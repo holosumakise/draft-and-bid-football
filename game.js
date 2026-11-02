@@ -12,7 +12,6 @@ let gameState = {
     draftAnimating: false,
     matchQueue: [],
     currentMatchData: null,
-    skipsLeft: 10,
     difficulty: 'normal'
 };
 
@@ -215,7 +214,7 @@ function initGame() {
         takenNames.add(name.toLowerCase());
         gameState.managers.push({
             id: i, name,
-            balance: INITIAL_BALANCE, squad: [], formationLocked: false,
+            balance: INITIAL_BALANCE, squad: [], formationLocked: false, skipLeft: MAX_SKIPS,
             bench: Array.from({length: BENCH_SLOTS}, (_, idx) => ({ id: `b${idx}`, pos: 'SUB', assignedPlayerId: null }))
         });
     }
@@ -223,7 +222,6 @@ function initGame() {
     renderDOMForManagers();
     gameState.activeDraft = null;
     gameState.draftAnimating = false;
-    gameState.skipsLeft = 10;
     gameState._gkPhaseToast = false;
     renderDraftBoard();
     updateRollButton();

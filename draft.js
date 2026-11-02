@@ -238,12 +238,26 @@ function updateRollButton() {
     const auctionOpen = !!gameState.auction;
     btn.disabled = lockedOut || spinning || animating || auctionOpen || !Net.ownsGame();
     btn.classList.toggle('opacity-50', btn.disabled); btn.classList.toggle('cursor-not-allowed', btn.disabled);
-    const skipEl = document.getElementById('skips-left-label');
-    if (skipEl) {
-        skipEl.innerText = `Skips: ${gameState.skipsLeft}`;
-        skipEl.className = `text-xs font-bold px-2 py-1 rounded-lg border ${gameState.skipsLeft <= 0 ? 'text-red-400 bg-red-950 border-red-800' : 'text-slate-400 bg-slate-800 border-slate-700'}`;
-    }
+    updateSkipLabel();
     Net.publishInfo();
+}
+
+function updateSkipLabel() {
+    const skipEl = document.getElementById('skips-left-label');
+    if (!skipEl) return;
+    const m = skipLabelManager();
+    const left = m ? m.skipLeft : 0;
+    skipEl.innerText = m ? `Skips: ${left}` : 'Skips: —';
+    skipEl.className = `text-xs font-bold px-2 py-1 rounded-lg border ${left <= 0 ? 'text-red-400 bg-red-950 border-red-800' : 'text-slate-400 bg-slate-800 border-slate-700'}`;
+}
+
+// Skips belong to a club, not to the room, so the header shows the club this device
+// is answerable for: your own online, whoever is up in a hotseat draft.
+function skipLabelManager() {
+    if (Net.online) return gameState.managers.find(m => m.id === Net.myManagerId) || null;
+    const a = getOpenAuction();
+    if (a) return auctionManagerById(auctionCurrentBidderId());
+    return gameState.managers[0] || null;
 }
 
 function teamHasGK(m) { return m.squad.some(p => p.mainPos === 'GK'); }
@@ -361,7 +375,7 @@ function rollPlayers() {
     const masterIdx = availablePlayers.findIndex(p => p.id === tmpl.id);
     if (masterIdx >= 0) availablePlayers.splice(masterIdx, 1);
 
-    const draft = { player: { ...tmpl, sold: false }, state: 'spinning', result: null };
+    const draft = { player: { ...tmpl, sold: false }, state: 'spinning', result: null, nonce: Date.now() };
     gameState.activeDraft = draft;
     gameState.auction = null;
 
@@ -370,67 +384,77 @@ function rollPlayers() {
     Net.publishDraftNow();
     Net.publishAuctionNow();
 
-    const allPos = ['GK','CB','LB','RB','LWB','RWB','CDM','CM','CAM','LM','RM','LW','RW','CF','ST'];
-    const allNats = availablePlayers.length
+    // The reels are driven by the render above, so both the host and every guest
+    // device spin them; only the host decides when the card is revealed.
+    setTimeout(() => {
+        if (gameState.activeDraft !== draft) return; // game was reset while the reels were spinning
+        draft.state = 'revealed';
+        // Immediate: the shot clock for the opener starts in the same tick, and
+        // a guest must not be handed a turn before the card reaches its screen.
+        Net.publishDraftNow();
+        if (gameState.managers.length > 1 && Net.ownsGame()) startAuction();
+        renderDraftBoard(); updateRollButton();
+    }, REEL.POS_MS + REEL.GAP_AFTER);
+}
+
+// --- Draft reel ---
+// Decorative spin played on every device that renders a 'spinning' card. The host's
+// reel lands on the rolled player; a guest is not told who it is yet, so its reel
+// simply stops on a random pair and the revealed snapshot brings the real card.
+const REEL = { ITEM_H: 36, VISIBLE: 3, SPIN_ITEMS: 18, NAT_MS: 1400, POS_MS: 2200, GAP_AFTER: 280 };
+const REEL_POSITIONS = ['GK','CB','LB','RB','LWB','RWB','CDM','CM','CAM','LM','RM','LW','RW','CF','ST'];
+const REEL_NATIONS = ["England","Spain","Italy","Germany","France","Brazil","Argentina","Portugal","Netherlands","Belgium"];
+
+function reelItems(pool, finalValue) {
+    const items = [];
+    for (let i = 0; i < REEL.SPIN_ITEMS; i++) items.push(pool[Math.floor(Math.random() * pool.length)]);
+    items.push(finalValue);
+    for (let i = 0; i < 2; i++) items.push(pool[Math.floor(Math.random() * pool.length)]);
+    return items;
+}
+
+function fillReel(trackEl, items, sizeClass) {
+    trackEl.innerHTML = items.map((t) => `<div class="reel-item ${sizeClass}" style="height:${REEL.ITEM_H}px">${escapeHTML(String(t ?? ""))}</div>`).join('');
+}
+
+function spinReel(trackEl, durationMs) {
+    const offset = (REEL.VISIBLE - 1) / 2;
+    const targetY = -((REEL.SPIN_ITEMS - offset) * REEL.ITEM_H);
+    trackEl.style.transition = 'none';
+    trackEl.style.transform = 'translateY(0px)';
+    void trackEl.offsetHeight;
+    trackEl.style.transition = `transform ${durationMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)`;
+    trackEl.style.transform = `translateY(${targetY}px)`;
+}
+
+function runDraftReel(player) {
+    const posTrack = document.getElementById('reel-pos');
+    const natTrack = document.getElementById('reel-nat');
+    const posCol = document.getElementById('col-pos');
+    const natCol = document.getElementById('col-nat');
+    if (!posTrack || !natTrack || !posCol || !natCol) return;
+
+    const nats = availablePlayers.length
         ? [...new Set(availablePlayers.map(p => p.nationality))].filter(Boolean)
-        : ["England","Spain","Italy","Germany","France","Brazil","Argentina","Portugal","Netherlands","Belgium"];
+        : REEL_NATIONS;
+    // A guest is not told the player until the reels stop, so its reel simply has to
+    // look busy; the revealed snapshot replaces it with the real card either way.
+    const finalNat = player ? (player.nationality || 'World') : pickRand(nats);
+    const finalPos = player ? player.mainPos : pickRand(REEL_POSITIONS);
 
-    const ITEM_H = 36;
-    const VISIBLE = 3;
-    const SPIN_ITEMS = 18;
-
-    function buildReelItems(pool, finalValue) {
-        const items = [];
-        for (let i = 0; i < SPIN_ITEMS; i++) items.push(pool[Math.floor(Math.random() * pool.length)]);
-        items.push(finalValue);
-        for (let i = 0; i < 2; i++) items.push(pool[Math.floor(Math.random() * pool.length)]);
-        return items;
-    }
-
-    function fillReel(trackEl, items, sizeClass) {
-        trackEl.innerHTML = items.map((t) => `<div class="reel-item ${sizeClass}" style="height:${ITEM_H}px">${escapeHTML(String(t ?? ""))}</div>`).join('');
-    }
-
-    function spinReel(trackEl, durationMs) {
-        const finalIndex = SPIN_ITEMS;
-        const offset = (VISIBLE - 1) / 2;
-        const targetY = -((finalIndex - offset) * ITEM_H);
-        trackEl.style.transition = 'none';
-        trackEl.style.transform = 'translateY(0px)';
-        void trackEl.offsetHeight;
-        trackEl.style.transition = `transform ${durationMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)`;
-        trackEl.style.transform = `translateY(${targetY}px)`;
-    }
-
-    const posTrack = document.getElementById('reel-pos'), natTrack = document.getElementById('reel-nat');
-    const posCol = document.getElementById('col-pos'), natCol = document.getElementById('col-nat');
-
-    fillReel(natTrack, buildReelItems(allNats, tmpl.nationality || 'World'), 'reel-nat-text');
-    fillReel(posTrack, buildReelItems(allPos, tmpl.mainPos), 'reel-pos-text');
+    fillReel(natTrack, reelItems(nats, finalNat), 'reel-nat-text');
+    fillReel(posTrack, reelItems(REEL_POSITIONS, finalPos), 'reel-pos-text');
 
     // Left-to-right: Nationality → Position
     natCol.classList.add('slot-spinning'); posCol.classList.add('slot-spinning');
 
-    const NAT_MS = 1400, POS_MS = 2200, GAP_AFTER = 280;
-
     requestAnimationFrame(() => {
-        spinReel(natTrack, NAT_MS);
-        spinReel(posTrack, POS_MS);
+        spinReel(natTrack, REEL.NAT_MS);
+        spinReel(posTrack, REEL.POS_MS);
     });
 
-    setTimeout(() => { natCol.classList.remove('slot-spinning'); natCol.classList.add('slot-locked'); }, NAT_MS);
-    setTimeout(() => {
-        posCol.classList.remove('slot-spinning'); posCol.classList.add('slot-locked');
-        setTimeout(() => {
-            if (gameState.activeDraft !== draft) return; // game was reset while the reels were spinning
-            draft.state = 'revealed';
-            // Immediate: the shot clock for the opener starts in the same tick, and
-            // a guest must not be handed a turn before the card reaches its screen.
-            Net.publishDraftNow();
-            if (gameState.managers.length > 1 && Net.ownsGame()) startAuction();
-            renderDraftBoard(); updateRollButton();
-        }, GAP_AFTER);
-    }, POS_MS);
+    setTimeout(() => { natCol.classList.remove('slot-spinning'); natCol.classList.add('slot-locked'); }, REEL.NAT_MS);
+    setTimeout(() => { posCol.classList.remove('slot-spinning'); posCol.classList.add('slot-locked'); }, REEL.POS_MS);
 }
 
 function renderDraftBoard() {
@@ -454,17 +478,49 @@ function renderDraftBoard() {
                     </div>
                 </div>
             </div>`;
+        // Every device that shows a spinning card animates it once per roll, so a
+        // guest sees the same reel as the host instead of a frozen window.
+        const spinToken = d.nonce || (player && player.id);
+        if (spinToken && gameState._reelFor !== spinToken) {
+            gameState._reelFor = spinToken;
+            runDraftReel(player);
+        }
     } else if (state === 'revealed') {
         const isSolo = gameState.managers.length === 1;
         if (player.sold) {
             const won = !!(result && result.winnerName);
-            // Successful sale is already shown by the fly animation — clear and wait for next roll
             if (won) {
+                // A sale is told by the SOLD stamp and the arrow flying to the buyer's
+                // panel. Other updates re-render through here, so the board must not be
+                // touched while that is running or the animation is cut short.
+                if (gameState.draftAnimating || document.getElementById('draft-fly-overlay')) return;
+                const winner = gameState.managers.find(m => m.name === result.winnerName);
+                const cardShowing = board.firstElementChild?.dataset?.draftCard === String(player.id);
+                if (winner && cardShowing) {
+                    // A guest never runs the sale itself: it replays the same fly-over
+                    // for the club the host just sold to.
+                    playDraftAcquisitionAnimation(player, winner.id, () => {
+                        gameState.activeDraft = null;
+                        Net.publishDraftNow();
+                        renderDraftBoard();
+                        updateRollButton();
+                    });
+                    return;
+                }
                 gameState.activeDraft = null;
-                // This clear can happen before the fly animation's own callback, so
-                // it has to publish — otherwise guests keep a SOLD card forever.
                 Net.publishDraftNow();
                 board.innerHTML = '<div class="text-slate-400 italic">Press Roll Draft</div>';
+                return;
+            }
+            // A guest mirrors the host's pass the same way it mirrors a sale: the
+            // DISCARDED stamp plays on the card it is already showing.
+            const skipCardShowing = board.firstElementChild?.dataset?.draftCard === String(player.id);
+            if (skipCardShowing && !Net.ownsGame() && !gameState.draftAnimating && !document.querySelector('.draft-sold-stamp')) {
+                playDraftDiscardAnimation(() => {
+                    gameState.activeDraft = null;
+                    renderDraftBoard();
+                    updateRollButton();
+                });
                 return;
             }
             // Pass / unsold still shows a brief result
@@ -497,7 +553,7 @@ function renderDraftBoard() {
             const freshCard = gameState._renderedPlayerId !== player.id;
             gameState._renderedPlayerId = player.id;
             board.innerHTML = `
-                <div class="w-full bg-slate-800 rounded-xl p-4 border-2 border-green-500/50 shadow-lg flex flex-col h-full ${freshCard ? 'animate-reveal' : ''} relative">
+                <div data-draft-card="${player.id}" class="w-full bg-slate-800 rounded-xl p-4 border-2 border-green-500/50 shadow-lg flex flex-col h-full ${freshCard ? 'animate-reveal' : ''} relative">
                     <div class="absolute -top-3 -right-3 bg-slate-700 text-[9px] px-2 py-1 rounded-full border border-slate-600 font-bold truncate max-w-[120px] text-white">${escapeHTML(player.nationality || 'World')}</div>
                     <div class="flex justify-between items-start mb-2 pb-2 border-b border-slate-700 mt-1">
                         <div class="flex-1 min-w-0 pr-2">
@@ -535,12 +591,14 @@ function soloTakePlayer() {
 
 function soloSkipPlayer() {
     const d = gameState.activeDraft; if (!d || d.player.sold) return;
-    if (gameState.skipsLeft <= 0) return showToast('No skips left! You must take this player.');
-    gameState.skipsLeft--;
+    const m = gameState.managers[0];
+    if (!m) return;
+    if ((m.skipLeft || 0) <= 0) return showToast('No skips left! You must take this player.');
+    m.skipLeft = Math.max(0, (m.skipLeft || 0) - 1);
     d.player.sold = true;
-    d.result = { winnerName: null, price: 0, bids: [{ name: gameState.managers[0]?.name || 'You', amount: 0 }] };
+    d.result = { winnerName: null, price: 0, bids: [{ name: m.name, amount: 0 }] };
     playDraftDiscardAnimation(() => {
-        showToast(`Player passed. Skips left: ${gameState.skipsLeft}`);
+        showToast(`Player passed. Skips left: ${m.skipLeft}`);
         gameState.activeDraft = null;
         renderDraftBoard();
         updateRollButton();

@@ -63,6 +63,12 @@ function auctionCanAffordToRaise(managerId) {
     return !!m && getManagerMaxBid(m) >= auctionBidFloor();
 }
 
+// Skipping is each club's own budget: a rival passing cannot force you to buy.
+function managerMustBuy(managerId) {
+    const m = auctionManagerById(managerId);
+    return !!m && (m.skipLeft || 0) <= 0;
+}
+
 function startAuction() {
     const draft = gameState.activeDraft;
     if (!draft) return false;
@@ -84,8 +90,7 @@ function startAuction() {
         topBidOf: {},
         out: {},
         status: 'open',
-        turnEndsAt: Date.now() + SHOT_CLOCK_MS,
-        mustBuy: gameState.skipsLeft <= 0
+        turnEndsAt: Date.now() + SHOT_CLOCK_MS
     };
     clearAuctionTimer();
     auctionClockId = setInterval(tickAuctionClock, AUCTION_TICK_MS);
@@ -176,7 +181,7 @@ function expireAuctionTurn() {
     if (!a || !bidderId) return;
     if (bidderId === a.highBidderId && a.highBid > 0) {
         applyAuctionAction(bidderId, { type: 'hammer' });
-    } else if (a.mustBuy && auctionCanAffordToRaise(bidderId)) {
+    } else if (managerMustBuy(bidderId) && auctionCanAffordToRaise(bidderId)) {
         applyAuctionAction(bidderId, { type: 'raise', amount: auctionBidFloor() });
     } else {
         applyAuctionAction(bidderId, { type: 'pass' });
@@ -209,10 +214,17 @@ function applyAuctionAction(managerId, action) {
     }
 
     if (action.type === 'pass') {
-        if (holdsHighBid) return showToast('You hold the high bid — raise or buy.');
-        if (a.mustBuy && auctionCanAffordToRaise(managerId)) return showToast('No skips left — you must bid.');
+        // Being the last club still in makes you the nominal high bidder, but there
+        // is nobody left to raise against, so passing is how you let the player go.
+        const inTheRoom = auctionActiveIds();
+        const sole = inTheRoom.length === 1 && inTheRoom[0] === managerId;
+        if (holdsHighBid && !sole) return showToast('You hold the high bid — raise or buy.');
+        if (managerMustBuy(managerId) && (sole || auctionCanAffordToRaise(managerId))) return showToast('No skips left — you must bid.');
+        // Declining a player spends one of this club's own skips, not the room's.
+        m.skipLeft = Math.max(0, (m.skipLeft || 0) - 1);
         a.out[managerId] = true;
         bidEntry = '';
+        Net.publishManagers(managerId);
         advanceAuctionTurn();
         return;
     }
@@ -239,10 +251,6 @@ function auctionControl(type, amount, step) {
 
 function setBidEntry(value) {
     bidEntry = String(value).replace(/\D/g, '').slice(0, 6);
-    const preview = document.getElementById('bid-entry-preview');
-    // One dot per digit: the bidder sees that typing registered without the
-    // amount itself being readable over their shoulder before they commit.
-    if (preview) preview.innerText = bidEntry ? `•${'•'.repeat(bidEntry.length - 1)}M` : '—';
     const raiseBtn = document.getElementById('btn-bid-raise');
     if (raiseBtn) raiseBtn.disabled = !bidEntry;
 }
@@ -328,10 +336,9 @@ function finishAuctionUnsold(player, free) {
         return;
     }
 
-    gameState.skipsLeft--;
     updateRollButton();
     playDraftDiscardAnimation(() => {
-        showToast(`Player passed. Skips left: ${gameState.skipsLeft}`);
+        showToast('Player unsold.');
         finish();
     });
 }
@@ -392,7 +399,7 @@ function renderAuctionPanel() {
                 <div id="auction-clock-bar" class="h-full bg-amber-400 transition-all duration-200" style="width:100%"></div>
             </div>
             <div class="flex flex-wrap gap-1 mt-2">${a.order.map(id => auctionStatusChip(id)).join('')}</div>
-            ${a.mustBuy ? '<p class="text-[10px] font-bold text-red-400 mt-1">No skips left — this player must be bought.</p>' : ''}
+            ${managerMustBuy(bidderId) ? '<p class="text-[10px] font-bold text-red-400 mt-1">No skips left — this player must be bought.</p>' : ''}
         </div>`;
 
     if (!mine) {
@@ -404,16 +411,20 @@ function renderAuctionPanel() {
             </div>`;
     }
 
-    // Everyone else has passed, so there is nothing left to bid against: the only
-    // real choice is taking the player at the price already on the table.
+    // Everyone else has passed, so there is nothing left to bid against. The club
+    // still standing chooses: take the player at the price on the table, or pass and
+    // let them go unsold.
     const standing = auctionActiveIds();
     if (standing.length === 1 && standing[0] === bidderId) {
         return `
             ${header}
             <div class="flex-1 flex flex-col justify-center gap-2">
-                <div class="text-[11px] font-bold text-slate-300">Only club left · €${a.highBid}M is the price</div>
+                <div class="text-[11px] font-bold text-slate-300">Only club left · €${a.highBid}M is the price · ${bidder ? bidder.skipLeft : 0} skips left</div>
                 <button type="button" onclick="auctionControl('hammer')"
                    class="w-full py-3 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-base shadow">BUY AT €${a.highBid}M</button>
+                <button type="button" onclick="auctionControl('pass')" ${managerMustBuy(bidderId) ? 'disabled' : ''}
+                   class="w-full py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm">PASS · LET THEM GO UNSOLD</button>
+                ${managerMustBuy(bidderId) ? '<p class="text-[10px] font-bold text-red-400">No skips left — this player must be bought.</p>' : ''}
             </div>`;
     }
 
@@ -424,12 +435,11 @@ function renderAuctionPanel() {
     return `
         ${header}
         <div class="flex-1 flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-1">
-            <div class="text-[11px] font-bold text-slate-300">Your turn, ${escapeHTML(bidder ? bidder.name : '')} · max €${maxBid}M</div>
+            <div class="text-[11px] font-bold text-slate-300">Your turn, ${escapeHTML(bidder ? bidder.name : '')} · max €${maxBid}M · ${bidder ? bidder.skipLeft : 0} skips left</div>
             <div class="flex items-center gap-1.5">
-                <input type="password" inputmode="numeric" autocomplete="off" id="bid-entry-field" value=""
+                <input type="text" inputmode="numeric" autocomplete="off" id="bid-entry-field" value="${bidEntry}"
                     placeholder="Bid €${floor}M+" oninput="setBidEntry(this.value)"
                     class="flex-1 min-w-0 bg-slate-950 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white tracking-widest focus:border-emerald-400 outline-none">
-                <span class="text-[10px] font-bold text-slate-400 whitespace-nowrap">Bid <span id="bid-entry-preview" class="text-emerald-300 font-mono">—</span></span>
             </div>
             <div class="flex gap-1.5">${raiseSteps}</div>
             ${holdsHighBid
@@ -437,7 +447,7 @@ function renderAuctionPanel() {
                        class="w-full py-2.5 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-sm shadow">BUY AT €${a.highBid}M</button>`
                 : `<button type="button" id="btn-bid-raise" onclick="auctionControl('raise', bidEntryValue())" ${canRaise && bidEntry ? '' : 'disabled'}
                        class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-900 rounded-lg font-black text-sm shadow">RAISE</button>
-                   <button type="button" onclick="auctionControl('pass')" ${(a.mustBuy && canRaise) ? 'disabled' : ''}
+                   <button type="button" onclick="auctionControl('pass')" ${(managerMustBuy(bidderId) && canRaise) ? 'disabled' : ''}
                        class="w-full py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm">PASS</button>`}
             ${!canRaise ? '<p class="text-[10px] font-bold text-red-400">You cannot cover the current bid.</p>' : ''}
         </div>`;

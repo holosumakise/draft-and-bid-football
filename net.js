@@ -276,7 +276,7 @@ const Net = {
     publishInfo() {
         this.publish('info', {
             mode: gameState.mode, playerCount: gameState.managers.length,
-            difficulty: gameState.difficulty, skipsLeft: gameState.skipsLeft,
+            difficulty: gameState.difficulty,
             phase: gameState.phase || null, note: gameState.phaseNote || null,
             queue: (gameState.matchQueue || []).map(m => ({ label: m.label || '', t1: { name: m.t1?.name || '' }, t2: { name: m.t2?.name || '' } }))
         });
@@ -353,7 +353,11 @@ function serializePlayer(p) {
 
 // Host-authored: what the auction and the wallet decide.
 function serializeManagerHost(m) {
-    return { id: m.id, name: m.name, balance: m.balance, squad: (m.squad || []).map(serializePlayer) };
+    return {
+        id: m.id, name: m.name, balance: m.balance,
+        skipLeft: Number.isFinite(m.skipLeft) ? m.skipLeft : MAX_SKIPS,
+        squad: (m.squad || []).map(serializePlayer)
+    };
 }
 
 // Player-authored: the shape, the XI, the bench and the match plan.
@@ -371,10 +375,12 @@ function serializeManagerOwn(m) {
 function serializeDraft(d) {
     if (!d) return null;
     // While the reels are still spinning the player stays off the wire, so a
-    // rival cannot inspect the room and see who is about to appear.
-    if (d.state === 'spinning') return { state: 'spinning', player: null, result: null };
+    // rival cannot inspect the room and see who is about to appear. The nonce is
+    // only a spin token: it lets a guest restart its own reel for each new roll.
+    if (d.state === 'spinning') return { state: 'spinning', player: null, result: null, nonce: d.nonce || null };
     return {
         state: d.state,
+        nonce: d.nonce || null,
         player: d.player ? serializePlayer(d.player) : null,
         result: d.result ? { winnerName: d.result.winnerName, price: d.result.price, bids: d.result.bids } : null
     };
@@ -385,7 +391,7 @@ function serializeAuction(a) {
     return {
         playerId: a.playerId, order: a.order.slice(), turnIdx: a.turnIdx, highBid: a.highBid,
         highBidderId: a.highBidderId, topBidOf: { ...a.topBidOf }, out: { ...a.out },
-        status: a.status, turnEndsAt: a.turnEndsAt, mustBuy: !!a.mustBuy,
+        status: a.status, turnEndsAt: a.turnEndsAt,
         // Remote devices rebase their countdown from this instead of comparing
         // turnEndsAt to their own wall clock, which is not the host's wall clock.
         turnRemaining: a.turnEndsAt ? Math.max(0, a.turnEndsAt - Date.now()) : 0

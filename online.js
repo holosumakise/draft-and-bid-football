@@ -179,10 +179,7 @@ const Online = {
         if (!info) return;
         gameState.mode = info.mode || gameState.mode;
         gameState.difficulty = info.difficulty || gameState.difficulty;
-        if (Number.isFinite(info.skipsLeft)) gameState.skipsLeft = info.skipsLeft;
         if (Array.isArray(info.queue)) gameState.remoteQueue = info.queue;
-        const label = document.getElementById('skips-left-label');
-        if (label) label.innerText = `Skips: ${gameState.skipsLeft}`;
         if (info.note) this.note(info.note);
         updateRollButton();
         renderDraftBoard();
@@ -207,6 +204,7 @@ const Online = {
             const own = node.own || {};
             if (Array.isArray(host.squad)) m.squad = host.squad.filter(Boolean);
             if (typeof host.balance === 'number') m.balance = host.balance;
+            if (Number.isFinite(host.skipLeft)) m.skipLeft = host.skipLeft;
             if (host.name) m.name = host.name;
             if (!Net.canControl(id)) {
                 if (Array.isArray(own.formation)) m.formation = own.formation.map(fillNode);
@@ -220,12 +218,12 @@ const Online = {
                 updateTeamOVR(id);
             }
         });
+        updateSkipLabel();
         if (document.getElementById('screen-game')?.classList.contains('active')) {
             gameState.managers.forEach(m => {
                 if (Net.canControl(m.id)) return;
                 renderPitchNodes(m.id);
                 renderBenchNodes(m.id);
-                updateFormationFitUI(m.id);
                 const btn = document.getElementById(`lock-btn-${m.id}`);
                 if (btn && m.formationLocked) {
                     btn.innerText = 'Formation & Tactics Confirmed';

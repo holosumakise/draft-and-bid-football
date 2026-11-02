@@ -4,6 +4,9 @@ const STARTERS = 11;
 const BENCH_SLOTS = 6;
 const MAX_SQUAD_SIZE = STARTERS + BENCH_SLOTS;
 const MAX_SUBS = 5;
+// Each club may decline this many players before it must buy when it is the last
+// one still in. It is per club: what a rival passes on is none of your business.
+const MAX_SKIPS = 10;
 
 // --- Chemistry ---
 // Players sharing the same nation form a link in the starting XI.

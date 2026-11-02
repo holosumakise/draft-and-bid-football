@@ -222,7 +222,7 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
         }, 220);
 
         setTimeout(() => {
-            const duration = 1100;
+            const duration = 1300;
             const t0 = performance.now();
 
             function ease(t) {
@@ -267,9 +267,12 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
                     head.style.transition = 'opacity 0.85s ease';
                     trail.style.opacity = '0';
                     head.style.opacity = '0';
-                    stamp.style.transition = 'opacity 0.35s ease';
-                    stamp.style.opacity = '0';
-                    setTimeout(cleanup, 900);
+                    // The stamp holds while the arrow lands, then the whole overlay clears.
+                    setTimeout(() => {
+                        stamp.style.transition = 'opacity 0.4s ease';
+                        stamp.style.opacity = '0';
+                    }, 500);
+                    setTimeout(cleanup, 1100);
                 }
             }
             requestAnimationFrame(frame);
@@ -536,33 +539,7 @@ function initPitch(id) {
     m.formationPreset = m.formationPreset || '4-4-2';
     m.formation = buildFormationFromPreset(m.formationPreset);
     renderPitchNodes(id); renderBenchNodes(id);
-    updateFormationFitUI(id);
 }
-
-function getFormationFit(manager) {
-    if (!manager || !Array.isArray(manager.formation)) return 0;
-    let total = 0, count = 0;
-    manager.formation.forEach(node => {
-        const player = manager.squad.find(p => p.id === node.assignedPlayerId);
-        if (!player || !player.rating) return;
-        total += getDynamicOVR(player, node.pos) / player.rating;
-        count++;
-    });
-    return count ? Math.round((total / count) * 100) : 0;
-}
-
-function updateFormationFitUI(managerId) {
-    const m = gameState.managers.find(x => x.id === managerId);
-    if (!m) return;
-    const hint = document.getElementById(`m${managerId}-formation-hint`);
-    if (!hint) return;
-    const placed = m.formation.filter(node => node.assignedPlayerId).length;
-    if (!placed) { hint.innerHTML = ''; return; }
-    const groups = getChemistryGroups(getFormationChemistry(m).players);
-    const fit = getFormationFit(m);
-    hint.innerHTML = `<span class="text-slate-200 font-bold">Fit ${fit}% · ${groups.length} chemistry link group${groups.length === 1 ? '' : 's'}.</span>`;
-}
-
 
 // OVR shown for a player in a formation slot, including the chemistry bonus.
 function formationOvrInfo(player, node, chemBonus) {
@@ -610,8 +587,6 @@ function renderPitchNodes(managerId) {
         pitch.appendChild(el);
         if (!nodeData.isGK && editable) makeDraggable(el, pitch, m, nodeData);
     });
-
-    updateFormationFitUI(managerId);
 }
 
 function renderBenchNodes(managerId) {
