@@ -176,7 +176,6 @@ function getGoal(t) {
 // --- Match-day tactics, ratings and substitutions ---
 
 let matchTactics = { mentality: 'balanced', press: 'mid' };
-let matchRatingsOpen = false;
 
 function getTacticsMultipliers() {
     return getTacticsMultipliersFor(matchTactics);
@@ -339,7 +338,6 @@ function toggleMatchRatings() {
         if (gameState.matchSim) renderMatchRatings(gameState.matchSim);
         modal.classList.remove('hidden'); modal.classList.add('flex');
         setTimeout(() => { modal.classList.remove('opacity-0'); document.getElementById('ratings-panel').classList.remove('scale-95'); }, 10);
-        matchRatingsOpen = true;
     } else {
         closeMatchRatings();
     }
@@ -348,7 +346,6 @@ function toggleMatchRatings() {
 function closeMatchRatings() {
     const modal = document.getElementById('ratings-modal');
     if (!modal) return;
-    matchRatingsOpen = false;
     modal.classList.add('opacity-0');
     document.getElementById('ratings-panel').classList.add('scale-95');
     setTimeout(() => { modal.classList.remove('flex'); modal.classList.add('hidden'); }, 200);
@@ -357,7 +354,6 @@ function closeMatchRatings() {
 function forceCloseMatchRatings() {
     const modal = document.getElementById('ratings-modal');
     if (!modal) return;
-    matchRatingsOpen = false;
     modal.classList.add('hidden', 'opacity-0');
     modal.classList.remove('flex');
     const panel = document.getElementById('ratings-panel');
@@ -600,6 +596,10 @@ function runLivePeriod(sim, start, end, isOT, onDone) {
 
         if (phase === 'injury') {
             if (injuryIndex > totalAdded) {
+                // Retire this period's scheduler: until the next period installs its
+                // own, a speed click would re-enter a finished period and fire its
+                // onDone twice, skipping half-time or starting the second half twice.
+                sim.scheduleTick = null;
                 onDone();
                 return;
             }

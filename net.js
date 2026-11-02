@@ -148,6 +148,16 @@ const Net = {
         this.roomRef = null;
         this.roomCode = null;
         this.myManagerId = null;
+        // A second room in this tab must behave like the first: the start flag, the
+        // last room's roster and any publish still waiting in the throttle all belong
+        // to the room that just closed.
+        this._started = false;
+        this._roster = null;
+        this._meta = null;
+        this._lobby = null;
+        clearTimeout(this._flushTimer);
+        this._flushTimer = null;
+        this.pending = {};
     },
 
     attach() {
@@ -275,16 +285,14 @@ const Net = {
     },
     publishInfo() {
         this.publish('info', {
-            mode: gameState.mode, playerCount: gameState.managers.length,
-            difficulty: gameState.difficulty,
-            phase: gameState.phase || null, note: gameState.phaseNote || null,
+            mode: gameState.mode, difficulty: gameState.difficulty, skipsLeft: gameState.skipsLeft,
             queue: (gameState.matchQueue || []).map(m => ({ label: m.label || '', t1: { name: m.t1?.name || '' }, t2: { name: m.t2?.name || '' } }))
         });
     },
     publishScreen(screenId) { this.publish('screen', screenId); },
     publishSeason() { this.publishNow('season', serializeSeason(gameState.season)); },
     publishEurope() { this.publishNow('europe', serializeEurope(gameState.europe)); },
-    publishMatch(value, force) { force ? this.publishNow('match', value) : this.publish('match', value); },
+    publishMatch(value) { this.publish('match', value); },
 
     // --- client side ---
     onRoster(roster) {
@@ -353,11 +361,7 @@ function serializePlayer(p) {
 
 // Host-authored: what the auction and the wallet decide.
 function serializeManagerHost(m) {
-    return {
-        id: m.id, name: m.name, balance: m.balance,
-        skipLeft: Number.isFinite(m.skipLeft) ? m.skipLeft : MAX_SKIPS,
-        squad: (m.squad || []).map(serializePlayer)
-    };
+    return { id: m.id, name: m.name, balance: m.balance, squad: (m.squad || []).map(serializePlayer) };
 }
 
 // Player-authored: the shape, the XI, the bench and the match plan.
@@ -374,22 +378,50 @@ function serializeManagerOwn(m) {
 
 function serializeDraft(d) {
     if (!d) return null;
-    // While the reels are still spinning the player stays off the wire, so a
-    // rival cannot inspect the room and see who is about to appear. The nonce is
-    // only a spin token: it lets a guest restart its own reel for each new roll.
-    if (d.state === 'spinning') return { state: 'spinning', player: null, result: null, nonce: d.nonce || null };
+    // While the reels are still spinning the player stays off the wire, so a rival
+    // cannot inspect the room and see who is about to appear. What does travel is the
+    // pair of symbols the reels land on plus how much spin is left, which is what makes
+    // every screen show one reel and stop it at the same moment. The nonce seeds the
+    // strip, so even the blurred symbols match.
+    if (d.state === 'spinning') {
+        const p = d.player || {};
+        return {
+            state: 'spinning', player: null, result: null, nonce: d.nonce || null,
+            spin: {
+                pos: p.mainPos || null,
+                nat: p.nationality || null,
+                remaining: d.spinEndsAt ? Math.max(0, d.spinEndsAt - Date.now()) : null
+            }
+        };
+    }
+    // The pickup wheel is decided by the host, so the club order and the landing
+    // segment travel with the card. The player is visible here because the wheel
+    // itself has to name the player being handed out.
+    if (d.state === 'picked' && d.pick) {
+        return {
+            state: 'picked',
+            nonce: d.nonce || null,
+            player: serializePlayer(d.player),
+            result: null,
+            pick: {
+                order: d.pick.order.slice(),
+                lands: d.pick.lands,
+                remaining: d.pick.endsAt ? Math.max(0, d.pick.endsAt - Date.now()) : null
+            }
+        };
+    }
     return {
         state: d.state,
         nonce: d.nonce || null,
         player: d.player ? serializePlayer(d.player) : null,
-        result: d.result ? { winnerName: d.result.winnerName, price: d.result.price, bids: d.result.bids } : null
+        result: d.result ? { winnerName: d.result.winnerName } : null
     };
 }
 
 function serializeAuction(a) {
     if (!a) return null;
     return {
-        playerId: a.playerId, order: a.order.slice(), turnIdx: a.turnIdx, highBid: a.highBid,
+        order: a.order.slice(), turnIdx: a.turnIdx, highBid: a.highBid,
         highBidderId: a.highBidderId, topBidOf: { ...a.topBidOf }, out: { ...a.out },
         status: a.status, turnEndsAt: a.turnEndsAt,
         // Remote devices rebase their countdown from this instead of comparing
@@ -409,8 +441,7 @@ function serializeSeason(season) {
         awards: season.awards || null,
         ceremony: season.ceremony || null,
         playerStatsByManager: season.playerStatsByManager || null,
-        ghostStatsById: season.ghostStatsById || null,
-        xiStats: season.xiStats || null
+        ghostStatsById: season.ghostStatsById || null
     };
 }
 

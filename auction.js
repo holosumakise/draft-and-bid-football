@@ -63,12 +63,6 @@ function auctionCanAffordToRaise(managerId) {
     return !!m && getManagerMaxBid(m) >= auctionBidFloor();
 }
 
-// Skipping is each club's own budget: a rival passing cannot force you to buy.
-function managerMustBuy(managerId) {
-    const m = auctionManagerById(managerId);
-    return !!m && (m.skipLeft || 0) <= 0;
-}
-
 function startAuction() {
     const draft = gameState.activeDraft;
     if (!draft) return false;
@@ -82,7 +76,6 @@ function startAuction() {
     }
 
     gameState.auction = {
-        playerId: draft.player.id,
         order: eligible,
         turnIdx: 0,
         highBid: 0,
@@ -121,13 +114,15 @@ function openAuctionTurn() {
             return;
         }
 
-        // The high bidder can only stop being eligible by being marked out for
-        // affordability, so the last club still in takes the player at their own
-        // best bid; that keeps BUY's price honest for the club that is pressing it.
+        // The last club still in is only ever handed a price they set themselves.
         if (active.length === 1) {
             const lastMan = active[0];
-            a.highBidderId = lastMan;
-            a.highBid = a.topBidOf[lastMan] || MIN_BID;
+            // A bid this club actually made stands against them. If nobody ever bid,
+            // the high bid is not invented for the last club: their pass or timeout
+            // discards the player instead of forcing a sale.
+            const own = a.topBidOf[lastMan] || 0;
+            a.highBidderId = own ? lastMan : null;
+            a.highBid = own;
             a.turnIdx = a.order.indexOf(lastMan);
             a.turnEndsAt = Date.now() + SHOT_CLOCK_MS;
             bidEntry = '';
@@ -174,18 +169,20 @@ function tickAuctionClock() {
     expireAuctionTurn();
 }
 
-// Silence on the shot clock: the high bidder buys, everyone else is out.
+// Silence on the shot clock: the high bidder takes the player, everyone else is out.
 function expireAuctionTurn() {
     const a = gameState.auction;
     const bidderId = auctionCurrentBidderId();
     if (!a || !bidderId) return;
     if (bidderId === a.highBidderId && a.highBid > 0) {
         applyAuctionAction(bidderId, { type: 'hammer' });
-    } else if (managerMustBuy(bidderId) && auctionCanAffordToRaise(bidderId)) {
-        applyAuctionAction(bidderId, { type: 'raise', amount: auctionBidFloor() });
-    } else {
-        applyAuctionAction(bidderId, { type: 'pass' });
+        return;
     }
+    // Silence never bids a club up against itself. Even with the room out of skips
+    // the clock just puts this bidder out and hands the next club the turn.
+    a.out[bidderId] = true;
+    bidEntry = '';
+    advanceAuctionTurn();
 }
 
 // The single place auction state changes. Host-only when online.
@@ -219,12 +216,11 @@ function applyAuctionAction(managerId, action) {
         const inTheRoom = auctionActiveIds();
         const sole = inTheRoom.length === 1 && inTheRoom[0] === managerId;
         if (holdsHighBid && !sole) return showToast('You hold the high bid — raise or buy.');
-        if (managerMustBuy(managerId) && (sole || auctionCanAffordToRaise(managerId))) return showToast('No skips left — you must bid.');
-        // Declining a player spends one of this club's own skips, not the room's.
-        m.skipLeft = Math.max(0, (m.skipLeft || 0) - 1);
+        // Passing means "I am out of this auction", which is exactly what the shot
+        // clock does in silence. The last club's pass is the one that discards the
+        // player, and it is allowed even when the room has no skips left.
         a.out[managerId] = true;
         bidEntry = '';
-        Net.publishManagers(managerId);
         advanceAuctionTurn();
         return;
     }
@@ -240,13 +236,18 @@ function auctionControl(type, amount, step) {
     if (!Net.canControl(bidderId)) return showToast('Not your turn.');
 
     if (type === 'raise') {
-        const base = a.highBid > 0 && step ? a.highBid + step : null;
+        // With nobody bid yet the quick buttons place the opening bid at the reserve.
+        const base = step ? Math.max(MIN_BID, (a.highBid || 0) + step) : null;
         const target = amount !== null && amount !== undefined ? amount : base;
         if (!Number.isFinite(target)) return showToast('Enter an amount first.');
         Net.auctionAction(bidderId, { type, amount: target });
+        // The host clears its own entry when it applies the bid; a client has to
+        // drop its copy, or the committed amount is still in the box next turn.
+        bidEntry = '';
         return;
     }
     Net.auctionAction(bidderId, { type });
+    bidEntry = '';
 }
 
 function setBidEntry(value) {
@@ -273,14 +274,7 @@ function finishAuctionSold() {
     winner.balance -= price;
     winner.squad.push({ ...draft.player, price });
     draft.player.sold = true;
-    draft.result = {
-        winnerName: winner.name,
-        price,
-        bids: a.order.map(id => ({
-            name: auctionManagerById(id)?.name || '?',
-            amount: id === winner.id ? price : (a.topBidOf[id] || 0)
-        }))
-    };
+    draft.result = { winnerName: winner.name };
 
     gameState.auction = null;
     bidEntry = '';
@@ -302,20 +296,81 @@ function finishAuctionSold() {
     showToast(`${winner.name} signs ${draft.player.name} for €${price}M.`);
 }
 
+// --- Random pickup wheel ---
+// The wheel carries the same clubs that were allowed to bid: room in the squad, the
+// reserve still payable, and not locked out of the draft.
+function pickupClubs() {
+    return gameState.managers.filter(m =>
+        !m.formationLocked &&
+        (m.squad || []).length < MAX_SQUAD_SIZE && getManagerMaxBid(m) >= MIN_BID
+    );
+}
+
+function startRandomPickup(player) {
+    const draft = gameState.activeDraft;
+    const clubs = pickupClubs();
+    if (!draft || !clubs.length) return false;
+
+    draft.state = 'picked';
+    draft.pick = {
+        order: clubs.map(m => m.id),
+        lands: Math.floor(Math.random() * clubs.length),
+        endsAt: Date.now() + WHEEL_MS + WHEEL_GAP
+    };
+    Net.publishDraftNow();
+    renderDraftBoard();
+    updateRollButton();
+
+    setTimeout(settleRandomPickup, WHEEL_MS + WHEEL_GAP);
+    return true;
+}
+
+function settleRandomPickup() {
+    const draft = gameState.activeDraft;
+    const pick = draft && draft.pick;
+    if (!pick) return;
+
+    const winner = auctionManagerById(pick.order[pick.lands]);
+    const price = MIN_BID;
+    draft.pick = null;
+    draft.state = 'revealed';
+
+    winner.balance -= price;
+    winner.squad.push({ ...draft.player, price });
+    draft.player.sold = true;
+    draft.result = { winnerName: winner.name };
+
+    Net.publishDraftNow();
+    Net.publishManagers(winner.id);
+    playDraftAcquisitionAnimation(draft.player, winner.id, () => {
+        updateDashboard(winner.id);
+        gameState.activeDraft = null;
+        Net.publishDraftNow();
+        renderDraftBoard();
+        updateRollButton();
+    });
+    showToast(`${winner.name} wins the wheel and takes ${draft.player.name} for €${price}M.`);
+}
+
 function finishAuctionUnsold(player, free) {
     const a = gameState.auction;
     if (a) a.status = 'unsold';
     clearAuctionTimer();
     if (!player) return;
 
-    const bids = (a ? a.order : []).map(id => ({
-        name: auctionManagerById(id)?.name || '?',
-        amount: a ? (a.topBidOf[id] || 0) : 0
-    }));
+    // Skips are gone and still nobody wanted this player, so the wheel decides who
+    // is stuck with them. Runs before the card is marked unsold, otherwise every
+    // screen would show a discard and then have to undo it.
+    if (!free && gameState.skipsLeft <= 0 && startRandomPickup(player)) {
+        gameState.auction = null;
+        bidEntry = '';
+        Net.publishAuctionNow();
+        return;
+    }
 
     if (gameState.activeDraft) {
         gameState.activeDraft.player.sold = true;
-        gameState.activeDraft.result = { winnerName: null, price: 0, bids };
+        gameState.activeDraft.result = { winnerName: null };
     }
 
     gameState.auction = null;
@@ -336,9 +391,11 @@ function finishAuctionUnsold(player, free) {
         return;
     }
 
+    // Every club has passed, and that is the only thing that spends a room skip.
+    gameState.skipsLeft = Math.max(0, gameState.skipsLeft - 1);
     updateRollButton();
     playDraftDiscardAnimation(() => {
-        showToast('Player unsold.');
+        showToast(`Player passed. Skips left: ${gameState.skipsLeft}`);
         finish();
     });
 }
@@ -399,7 +456,6 @@ function renderAuctionPanel() {
                 <div id="auction-clock-bar" class="h-full bg-amber-400 transition-all duration-200" style="width:100%"></div>
             </div>
             <div class="flex flex-wrap gap-1 mt-2">${a.order.map(id => auctionStatusChip(id)).join('')}</div>
-            ${managerMustBuy(bidderId) ? '<p class="text-[10px] font-bold text-red-400 mt-1">No skips left — this player must be bought.</p>' : ''}
         </div>`;
 
     if (!mine) {
@@ -413,18 +469,17 @@ function renderAuctionPanel() {
 
     // Everyone else has passed, so there is nothing left to bid against. The club
     // still standing chooses: take the player at the price on the table, or pass and
-    // let them go unsold.
+    // send them to the discard — once skips are gone, to the pickup wheel.
     const standing = auctionActiveIds();
-    if (standing.length === 1 && standing[0] === bidderId) {
+    if (standing.length === 1 && a.highBid > 0 && standing[0] === bidderId) {
         return `
             ${header}
             <div class="flex-1 flex flex-col justify-center gap-2">
-                <div class="text-[11px] font-bold text-slate-300">Only club left · €${a.highBid}M is the price · ${bidder ? bidder.skipLeft : 0} skips left</div>
+                <div class="text-[11px] font-bold text-slate-300">Only club left · €${a.highBid}M is the price</div>
                 <button type="button" onclick="auctionControl('hammer')"
                    class="w-full py-3 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-base shadow">BUY AT €${a.highBid}M</button>
-                <button type="button" onclick="auctionControl('pass')" ${managerMustBuy(bidderId) ? 'disabled' : ''}
-                   class="w-full py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm">PASS · LET THEM GO UNSOLD</button>
-                ${managerMustBuy(bidderId) ? '<p class="text-[10px] font-bold text-red-400">No skips left — this player must be bought.</p>' : ''}
+                <button type="button" onclick="auctionControl('pass')"
+                   class="w-full py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm">PASS</button>
             </div>`;
     }
 
@@ -435,7 +490,7 @@ function renderAuctionPanel() {
     return `
         ${header}
         <div class="flex-1 flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-1">
-            <div class="text-[11px] font-bold text-slate-300">Your turn, ${escapeHTML(bidder ? bidder.name : '')} · max €${maxBid}M · ${bidder ? bidder.skipLeft : 0} skips left</div>
+            <div class="text-[11px] font-bold text-slate-300">Your turn, ${escapeHTML(bidder ? bidder.name : '')} · max €${maxBid}M</div>
             <div class="flex items-center gap-1.5">
                 <input type="text" inputmode="numeric" autocomplete="off" id="bid-entry-field" value="${bidEntry}"
                     placeholder="Bid €${floor}M+" oninput="setBidEntry(this.value)"
@@ -447,7 +502,7 @@ function renderAuctionPanel() {
                        class="w-full py-2.5 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-sm shadow">BUY AT €${a.highBid}M</button>`
                 : `<button type="button" id="btn-bid-raise" onclick="auctionControl('raise', bidEntryValue())" ${canRaise && bidEntry ? '' : 'disabled'}
                        class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-900 rounded-lg font-black text-sm shadow">RAISE</button>
-                   <button type="button" onclick="auctionControl('pass')" ${(managerMustBuy(bidderId) && canRaise) ? 'disabled' : ''}
+                   <button type="button" onclick="auctionControl('pass')"
                        class="w-full py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm">PASS</button>`}
             ${!canRaise ? '<p class="text-[10px] font-bold text-red-400">You cannot cover the current bid.</p>' : ''}
         </div>`;

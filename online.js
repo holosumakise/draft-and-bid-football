@@ -179,8 +179,8 @@ const Online = {
         if (!info) return;
         gameState.mode = info.mode || gameState.mode;
         gameState.difficulty = info.difficulty || gameState.difficulty;
+        if (Number.isFinite(info.skipsLeft)) gameState.skipsLeft = info.skipsLeft;
         if (Array.isArray(info.queue)) gameState.remoteQueue = info.queue;
-        if (info.note) this.note(info.note);
         updateRollButton();
         renderDraftBoard();
     },
@@ -204,7 +204,6 @@ const Online = {
             const own = node.own || {};
             if (Array.isArray(host.squad)) m.squad = host.squad.filter(Boolean);
             if (typeof host.balance === 'number') m.balance = host.balance;
-            if (Number.isFinite(host.skipLeft)) m.skipLeft = host.skipLeft;
             if (host.name) m.name = host.name;
             if (!Net.canControl(id)) {
                 if (Array.isArray(own.formation)) m.formation = own.formation.map(fillNode);
@@ -218,7 +217,6 @@ const Online = {
                 updateTeamOVR(id);
             }
         });
-        updateSkipLabel();
         if (document.getElementById('screen-game')?.classList.contains('active')) {
             gameState.managers.forEach(m => {
                 if (Net.canControl(m.id)) return;
@@ -263,7 +261,9 @@ const Online = {
         renderDraftBoard();
         if (auction.turnEndsAt && auction.status === 'open') {
             const who = gameState.managers.find(m => m.id === auction.order[auction.turnIdx]);
-            if (Net.canControl(auction.order[auction.turnIdx])) this.note(`Your turn to bid — ${Math.max(0, Math.ceil((auction.turnEndsAt - Date.now()) / 1000))}s left`);
+            // Read the rebased deadline above, not the host's wall-clock value, or a
+            // device with a skewed clock reports the wrong seconds left.
+            if (Net.canControl(auction.order[auction.turnIdx])) this.note(`Your turn to bid — ${Math.max(0, Math.ceil((gameState.auction.turnEndsAt - Date.now()) / 1000))}s left`);
             else if (who) this.note(`${who.name} is bidding…`);
         } else {
             this.note('');
@@ -382,6 +382,18 @@ const Online = {
     applyEurope(europe) {
         if (!europe) { gameState.europe = null; return; }
         gameState.europe = { ...europe, brackets: europe.brackets || {} };
+        // The queue arrives as ids. Pointing each entry back at its bracket node gives
+        // this device the same queue shape the host renders with.
+        gameState.europe.queue = (europe.queue || []).map(q => ({
+            ...q,
+            match: (gameState.europe.brackets[q.comp]?.[q.roundIdx] || []).find(m => m.id === q.tieId) || null
+        }));
+        // A winner crosses the wire as a name; point it back at the bracket's own team
+        // object so the finished ties highlight on this device too.
+        Object.values(gameState.europe.brackets).forEach(rounds => (rounds || []).forEach(round => (round || []).forEach(m => {
+            if (!m.played || !m.winnerName) return;
+            m.winner = m.t1 && m.t1.name === m.winnerName ? m.t1 : m.t2;
+        })));
         if (document.getElementById('screen-euro-bracket')?.classList.contains('active')) {
             renderEuropeBracketScreen();
             // Advancing the bracket is the host's job.

@@ -799,9 +799,7 @@ function buildEuroGhost(comp, roundIdx, uniqueSeed, club) {
         -20, 4
     );
     // -5 tier bias keeps the same bench/starter calibration European ghosts always had
-    const ghost = buildGhostTeam(club.name, avgByPos, 500 + uniqueSeed * 13 + roundIdx * 7, competitionOffset, -5);
-    ghost.euroTier = club.tier;
-    return ghost;
+    return buildGhostTeam(club.name, avgByPos, 500 + uniqueSeed * 13 + roundIdx * 7, competitionOffset, -5);
 }
 
 // Ghost-vs-ghost ties are settled instantly. Bias heavily toward decisive results
@@ -1141,7 +1139,8 @@ function renderEuropeBracketScreen() {
 
     const sub = document.getElementById('euro-bracket-sub');
     if (sub) {
-        const nextMatch = euro.queue.length ? `${euro.queue[0].match.t1.name} vs ${euro.queue[0].match.t2.name}` : 'Tournament Finished';
+        const next = (euro.queue || []).find(q => q.match)?.match;
+        const nextMatch = next ? `${next.t1.name} vs ${next.t2.name}` : 'Tournament Finished';
         sub.innerHTML = `Knockout progress <span class="text-slate-500">· Next: ${escapeHTML(nextMatch)}</span>`;
     }
 }

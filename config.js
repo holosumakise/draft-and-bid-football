@@ -4,9 +4,6 @@ const STARTERS = 11;
 const BENCH_SLOTS = 6;
 const MAX_SQUAD_SIZE = STARTERS + BENCH_SLOTS;
 const MAX_SUBS = 5;
-// Each club may decline this many players before it must buy when it is the last
-// one still in. It is per club: what a rival passes on is none of your business.
-const MAX_SKIPS = 10;
 
 // --- Chemistry ---
 // Players sharing the same nation form a link in the starting XI.
@@ -22,6 +19,11 @@ const CHEMISTRY = Object.freeze({
 const SHOT_CLOCK_MS = 20000;
 const AUCTION_TICK_MS = 200;
 const BID_RAISE_STEPS = [1, 5];
+
+// Once the room's skips are gone, an unwanted player is handed to one club picked at
+// random. The wheel spins this long, then pauses before the sale is announced.
+const WHEEL_MS = 2400;
+const WHEEL_GAP = 400;
 
 const DIFFICULTY_PRESETS = {
     easy: { label: 'Easy', offset: -6, desc: 'Easy: ghost clubs are a step weaker. Good for learning the draft.' },
@@ -56,7 +58,6 @@ const RANK_OVR_TABLE = [
     107, 104, 103, 100, 100, 100,
     ...Array.from({ length: 50 }, (_, i) => 99 - Math.floor(i / (50 / 15)))
 ];
-const DEFAULT_FORMATION = [ { x: 50, y: 86, isGK: true }, { x: 20, y: 70 }, { x: 40, y: 70 }, { x: 60, y: 70 }, { x: 80, y: 70 }, { x: 20, y: 45 }, { x: 40, y: 50 }, { x: 60, y: 50 }, { x: 80, y: 45 }, { x: 50, y: 25 }, { x: 50, y: 12 } ];
 
 // The one shape every club plays. Each slot declares its own position so the pitch
 // UI, auto-fill and the match engine all agree. The trade-off is positional fit:

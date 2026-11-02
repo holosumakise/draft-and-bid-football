@@ -150,7 +150,7 @@ function initializePlayerDB() {
     }
 
     if (!availablePlayers.length) {
-        console.error('[Draft] Loaded 0 players from playerPool. Keys:', eras);
+        console.error('[Draft] Loaded 0 players from playerPool. Keys:', poolGroups);
     }
 }
 
@@ -233,31 +233,17 @@ function getManagerMaxBid(manager) {
 function updateRollButton() {
     const btn = document.getElementById('btn-roll');
     const lockedOut = gameState.managers.every(m => m.formationLocked || m.squad.length >= MAX_SQUAD_SIZE);
-    const spinning = gameState.activeDraft && gameState.activeDraft.state === 'spinning';
+    const spinning = gameState.activeDraft && (gameState.activeDraft.state === 'spinning' || gameState.activeDraft.state === 'picked');
     const animating = !!gameState.draftAnimating;
     const auctionOpen = !!gameState.auction;
     btn.disabled = lockedOut || spinning || animating || auctionOpen || !Net.ownsGame();
     btn.classList.toggle('opacity-50', btn.disabled); btn.classList.toggle('cursor-not-allowed', btn.disabled);
-    updateSkipLabel();
-    Net.publishInfo();
-}
-
-function updateSkipLabel() {
     const skipEl = document.getElementById('skips-left-label');
-    if (!skipEl) return;
-    const m = skipLabelManager();
-    const left = m ? m.skipLeft : 0;
-    skipEl.innerText = m ? `Skips: ${left}` : 'Skips: —';
-    skipEl.className = `text-xs font-bold px-2 py-1 rounded-lg border ${left <= 0 ? 'text-red-400 bg-red-950 border-red-800' : 'text-slate-400 bg-slate-800 border-slate-700'}`;
-}
-
-// Skips belong to a club, not to the room, so the header shows the club this device
-// is answerable for: your own online, whoever is up in a hotseat draft.
-function skipLabelManager() {
-    if (Net.online) return gameState.managers.find(m => m.id === Net.myManagerId) || null;
-    const a = getOpenAuction();
-    if (a) return auctionManagerById(auctionCurrentBidderId());
-    return gameState.managers[0] || null;
+    if (skipEl) {
+        skipEl.innerText = `Skips: ${gameState.skipsLeft}`;
+        skipEl.className = `text-xs font-bold px-2 py-1 rounded-lg border ${gameState.skipsLeft <= 0 ? 'text-red-400 bg-red-950 border-red-800' : 'text-slate-400 bg-slate-800 border-slate-700'}`;
+    }
+    Net.publishInfo();
 }
 
 function teamHasGK(m) { return m.squad.some(p => p.mainPos === 'GK'); }
@@ -322,7 +308,7 @@ function rollPlayers() {
     if (!Net.ownsGame()) return showToast('Only the host rolls the draft.');
     if (gameState.draftAnimating) return;
     const d = gameState.activeDraft;
-    if (d && d.state === 'spinning') return;
+    if (d && (d.state === 'spinning' || d.state === 'picked')) return;
     if (d && d.state === 'revealed' && !d.player.sold) return showToast("Resolve current player first!");
     if (gameState.auction) return showToast("Auction in progress — settle it first.");
 
@@ -375,7 +361,11 @@ function rollPlayers() {
     const masterIdx = availablePlayers.findIndex(p => p.id === tmpl.id);
     if (masterIdx >= 0) availablePlayers.splice(masterIdx, 1);
 
-    const draft = { player: { ...tmpl, sold: false }, state: 'spinning', result: null, nonce: Date.now() };
+    const draft = {
+        player: { ...tmpl, sold: false }, state: 'spinning', result: null,
+        nonce: Date.now(),
+        spinEndsAt: Date.now() + REEL.POS_MS + REEL.GAP_AFTER
+    };
     gameState.activeDraft = draft;
     gameState.auction = null;
 
@@ -405,11 +395,24 @@ const REEL = { ITEM_H: 36, VISIBLE: 3, SPIN_ITEMS: 18, NAT_MS: 1400, POS_MS: 220
 const REEL_POSITIONS = ['GK','CB','LB','RB','LWB','RWB','CDM','CM','CAM','LM','RM','LW','RW','CF','ST'];
 const REEL_NATIONS = ["England","Spain","Italy","Germany","France","Brazil","Argentina","Portugal","Netherlands","Belgium"];
 
-function reelItems(pool, finalValue) {
+// The scrolling strip is seeded from the roll itself, so every device shows the
+// same symbols in the same order instead of a different blur on each screen.
+function reelSeed(seed) {
+    let s = (seed || 0) >>> 0;
+    return () => {
+        s = (s + 0x6D2B79F5) >>> 0;
+        let t = Math.imul(s ^ (s >>> 15), 1 | s);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function reelItems(pool, finalValue, rand) {
+    const pick = rand || Math.random;
     const items = [];
-    for (let i = 0; i < REEL.SPIN_ITEMS; i++) items.push(pool[Math.floor(Math.random() * pool.length)]);
+    for (let i = 0; i < REEL.SPIN_ITEMS; i++) items.push(pool[Math.floor(pick() * pool.length)]);
     items.push(finalValue);
-    for (let i = 0; i < 2; i++) items.push(pool[Math.floor(Math.random() * pool.length)]);
+    for (let i = 0; i < 2; i++) items.push(pool[Math.floor(pick() * pool.length)]);
     return items;
 }
 
@@ -427,7 +430,7 @@ function spinReel(trackEl, durationMs) {
     trackEl.style.transform = `translateY(${targetY}px)`;
 }
 
-function runDraftReel(player) {
+function runDraftReel(player, spin, nonce) {
     const posTrack = document.getElementById('reel-pos');
     const natTrack = document.getElementById('reel-nat');
     const posCol = document.getElementById('col-pos');
@@ -437,24 +440,88 @@ function runDraftReel(player) {
     const nats = availablePlayers.length
         ? [...new Set(availablePlayers.map(p => p.nationality))].filter(Boolean)
         : REEL_NATIONS;
-    // A guest is not told the player until the reels stop, so its reel simply has to
-    // look busy; the revealed snapshot replaces it with the real card either way.
-    const finalNat = player ? (player.nationality || 'World') : pickRand(nats);
-    const finalPos = player ? player.mainPos : pickRand(REEL_POSITIONS);
+    // The name and OVR stay hidden until the reveal, but the two symbols the reels
+    // land on travel with the spin, so every screen stops on the same pair.
+    const finalNat = (player && player.nationality) || (spin && spin.nat) || pickRand(nats);
+    const finalPos = (player && player.mainPos) || (spin && spin.pos) || pickRand(REEL_POSITIONS);
 
-    fillReel(natTrack, reelItems(nats, finalNat), 'reel-nat-text');
-    fillReel(posTrack, reelItems(REEL_POSITIONS, finalPos), 'reel-pos-text');
+    // A device that picks the spin up late shortens it so its reels still stop when
+    // the host reveals, rather than running a full lap behind everyone else.
+    const full = REEL.POS_MS + REEL.GAP_AFTER;
+    const left = spin && Number.isFinite(spin.remaining) ? spin.remaining : full;
+    const scale = clamp(left / full, 0.3, 1);
+    const natMs = Math.round(REEL.NAT_MS * scale);
+    const posMs = Math.round(REEL.POS_MS * scale);
+
+    const rand = reelSeed(nonce);
+    fillReel(natTrack, reelItems(nats, finalNat, rand), 'reel-nat-text');
+    fillReel(posTrack, reelItems(REEL_POSITIONS, finalPos, rand), 'reel-pos-text');
 
     // Left-to-right: Nationality → Position
     natCol.classList.add('slot-spinning'); posCol.classList.add('slot-spinning');
 
     requestAnimationFrame(() => {
-        spinReel(natTrack, REEL.NAT_MS);
-        spinReel(posTrack, REEL.POS_MS);
+        spinReel(natTrack, natMs);
+        spinReel(posTrack, posMs);
     });
 
-    setTimeout(() => { natCol.classList.remove('slot-spinning'); natCol.classList.add('slot-locked'); }, REEL.NAT_MS);
-    setTimeout(() => { posCol.classList.remove('slot-spinning'); posCol.classList.add('slot-locked'); }, REEL.POS_MS);
+    setTimeout(() => { natCol.classList.remove('slot-spinning'); natCol.classList.add('slot-locked'); }, natMs);
+    setTimeout(() => { posCol.classList.remove('slot-spinning'); posCol.classList.add('slot-locked'); }, posMs);
+}
+
+// The host draws the wheel and sends the landing index, so every screen spins the
+// same clubs in the same order and stops on the same one at the same moment.
+function renderPickupWheel(board, d) {
+    const pick = d.pick;
+    const order = pick ? pick.order : null;
+    if (!d.player || !order || !order.length) return;
+
+    // Unrelated updates re-render the board constantly; rebuilding the card would
+    // reset the rotation mid-spin, so a wheel already running for this player stays.
+    const token = `${d.player.id}:${order.join(',')}:${pick.lands}`;
+    if (gameState._wheelFor === token &&
+        board.firstElementChild?.dataset?.draftCard === String(d.player.id)) return;
+    gameState._wheelFor = token;
+
+    const clubs = order.map(id => auctionManagerById(id) || { name: '?' });
+    const seg = 360 / clubs.length;
+    const colors = ['#1d4ed8', '#b91c1c', '#6d28d9', '#c2410c', '#047857', '#0e7490'];
+    const stops = clubs.map((c, i) => `${colors[i % colors.length]} ${i * seg}deg ${(i + 1) * seg}deg`).join(', ');
+    // Labels run along the radius. Conic angles start at 12 o'clock but an unrotated
+    // label points at 3, hence the -90; a label whose radius points left would render
+    // upside down, so those names are turned back inside their own box.
+    const labels = clubs.map((c, i) => {
+        const angle = (i + 0.5) * seg;
+        const text = escapeHTML(String(c.name).slice(0, 12));
+        const inner = angle > 180 ? `<span class="wheel-flip">${text}</span>` : text;
+        return `<div class="wheel-label" style="transform:rotate(${angle - 90}deg)">${inner}</div>`;
+    }).join('');
+
+    board.innerHTML = `
+        <div data-draft-card="${d.player.id}" class="w-full bg-slate-800 rounded-xl border border-amber-500/40 shadow-2xl px-4 py-6 flex flex-col justify-center items-center min-h-[280px] gap-4">
+            <h4 class="text-amber-300 font-bold tracking-widest uppercase text-sm">Skips gone · Pickup wheel</h4>
+            <div class="relative w-[200px] h-[200px]">
+                <div id="pickup-wheel" class="wheel" style="background:conic-gradient(from 0deg, ${stops})">${labels}</div>
+                <div class="wheel-hub">€${MIN_BID}M</div>
+                <div class="wheel-pointer"></div>
+            </div>
+            <p class="text-[11px] text-slate-400 text-center max-w-[260px]">${escapeHTML(d.player.name)} goes to the club the wheel stops on.</p>
+        </div>`;
+
+    const wheel = document.getElementById('pickup-wheel');
+    // A late device shortens its spin so it settles near the host, with a floor so a
+    // last-moment joiner still sees a wheel rather than an instant snap.
+    const full = WHEEL_MS + WHEEL_GAP;
+    const left = Number.isFinite(pick.remaining) ? pick.remaining : full;
+    const spinMs = Math.round(WHEEL_MS * clamp(left / full, 0.3, 1));
+    const target = 360 * 4 - (pick.lands * seg + seg / 2);
+    // Same forced-reflow start the reels use, so the spin also begins on a device
+    // whose tab is backgrounded and therefore not running animation frames.
+    wheel.style.transition = 'none';
+    wheel.style.transform = 'rotate(0deg)';
+    void wheel.offsetHeight;
+    wheel.style.transition = `transform ${spinMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)`;
+    wheel.style.transform = `rotate(${target}deg)`;
 }
 
 function renderDraftBoard() {
@@ -483,8 +550,10 @@ function renderDraftBoard() {
         const spinToken = d.nonce || (player && player.id);
         if (spinToken && gameState._reelFor !== spinToken) {
             gameState._reelFor = spinToken;
-            runDraftReel(player);
+            runDraftReel(player, d.spin, spinToken);
         }
+    } else if (state === 'picked') {
+        renderPickupWheel(board, d);
     } else if (state === 'revealed') {
         const isSolo = gameState.managers.length === 1;
         if (player.sold) {
@@ -512,27 +581,23 @@ function renderDraftBoard() {
                 board.innerHTML = '<div class="text-slate-400 italic">Press Roll Draft</div>';
                 return;
             }
-            // A guest mirrors the host's pass the same way it mirrors a sale: the
-            // DISCARDED stamp plays on the card it is already showing.
+            // An unsold player needs no recap panel — the DISCARDED stamp on the card
+            // every device is already showing is the whole story. The stamp must not be
+            // wiped by a re-render, so anything mid-animation leaves the board alone.
+            if (gameState.draftAnimating || document.querySelector('.draft-sold-stamp')) return;
             const skipCardShowing = board.firstElementChild?.dataset?.draftCard === String(player.id);
-            if (skipCardShowing && !Net.ownsGame() && !gameState.draftAnimating && !document.querySelector('.draft-sold-stamp')) {
+            if (skipCardShowing) {
                 playDraftDiscardAnimation(() => {
                     gameState.activeDraft = null;
+                    Net.publishDraftNow();
                     renderDraftBoard();
                     updateRollButton();
                 });
                 return;
             }
-            // Pass / unsold still shows a brief result
-            board.innerHTML = `
-                <div class="w-full bg-slate-800 rounded-xl border border-slate-700 flex flex-col items-center justify-center h-[260px] p-5 text-center">
-                    <span class="text-3xl font-bold text-slate-500 mb-1">UNSOLD</span>
-                    <span class="text-slate-200 font-bold text-xl truncate w-full">${escapeHTML(player.name)}</span>
-                    <span class="text-slate-400 text-sm mt-1">Passed</span>
-                    <div class="w-full mt-4 pt-3 border-t border-slate-700 text-xs text-slate-400 space-y-0.5">
-                        ${(result && result.bids ? result.bids : []).map(b => `<div class="flex justify-between"><span class="truncate pr-2">${escapeHTML(b.name)}</span><span class="font-mono">${isSolo ? '' : (b.amount>0?'€'+b.amount+'M':'—')}</span></div>`).join('')}
-                    </div>
-                </div>`;
+            gameState.activeDraft = null;
+            Net.publishDraftNow();
+            board.innerHTML = '<div class="text-slate-400 italic">Press Roll Draft</div>';
         } else {
             let actionHtml;
             if (isSolo) {
@@ -580,7 +645,7 @@ function soloTakePlayer() {
     const price = 0;
     m.squad.push({ ...d.player, price });
     d.player.sold = true;
-    d.result = { winnerName: m.name, price, bids: [{ name: m.name, amount: price }] };
+    d.result = { winnerName: m.name };
     playDraftAcquisitionAnimation(d.player, m.id, () => {
         updateDashboard(m.id);
         gameState.activeDraft = null; // destination known via animation — skip SOLD result panel
@@ -593,12 +658,11 @@ function soloSkipPlayer() {
     const d = gameState.activeDraft; if (!d || d.player.sold) return;
     const m = gameState.managers[0];
     if (!m) return;
-    if ((m.skipLeft || 0) <= 0) return showToast('No skips left! You must take this player.');
-    m.skipLeft = Math.max(0, (m.skipLeft || 0) - 1);
+    gameState.skipsLeft = Math.max(0, gameState.skipsLeft - 1);
     d.player.sold = true;
-    d.result = { winnerName: null, price: 0, bids: [{ name: m.name, amount: 0 }] };
+    d.result = { winnerName: null };
     playDraftDiscardAnimation(() => {
-        showToast(`Player passed. Skips left: ${m.skipLeft}`);
+        showToast(`Player passed. Skips left: ${gameState.skipsLeft}`);
         gameState.activeDraft = null;
         renderDraftBoard();
         updateRollButton();

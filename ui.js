@@ -224,12 +224,35 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
         setTimeout(() => {
             const duration = 1300;
             const t0 = performance.now();
+            let landed = false;
 
             function ease(t) {
                 return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
             }
 
+            // The stamp holds while the arrow lands, then the whole overlay clears.
+            const arrive = () => {
+                if (landed) return;
+                landed = true;
+                buildTrail(1);
+                head.style.opacity = '1';
+                target.classList.add('draft-target-receive');
+                circle.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+                circle.style.opacity = '0';
+                circle.style.transform = 'translate(-50%, -50%) scale(0.35)';
+                trail.style.transition = 'opacity 0.85s ease';
+                head.style.transition = 'opacity 0.85s ease';
+                trail.style.opacity = '0';
+                head.style.opacity = '0';
+                setTimeout(() => {
+                    stamp.style.transition = 'opacity 0.4s ease';
+                    stamp.style.opacity = '0';
+                }, 500);
+                setTimeout(cleanup, 1100);
+            };
+
             function frame(now) {
+                if (landed) return;
                 const t = Math.min(1, (now - t0) / duration);
                 const e = ease(t);
                 const p = pointAt(e);
@@ -257,25 +280,21 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
                 if (t < 1) {
                     requestAnimationFrame(frame);
                 } else {
-                    buildTrail(1);
-                    head.style.opacity = '1';
-                    target.classList.add('draft-target-receive');
-                    circle.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
-                    circle.style.opacity = '0';
-                    circle.style.transform = 'translate(-50%, -50%) scale(0.35)';
-                    trail.style.transition = 'opacity 0.85s ease';
-                    head.style.transition = 'opacity 0.85s ease';
-                    trail.style.opacity = '0';
-                    head.style.opacity = '0';
-                    // The stamp holds while the arrow lands, then the whole overlay clears.
-                    setTimeout(() => {
-                        stamp.style.transition = 'opacity 0.4s ease';
-                        stamp.style.opacity = '0';
-                    }, 500);
-                    setTimeout(cleanup, 1100);
+                    arrive();
                 }
             }
             requestAnimationFrame(frame);
+            // A backgrounded tab never reaches an animation frame, and an online host
+            // spends most of the auction in a background tab while a guest bids. The
+            // fly-over is what re-enables Roll, so land it from a timer instead.
+            setTimeout(() => {
+                if (landed) return;
+                const p = pointAt(1);
+                circle.style.transition = 'none';
+                circle.style.left = `${p.x}px`;
+                circle.style.top = `${p.y}px`;
+                arrive();
+            }, duration + 900);
         }, 320);
     });
 }
@@ -313,9 +332,9 @@ function playDraftDiscardAnimation(onComplete) {
 
     panel.classList.add('draft-panel-sold-react');
 
-    // Hold the stamp briefly, then fade and clean up
+    // Hold the stamp long enough to read, then fade and clean up
     setTimeout(() => {
-        stamp.style.transition = 'opacity 0.4s ease';
+        stamp.style.transition = 'opacity 0.5s ease';
         stamp.style.opacity = '0';
         setTimeout(() => {
             if (stamp.parentNode) stamp.remove();
@@ -324,8 +343,8 @@ function playDraftDiscardAnimation(onComplete) {
             gameState.draftAnimating = false;
             updateRollButton();
             finish();
-        }, 420);
-    }, 720);
+        }, 500);
+    }, 1250);
 }
 
 
@@ -993,7 +1012,7 @@ function autoFillLineup(mId) {
     if (!m || m.formationLocked) return;
     if (!Net.canControl(mId)) return showToast('Only that manager can set their own XI.');
     const draft = gameState.activeDraft;
-    if (draft && (draft.state === 'spinning' || (draft.state === 'revealed' && !draft.player.sold))) {
+    if (draft && (draft.state === 'spinning' || draft.state === 'picked' || (draft.state === 'revealed' && !draft.player.sold))) {
         return showToast('Resolve the current player before auto-filling.');
     }
     if (!m.squad.length) return showToast('No players drafted yet.');
@@ -1042,7 +1061,7 @@ function lockFormation(mId) {
     if (!m || m.formationLocked) return;
     if (!Net.canControl(mId)) return showToast('Only that manager can lock their own club.');
     const draft = gameState.activeDraft;
-    if (draft && (draft.state === 'spinning' || (draft.state === 'revealed' && !draft.player.sold))) {
+    if (draft && (draft.state === 'spinning' || draft.state === 'picked' || (draft.state === 'revealed' && !draft.player.sold))) {
         return showToast('Resolve the current player before locking formations.');
     }
     if (m.formation.filter(n => n.assignedPlayerId).length < STARTERS) return showToast(`Place ${STARTERS} players first!`);
