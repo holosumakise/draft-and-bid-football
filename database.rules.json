@@ -1,0 +1,31 @@
+{
+  "rules": {
+    "rooms": {
+      "$code": {
+        ".read": true,
+        ".write": true,
+
+        "meta": {
+            ".validate": "newData().hasChild('code') && newData().hasChild('hostId') && newData().hasChild('status')"
+        },
+
+        "lobby": {
+            "playerCount": { ".validate": "newData().isNumber() && newData().val() >= 1 && newData().val() <= 8" },
+            "difficulty": { ".validate": "newData().val() === 'easy' || newData().val() === 'normal' || newData().val() === 'hard' || newData().val() === 'legend'" }
+        },
+
+        "roster": {
+            "$clientId": {
+                ".validate": "newData().hasChild('name') && newData().child('slot').isNumber() && newData().child('slot').val() >= 1 && newData().child('slot').val() <= 8"
+            }
+        },
+
+        "cmd": {
+            "$clientId": {
+                "$pushId": { ".validate": "newData().hasChild('type')" }
+            }
+        }
+      }
+    }
+  }
+}

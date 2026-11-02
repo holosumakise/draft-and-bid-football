@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Draft &amp; Bid Football</title>
+    <meta name="theme-color" content="#0f172a">
+    <meta name="description" content="Draft legends, bid against rivals and simulate seasons in a football manager game.">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Base & Pitch Styles */
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            user-select: none;
+            overflow-x: hidden;
+        }
+
+        .pitch {
+            background-color: #22c55e;
+            border: 2px solid white;
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            aspect-ratio: 2/3;
+            margin: 0 auto;
+            overflow: hidden;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            border-radius: 4px;
+        }
+        .pitch::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 2px; background-color: white; transform: translateY(-50%); }
+        .center-circle { position: absolute; top: 50%; left: 50%; width: 80px; height: 80px; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); }
+        .center-dot { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background-color: white; border-radius: 50%; transform: translate(-50%, -50%); }
+        .penalty-box-top { position: absolute; top: 0; left: 50%; width: 50%; height: 15%; border: 2px solid white; border-top: none; transform: translateX(-50%); }
+        .penalty-box-bottom { position: absolute; bottom: 0; left: 50%; width: 50%; height: 15%; border: 2px solid white; border-bottom: none; transform: translateX(-50%); }
+        .six-yard-top { position: absolute; top: 0; left: 50%; width: 25%; height: 5%; border: 2px solid white; border-top: none; transform: translateX(-50%); }
+        .six-yard-bottom { position: absolute; bottom: 0; left: 50%; width: 25%; height: 5%; border: 2px solid white; border-bottom: none; transform: translateX(-50%); }
+
+        /* Player Nodes */
+        .pitch-node {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 10;
+        }
+        .pitch-node:active { z-index: 50; }
+        .pitch-node-circle {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid white;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            cursor: grab;
+            touch-action: none;
+            transition: transform 0.1s;
+            position: relative;
+        }
+        .pitch-node-circle:active { cursor: grabbing; transform: scale(1.1); }
+        .pitch-node-circle.locked { cursor: not-allowed; background-color: #475569 !important; }
+        .pitch-node-circle.locked.gk-fixed { background-color: #ca8a04 !important; }
+        .pitch-node-circle.gk-fixed { cursor: default; }
+        .pitch-node-circle.gk-fixed:active { transform: none; }
+        .pitch-node-label {
+            font-size: 11px;
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-top: 4px;
+            white-space: nowrap;
+            pointer-events: none;
+            font-weight: bold;
+        }
+
+        /* Bench Nodes */
+        .bench-area { display: flex; gap: 10px; justify-content: center; margin-top: 15px; flex-wrap: wrap; max-width: 400px; }
+        .bench-node { width: 46px; display: flex; flex-direction: column; align-items: center; position: relative; cursor: grab; touch-action: none; }
+        .bench-node.dragging { opacity: 0.45; cursor: grabbing; }
+        .bench-node .bench-circle { cursor: grab; }
+        .pitch-node.drop-target .pitch-node-circle,
+        .bench-node.drop-target .bench-circle { box-shadow: 0 0 0 4px #34d399, 0 0 16px rgba(52, 211, 153, 0.75) !important; }
+        .bench-circle {
+            width: 42px; height: 42px; border-radius: 50%; background-color: #475569;
+            border: 2px dashed #94a3b8; display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: bold; color: #cbd5e1; box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .bench-circle.filled { border: 2px solid white; }
+
+        /* Animations */
+        @keyframes revealCard {
+            0%   { opacity: 0; transform: translateY(24px) scale(0.94); filter: blur(6px); }
+            60%  { opacity: 1; filter: blur(0); }
+            100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+        }
+        .animate-reveal {
+            animation: revealCard 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            opacity: 0;
+        }
+
+        /* Draft acquisition fly animation */
+        #draft-fly-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 90;
+            pointer-events: none;
+            overflow: hidden;
+        }
+        .draft-fly-arrow-line {
+            fill: none;
+            stroke: #34d399;
+            stroke-width: 3;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.55));
+            opacity: 0;
+        }
+        .draft-fly-arrow-head {
+            fill: #34d399;
+            filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.55));
+            opacity: 0;
+        }
+        .draft-fly-circle {
+            position: fixed;
+            width: 22px;
+            height: 22px;
+            margin: 0;
+            border-radius: 50%;
+            background: #34d399;
+            border: 2px solid #ecfdf5;
+            box-shadow: 0 0 14px rgba(52, 211, 153, 0.75), 0 2px 8px rgba(0,0,0,0.35);
+            z-index: 92;
+            pointer-events: none;
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.5);
+        }
+
+        /* Fixed SOLD stamp (not a child of the panel — avoids layout glitches) */
+        .draft-sold-stamp {
+            position: fixed;
+            z-index: 93;
+            pointer-events: none;
+            font-size: clamp(1.6rem, 5vw, 2.4rem);
+            font-weight: 900;
+            letter-spacing: 0.14em;
+            color: #ef4444;
+            border: 4px solid #ef4444;
+            border-radius: 6px;
+            padding: 0.12em 0.32em;
+            line-height: 1;
+            background: rgba(15, 23, 42, 0.35);
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+            opacity: 0;
+            transform: translate(-50%, -50%) rotate(-12deg) scale(1.35);
+            will-change: transform, opacity;
+        }
+        .draft-sold-stamp.stamped {
+            /* Soft, weighty stamp — not a stiff pop */
+            transition: transform 0.32s cubic-bezier(0.34, 1.4, 0.64, 1),
+                        opacity 0.18s ease-out;
+            opacity: 1;
+            transform: translate(-50%, -50%) rotate(-12deg) scale(1);
+        }
+        .draft-discard-stamp {
+            color: #fb923c;
+            border-color: #fb923c;
+            font-size: clamp(1.2rem, 4.2vw, 1.9rem);
+            letter-spacing: 0.1em;
+        }
+
+        .draft-sold-stamp-inpanel {
+            position: absolute !important;
+            z-index: 40;
+            pointer-events: none;
+        }
+
+        /* Gentle dip + smooth darken (no harsh shake steps) */
+        @keyframes draftSoldReact {
+            0%   { transform: translate3d(0, 0, 0) scale(1); filter: brightness(1) saturate(1); opacity: 1; }
+            28%  { transform: translate3d(0, 1px, 0) scale(0.995); filter: brightness(0.96) saturate(0.97); opacity: 0.98; }
+            55%  { transform: translate3d(0, 3px, 0) scale(0.985); filter: brightness(0.78) saturate(0.85); opacity: 0.88; }
+            100% { transform: translate3d(0, 5px, 0) scale(0.975); filter: brightness(0.55) saturate(0.7); opacity: 0.78; }
+        }
+        .draft-panel-sold-react {
+            animation: draftSoldReact 0.48s cubic-bezier(0.33, 0, 0.2, 1) forwards;
+            transform-origin: center center;
+        }
+
+        /* Squad receive glow + clean recognizable bounce */
+        @keyframes draftReceiveGlow {
+            0% {
+                box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+                filter: brightness(1);
+                transform: translate3d(0, 0, 0) scale(1);
+            }
+            18% {
+                box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.85), 0 0 32px 8px rgba(52, 211, 153, 0.4);
+                filter: brightness(1.14);
+                transform: translate3d(0, -10px, 0) scale(1.045);
+            }
+            36% {
+                box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.55), 0 0 18px 4px rgba(52, 211, 153, 0.25);
+                filter: brightness(1.08);
+                transform: translate3d(0, 3px, 0) scale(0.985);
+            }
+            54% {
+                transform: translate3d(0, -5px, 0) scale(1.02);
+            }
+            72% {
+                box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25), 0 0 10px 2px rgba(52, 211, 153, 0.12);
+                filter: brightness(1.03);
+                transform: translate3d(0, 1px, 0) scale(0.995);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+                filter: brightness(1);
+                transform: translate3d(0, 0, 0) scale(1);
+            }
+        }
+        .draft-target-receive {
+            animation: draftReceiveGlow 0.95s cubic-bezier(0.34, 1.3, 0.64, 1);
+            will-change: transform, box-shadow, filter;
+        }
+
+        /* Slot-machine reels */
+        .reel-window {
+            position: relative;
+            width: 100%;
+            height: 108px; /* 3 x 36px */
+            overflow: hidden;
+            border-radius: 0.5rem;
+            background: #0f172a;
+        }
+        .reel-track {
+            will-change: transform;
+        }
+        .reel-item {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 0 4px;
+            box-sizing: border-box;
+            line-height: 1.15;
+            word-break: break-word;
+        }
+        .reel-pos-text  { font-size: 1.35rem; font-weight: 900; color: #34d399; }
+        .reel-nat-text  { font-size: 0.95rem; font-weight: 700; color: #38bdf8; }
+        .reel-mask-top, .reel-mask-bot {
+            position: absolute;
+            left: 0; right: 0;
+            height: 36px;
+            pointer-events: none;
+            z-index: 2;
+        }
+        .reel-mask-top {
+            top: 0;
+            background: linear-gradient(to bottom, rgba(15,23,42,0.95), rgba(15,23,42,0));
+        }
+        .reel-mask-bot {
+            bottom: 0;
+            background: linear-gradient(to top, rgba(15,23,42,0.95), rgba(15,23,42,0));
+        }
+        .reel-highlight {
+            position: absolute;
+            left: 0; right: 0;
+            top: 36px;
+            height: 36px;
+            border-top: 1px solid rgba(52, 211, 153, 0.35);
+            border-bottom: 1px solid rgba(52, 211, 153, 0.35);
+            background: rgba(52, 211, 153, 0.06);
+            pointer-events: none;
+            z-index: 1;
+        }
+        .slot-col.slot-spinning {
+            border-color: #64748b;
+        }
+        .slot-col.slot-locked {
+            border-color: #34d399;
+            box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.35), 0 0 18px rgba(52, 211, 153, 0.15);
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
+        }
+
+        .screen { display: none; min-height: 100vh; flex-direction: column; }
+        .screen.active { display: flex; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+
+        /* Goal Timeline */
+        .timeline-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 2rem 0;
+        }
+        .timeline-center-line {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background-color: #e2e8f0;
+            transform: translateX(-50%);
+            z-index: 1;
+        }
+        .timeline-event {
+            display: flex;
+            width: 100%;
+            margin-bottom: 1.5rem;
+            position: relative;
+            z-index: 10;
+        }
+        .timeline-event.left-side { justify-content: flex-start; }
+        .timeline-event.right-side { justify-content: flex-end; }
+        
+        .timeline-card {
+            width: 45%;
+            background-color: #f0fdf4;
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .timeline-card::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 5%;
+            height: 2px;
+            background-color: #e2e8f0;
+            transform: translateY(-50%);
+        }
+        .timeline-event.left-side .timeline-card::before { right: -5%; }
+        .timeline-event.right-side .timeline-card::before { left: -5%; }
+
+        .timeline-time-bubble {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            background-color: #22c55e;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            z-index: 20;
+            box-shadow: 0 0 0 4px #0f172a;
+        }
+        .time-injury { background-color: #16a34a; }
+
+        /* Season / League */
+        .season-row {
+            transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease, border-color 0.3s ease;
+        }
+        .season-row.human {
+            background: linear-gradient(90deg, rgba(34,197,94,0.12), rgba(59,130,246,0.08));
+            border-color: rgba(34,197,94,0.45) !important;
+        }
+        @keyframes pulse-md {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.55; }
+        }
+        .md-pulse { animation: pulse-md 1.1s ease-in-out infinite; }
+        .award-card {
+            background: linear-gradient(145deg, #1e293b, #0f172a);
+            border: 1px solid #334155;
+            border-radius: 1rem;
+            padding: 1rem 1.25rem;
+        }
+
+        /* European knockout bracket */
+        .euro-bracket-comp { margin-bottom: 1.5rem; }
+        .euro-round-col { display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+        .euro-round-head { text-align: center; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #64748b; }
+        .euro-tie { border: 1px solid #1e293b; background: rgba(15, 23, 42, 0.65); border-radius: 0.75rem; padding: 0.45rem; display: flex; flex-direction: column; gap: 0.3rem; min-height: 94px; justify-content: center; }
+        .euro-tie.played { background: rgba(30, 41, 59, 0.8); border-color: #334155; }
+
+        /* Accessibility: a visible ring for keyboard users without changing mouse focus. */
+        button:focus-visible,
+        input:focus-visible,
+        select:focus-visible,
+        a:focus-visible,
+        [tabindex]:focus-visible {
+            outline: 3px solid #34d399;
+            outline-offset: 2px;
+        }
+        button:focus:not(:focus-visible) { outline: none; }
+
+        /* Click-to-swap selection */
+        .pitch-node.selected .pitch-node-circle,
+        .bench-node.selected .bench-circle {
+            box-shadow: 0 0 0 3px #fbbf24, 0 0 18px rgba(251, 191, 36, 0.7) !important;
+        }
+        .pitch-node.selected .pitch-node-label { background: rgba(120, 53, 15, 0.95); }
+
+        /* Linked players get a soft ring in the chemistry colour. */
+        .pitch-node-circle.chem-warm {
+            box-shadow: 0 0 0 2px #38bdf8, 0 0 14px rgba(56, 189, 248, 0.75), 0 2px 5px rgba(0, 0, 0, 0.5);
+        }
+        .pitch-node-circle.chem-strong {
+            box-shadow: 0 0 0 3px #34d399, 0 0 20px rgba(52, 211, 153, 0.9), 0 2px 5px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Match speed controls */
+        .speed-btn {
+            padding: 2px 8px;
+            border-radius: 9999px;
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            color: #475569;
+            font-size: 10px;
+            font-weight: 900;
+            line-height: 16px;
+            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .speed-btn:hover { border-color: #34d399; color: #047857; }
+        .speed-btn.active {
+            background: #10b981;
+            border-color: #059669;
+            color: #052e16;
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18);
+        }
+
+        /* Formation preset buttons */
+        .shape-btn {
+            padding: 2px 7px;
+            border-radius: 9999px;
+            border: 1px solid #475569;
+            background: #1e293b;
+            color: #cbd5e1;
+            font-size: 10px;
+            font-weight: 900;
+            line-height: 16px;
+            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .shape-btn:hover { border-color: #60a5fa; color: #bfdbfe; }
+        .shape-btn.active {
+            background: #3b82f6;
+            border-color: #60a5fa;
+            color: #ffffff;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
+        }
+    </style>
+</head>
+<body class="font-sans antialiased text-slate-100">
+
+    <!-- Online status line: what a guest device is waiting for -->
+    <div id="online-note" class="hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-[80] max-w-[92vw] text-center text-[11px] font-bold px-3 py-1.5 rounded-full bg-slate-800/95 border border-emerald-500/40 text-emerald-200 shadow-lg pointer-events-none"></div>
+
+    <!-- Screen 1: Main Menu -->
+    <div id="screen-main" class="screen active justify-center items-center p-6">
+        <h1 class="text-5xl md:text-6xl font-black mb-12 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500 text-center tracking-tight drop-shadow-lg">
+            Draft &amp; Bid Football
+        </h1>
+        <div class="flex flex-col gap-6 w-full max-w-sm">
+            <button onclick="selectMode('H2H')" class="w-full py-4 px-6 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-xl shadow-lg transition-transform transform hover:scale-105 active:scale-95 text-white">
+                H2H Mode (2 Players)
+            </button>
+            <button onclick="selectMode('Tournament')" class="w-full py-4 px-6 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold text-xl shadow-lg transition-transform transform hover:scale-105 active:scale-95 text-white">
+                Tournament Mode
+            </button>
+            <button onclick="openHowTo()" class="w-full py-3 px-6 bg-slate-700 hover:bg-slate-600 border border-slate-500 rounded-xl font-bold text-base shadow-lg transition-colors text-slate-100">
+                How it works
+            </button>
+        </div>
+    </div>
+
+    <!-- Screen 2: Setup -->
+    <div id="screen-setup" class="screen justify-center items-center p-6">
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700">
+            <h2 class="text-3xl font-bold mb-6 text-center text-green-400" id="setup-title">Game Setup</h2>
+            
+            <div id="player-count-container" class="mb-6 hidden">
+                <label class="block text-sm font-medium text-slate-300 mb-2">Number of Players (1-4)</label>
+                <select id="player-count" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white outline-none focus:border-green-400 transition" onchange="generateNameInputs()">
+                    <option value="1">1 Player</option>
+                    <option value="2">2 Players</option>
+                    <option value="3">3 Players</option>
+                    <option value="4" selected>4 Players</option>
+                </select>
+            </div>
+
+            <div id="difficulty-container" class="mb-6">
+                <label class="block text-sm font-medium text-slate-300 mb-2">Difficulty <span class="text-slate-500 font-normal">(ghost clubs)</span></label>
+                <div class="grid grid-cols-4 gap-2" id="difficulty-options">
+                    <button type="button" data-diff="easy" onclick="selectDifficulty('easy')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400">Easy</button>
+                    <button type="button" data-diff="normal" onclick="selectDifficulty('normal')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-green-400 bg-green-500 text-slate-900">Normal</button>
+                    <button type="button" data-diff="hard" onclick="selectDifficulty('hard')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400">Hard</button>
+                    <button type="button" data-diff="legend" onclick="selectDifficulty('legend')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400">Legend</button>
+                </div>
+                <p id="difficulty-desc" class="text-[11px] text-slate-500 mt-2">Normal: ghost clubs play at their standard strength.</p>
+            </div>
+
+            <div id="names-container" class="space-y-4 mb-8">
+                <!-- Name inputs injected here -->
+            </div>
+
+            <div class="flex gap-4">
+                <button onclick="showScreen('screen-main')" class="flex-1 py-3 px-4 bg-slate-600 hover:bg-slate-500 rounded-xl font-bold transition-colors">Back</button>
+                <button onclick="initGame()" class="flex-1 py-3 px-4 bg-green-500 hover:bg-green-400 rounded-xl font-bold text-slate-900 transition-colors shadow-lg">Play</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 2a: Choose local or online -->
+    <div id="screen-play-choose" class="screen justify-center items-center p-6">
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700 text-center">
+            <h2 class="text-2xl md:text-3xl font-bold mb-2 text-green-400" id="choose-title">Choose how to play</h2>
+            <p class="text-sm text-slate-400 mb-6">Local runs entirely on this device. Online shares one room code through Firebase — the host runs the draft and every match, and each manager plays their own club on their own device.</p>
+            <div class="flex flex-col gap-3">
+                <button onclick="chooseLocal()" class="w-full py-4 px-6 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-lg shadow-lg transition text-white">
+                    Play Locally
+                </button>
+                <button onclick="chooseOnline()" class="w-full py-4 px-6 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold text-lg shadow-lg transition text-white">
+                    Play Online
+                </button>
+                <button onclick="showScreen('screen-main')" class="w-full py-3 px-6 bg-slate-600 hover:bg-slate-500 rounded-xl font-bold transition-colors">Back</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 2b: Online hub — name, then create or join -->
+    <div id="screen-online-hub" class="screen justify-center items-center p-6">
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700">
+            <h2 class="text-2xl md:text-3xl font-bold mb-1 text-center text-purple-400">Online Play</h2>
+            <p class="text-center text-xs text-slate-400 mb-6" id="online-hub-mode">H2H · 2 managers</p>
+
+            <label class="block text-sm font-medium text-slate-300 mb-1">Your manager name <span class="text-red-400">*</span></label>
+            <input type="text" id="online-manager-name" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white outline-none focus:border-purple-400 mb-5" maxlength="15" placeholder="e.g. Keanu">
+
+            <button onclick="createRoom()" id="btn-create-room" class="w-full py-3 px-4 bg-green-500 hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-bold text-slate-900 transition-colors shadow-lg mb-3">
+                Create Room
+            </button>
+
+            <div class="flex items-center gap-3 my-4 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <span class="h-px flex-1 bg-slate-700"></span> or <span class="h-px flex-1 bg-slate-700"></span>
+            </div>
+
+            <label class="block text-sm font-medium text-slate-300 mb-1">Room code</label>
+            <div class="flex gap-2 mb-5">
+                <input type="text" id="online-room-code" class="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded-lg p-3 text-white uppercase tracking-[0.3em] font-mono outline-none focus:border-purple-400" maxlength="6" placeholder="ABCDEF" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')">
+                <button onclick="joinRoom()" id="btn-join-room" class="px-5 py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-bold text-white transition-colors shadow-lg">Join Room</button>
+            </div>
+
+            <p id="online-hub-status" class="text-xs text-slate-400 text-center min-h-[18px]"></p>
+            <div class="flex gap-4 mt-4">
+                <button onclick="backToMenu()" class="flex-1 py-3 px-4 bg-slate-600 hover:bg-slate-500 rounded-xl font-bold transition-colors">Back</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 2c: Room lobby -->
+    <div id="screen-lobby" class="screen justify-center items-center p-6">
+        <div class="bg-slate-800 p-6 md:p-8 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-700">
+            <div class="flex items-center justify-between mb-1">
+                <h2 class="text-2xl font-bold text-purple-400">Room Lobby</h2>
+                <span class="flex items-center gap-2 text-xs text-slate-400">
+                    <span id="online-status-dot" class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                    <span id="online-status-label"></span>
+                </span>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-600 rounded-xl p-4 mb-5 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Room code</div>
+                    <div id="lobby-code" class="text-3xl md:text-4xl font-black font-mono tracking-[0.2em] text-white truncate">------</div>
+                </div>
+                <button onclick="copyRoomCode()" class="shrink-0 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-bold border border-slate-500 transition">Copy</button>
+            </div>
+            <p class="text-[11px] text-slate-500 -mt-3 mb-5">Send this code to the other manager(s). They pick the same mode and join here.</p>
+
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Managers</div>
+            <div id="lobby-roster" class="space-y-2 mb-5"></div>
+
+            <div id="lobby-host-controls" class="border-t border-slate-700 pt-5">
+                <div id="lobby-count-container" class="mb-4">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Number of players</label>
+                    <select id="lobby-player-count" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white outline-none focus:border-green-400" onchange="setLobbyPlayerCount(this.value)">
+                        <option value="2">2 Players</option>
+                        <option value="3">3 Players</option>
+                        <option value="4">4 Players</option>
+                    </select>
+                </div>
+                <div id="lobby-difficulty-container" class="mb-4">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Difficulty <span class="text-slate-500 font-normal">(ghost clubs)</span></label>
+                    <div class="grid grid-cols-4 gap-2" id="lobby-difficulty-options">
+                        <button type="button" data-diff="easy" onclick="selectLobbyDifficulty('easy')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400">Easy</button>
+                        <button type="button" data-diff="normal" onclick="selectLobbyDifficulty('normal')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-green-400 bg-green-500 text-slate-900">Normal</button>
+                        <button type="button" data-diff="hard" onclick="selectLobbyDifficulty('hard')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400">Hard</button>
+                        <button type="button" data-diff="legend" onclick="selectLobbyDifficulty('legend')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400">Legend</button>
+                    </div>
+                    <p id="lobby-difficulty-desc" class="text-[11px] text-slate-500 mt-2"></p>
+                </div>
+                <button onclick="startRoom()" id="btn-start-room" class="w-full py-3 px-4 bg-green-500 hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-black text-slate-900 transition-colors shadow-lg">Start Game</button>
+            </div>
+
+            <div id="lobby-guest-note" class="border-t border-slate-700 pt-4 text-center">
+                <p class="text-sm text-slate-300 font-bold">Waiting for the host to start</p>
+                <p class="text-[11px] text-slate-500 mt-1">The host picks the squad size and difficulty. You play your own club from the first roll.</p>
+            </div>
+
+            <button onclick="leaveRoomFromLobby()" class="w-full mt-4 py-2.5 px-4 bg-slate-600 hover:bg-slate-500 rounded-xl font-bold transition-colors text-sm">Leave Room</button>
+        </div>
+    </div>
+
+    <!-- Screen 3: Game View -->
+    <div id="screen-game" class="screen p-4 md:p-6 bg-slate-950">
+        
+        <!-- Top Panel with Side Notes -->
+        <div class="w-full max-w-5xl mx-auto mb-6 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-4">
+            
+            <!-- Left Side Note: Tier Legend -->
+            <div class="hidden lg:flex flex-col justify-center w-60 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl text-xs shadow-lg self-center">
+                <div class="text-[11px] font-black text-slate-400 uppercase tracking-wider mb-2">Player Tiers</div>
+                <div class="space-y-1.5 font-bold">
+                    <div class="text-yellow-400">🐐 GOAT</div>
+                    <div class="text-[10px] font-normal text-slate-400">Rating: 106+ Overall</div>
+                </div>
+                <div class="mt-3 space-y-1.5 font-bold">
+                    <div class="text-fuchsia-400">🛡️ INVINCIBLE</div>
+                    <div class="text-[10px] font-normal text-slate-400">Rating: 101-105 Overall</div>
+                </div>
+            </div>
+
+            <!-- Mobile Tier Legend (shown only on smaller screens above panel) -->
+            <div class="flex lg:hidden w-full max-w-xl bg-slate-900/80 border border-slate-800 rounded-xl p-3 text-xs justify-between items-center px-4">
+                <span class="text-yellow-400 font-bold">🐐 GOAT (106+)</span>
+                <span class="text-slate-600">|</span>
+                <span class="text-fuchsia-400 font-bold">🛡️ INVINCIBLE (101-105)</span>
+            </div>
+
+            <!-- Draft Pool Container -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl relative overflow-hidden flex flex-col max-w-xl w-full flex-1">
+                <div class="absolute inset-0 opacity-10 pointer-events-none" style="background-image: radial-gradient(circle at 50% 50%, #ffffff 2px, transparent 2px); background-size: 40px 40px;"></div>
+                
+                <div class="relative z-10 flex flex-col md:flex-row justify-between items-center mb-4 gap-4 border-b border-slate-800 pb-4">
+                    <h2 class="text-2xl font-bold text-blue-400 flex items-center gap-2">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        Draft Pool
+                    </h2>
+                    <div class="flex items-center gap-3">
+                        <button onclick="openHowTo()" aria-label="How it works" title="How it works" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 font-black transition-colors">?</button>
+                        <span id="online-room-badge" class="hidden text-[10px] font-bold px-2 py-1 rounded-lg border text-purple-300 bg-purple-950 border-purple-700 whitespace-nowrap"></span>
+                        <span id="skips-left-label" class="text-xs font-bold px-2 py-1 rounded-lg border text-slate-400 bg-slate-800 border-slate-700">Skips: 10</span>
+                        <button onclick="rollPlayers()" id="btn-roll" class="py-2 px-6 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold transition shadow-md">
+                            Roll Draft
+                        </button>
+                    </div>
+                </div>
+
+                <div class="relative z-10 flex items-center justify-center w-full p-2" id="draft-board-container">
+                    <div id="draft-board" class="w-full flex items-center justify-center min-h-[250px]"></div>
+                </div>
+            </div>
+
+            <!-- Right Side Warning: Minimum Balance -->
+            <div class="hidden lg:flex flex-col justify-center w-60 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl text-xs shadow-lg self-center">
+                <div class="text-[11px] font-black text-amber-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <span>⚠️</span> Budget Reserve
+                </div>
+                <p class="text-[11px] text-slate-300 leading-relaxed font-medium">
+                    Keep at least <span class="text-amber-400 font-bold">10M</span> per empty starting XI slot before bidding.
+                </p>
+            </div>
+
+            <!-- Mobile Balance Warning (shown only on smaller screens below panel) -->
+            <div class="flex lg:hidden w-full max-w-xl bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs items-center gap-2 text-amber-300">
+                <span class="text-base">⚠️</span>
+                <span>Keep at least <strong>10M</strong> per empty starting XI slot.</span>
+            </div>
+
+        </div>
+
+        <!-- Middle & Bottom Panels -->
+        <div class="grid grid-cols-1 gap-6 mb-6" id="managers-info"></div>
+        <div class="grid grid-cols-1 gap-8 lg:gap-12" id="pitches-container"></div>
+        
+        <div id="matchup-btn-container" class="hidden mt-10 mb-4 justify-center w-full">
+            <button onclick="prepareTournament()" class="py-4 px-12 bg-gradient-to-r from-yellow-400 to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 rounded-full font-black text-2xl text-slate-900 shadow-[0_0_30px_rgba(250,204,21,0.6)] transition-transform transform hover:scale-105 active:scale-95 animate-pulse">
+                SIMULATE MATCHES ⚔️
+            </button>
+        </div>
+    </div>
+
+    <!-- Screen 4a: League Season Simulation -->
+    <div id="screen-season" class="screen p-3 md:p-6 bg-slate-950 items-center justify-center relative">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 md:p-5 shadow-2xl w-full max-w-4xl flex flex-col max-h-[96vh]">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 border-b border-slate-800 pb-3 shrink-0">
+                <h2 class="text-lg md:text-2xl font-black text-emerald-400 uppercase tracking-wider">League · Season</h2>
+                <div class="flex items-center gap-3">
+                    <span id="season-md-label" class="text-sm font-bold text-slate-300 md-pulse">Matchday 0 / 38</span>
+                    <div class="w-28 h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div id="season-progress-bar" class="h-full bg-gradient-to-r from-emerald-500 to-blue-500 transition-all duration-300" style="width:0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Per-manager W-D-L icon strips + live chart -->
+            <div id="season-wdl-strips" class="space-y-2 mb-3 shrink-0"></div>
+
+            <div class="relative w-full bg-slate-950/80 border border-slate-700 rounded-xl overflow-hidden" style="height:min(42vh,320px)">
+                <canvas id="season-chart" class="w-full h-full block"></canvas>
+            </div>
+
+            <div id="season-legend" class="flex flex-wrap gap-3 justify-center mt-3 text-xs font-bold shrink-0"></div>
+            <p class="text-center text-[11px] text-slate-500 mt-2 shrink-0">Lines = league position over 38 matchdays · icons = W / D / L each game</p>
+            <div id="season-next-wrap" class="hidden justify-center mt-4 shrink-0">
+                <button onclick="showSeasonResults()" class="py-3 px-10 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded-full font-black text-lg shadow-lg transition">
+                    Next · Season Results →
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 4b: Season Results -->
+    <div id="screen-season-results" class="screen p-4 md:p-6 bg-slate-950 items-center justify-start relative overflow-y-auto">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-8 shadow-2xl w-full max-w-4xl my-4">
+            <h2 class="text-2xl md:text-3xl font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-blue-400 mb-2 uppercase tracking-wider">Season Complete</h2>
+            <p class="text-center text-slate-400 text-sm mb-6" id="season-champion-banner">—</p>
+
+            <div class="mb-8">
+                <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Final Standings</h3>
+                <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider grid grid-cols-12 gap-1 px-2 mb-1">
+                    <span class="col-span-1">#</span>
+                    <span class="col-span-4">Club</span>
+                    <span class="col-span-1 text-center">P</span>
+                    <span class="col-span-1 text-center">W</span>
+                    <span class="col-span-1 text-center">D</span>
+                    <span class="col-span-1 text-center">L</span>
+                    <span class="col-span-1 text-center">GD</span>
+                    <span class="col-span-2 text-right">Pts</span>
+                </div>
+                <div id="season-final-table" class="space-y-1"></div>
+            </div>
+
+            <!-- Full XI stats per manager -->
+            <div class="mb-8" id="season-xi-stats"></div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8" id="season-awards"></div>
+
+            <div class="flex justify-center">
+                <button id="btn-to-europe" onclick="startEuropeanCampaign()" class="py-3 px-10 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 rounded-full font-black text-lg text-white shadow-lg transition transform hover:scale-105">
+                    Continue to Europe 🏆
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 4c-2: European Bracket -->
+    <div id="screen-euro-bracket" class="screen p-4 md:p-6 bg-slate-950 items-center justify-center relative">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-6 shadow-2xl w-full max-w-5xl flex flex-col max-h-[95vh]">
+            <h2 class="text-xl md:text-2xl font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 mb-1 uppercase tracking-wider">European Bracket</h2>
+            <p class="text-center text-slate-400 text-xs mb-4" id="euro-bracket-sub">&mdash;</p>
+            <div id="euro-bracket-scroll" class="flex-1 overflow-y-auto custom-scrollbar pr-1 min-h-[220px]">
+                <div id="euro-bracket-stage"></div>
+            </div>
+            <div class="flex justify-center gap-3 mt-4 shrink-0">
+                <button id="btn-bracket-next" onclick="euroBracketNextMatch()" class="hidden py-3 px-10 bg-green-500 hover:bg-green-400 text-slate-900 rounded-full font-black text-lg shadow-lg transition">
+                    Next Match ⚔️
+                </button>
+                <button id="btn-bracket-final" onclick="showFinalSummary()" class="hidden py-3 px-10 bg-yellow-500 hover:bg-yellow-400 text-slate-900 rounded-full font-black text-lg shadow-lg transition">
+                    Next · Final Summary →
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 4d: Final Summary -->
+    <div id="screen-final-summary" class="screen p-4 md:p-6 bg-slate-950 items-center justify-start relative overflow-y-auto">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-8 shadow-2xl w-full max-w-4xl my-4">
+            <h2 class="text-2xl md:text-3xl font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-amber-500 mb-2 uppercase tracking-wider">End of Season</h2>
+            <p class="text-center text-slate-400 text-sm mb-6" id="best-team-banner">—</p>
+            <div id="final-summary-cards" class="space-y-4 mb-8"></div>
+            <div class="flex justify-center">
+                <button onclick="showScreen('screen-main')" class="py-3 px-10 bg-slate-600 hover:bg-slate-500 rounded-full font-bold text-white shadow-lg transition">
+                    Back to Menu
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 4: H2H Bracket (kept for H2H mode) -->
+    <div id="screen-bracket" class="screen p-6 bg-slate-950 items-center justify-center relative">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl w-full max-w-2xl text-center">
+            <h2 class="text-3xl font-black text-blue-400 mb-6 uppercase tracking-widest" id="bracket-title">Tournament Bracket</h2>
+            <div id="bracket-queue" class="space-y-4 mb-8"></div>
+            <button onclick="startNextMatch()" id="btn-next-match" class="py-3 px-8 bg-green-500 hover:bg-green-400 text-slate-900 rounded-xl font-bold shadow-lg transition text-xl">
+                Play Next Match
+            </button>
+        </div>
+    </div>
+
+    <!-- Screen 4e: H2H Champion -->
+    <div id="screen-h2h-result" class="screen p-6 bg-slate-950 items-center justify-center relative">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl w-full max-w-xl text-center">
+            <div class="text-[11px] font-black tracking-[0.3em] text-yellow-400 uppercase mb-3">H2H Champion</div>
+            <h2 id="h2h-winner" class="text-4xl md:text-5xl font-black text-white mb-5 break-words">—</h2>
+            <div class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 mb-2">
+                <div id="h2h-team-1" class="text-right text-sm md:text-base font-bold text-blue-300 break-words leading-tight">—</div>
+                <div id="h2h-final-score" class="text-3xl md:text-4xl font-black text-white tabular-nums whitespace-nowrap">0 - 0</div>
+                <div id="h2h-team-2" class="text-left text-sm md:text-base font-bold text-red-300 break-words leading-tight">—</div>
+            </div>
+            <p id="h2h-score-note" class="text-sm text-slate-500 mb-8">—</p>
+            <div class="flex gap-3 justify-center flex-wrap">
+                <button onclick="h2hRematch()" class="py-3 px-8 bg-green-500 hover:bg-green-400 text-slate-900 rounded-xl font-bold shadow-lg transition">Rematch</button>
+                <button onclick="showScreen('screen-main')" class="py-3 px-8 bg-slate-600 hover:bg-slate-500 text-white rounded-xl font-bold shadow-lg transition">Main Menu</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 5: Match Simulation -->
+    <div id="screen-match" class="screen p-0 md:p-6 bg-slate-950 items-center justify-center relative overflow-hidden">
+        <canvas id="confetti-canvas" class="absolute inset-0 pointer-events-none z-30"></canvas>
+        <div class="bg-white border border-slate-300 md:rounded-2xl shadow-2xl w-full max-w-4xl z-10 flex flex-col h-[100dvh] md:h-[90vh] max-h-[900px] overflow-hidden relative">
+            
+            <div class="flex flex-col items-center pt-6 pb-4 border-b border-slate-200 bg-white shrink-0">
+                <div class="text-xs font-bold text-slate-400 tracking-widest uppercase mb-4" id="match-header-label">PREMIER LEAGUE | MATCHDAY 2</div>
+                <div class="flex justify-center items-center w-full px-4 md:px-12">
+                    <div class="text-center flex-1 flex flex-col items-center">
+                        <div class="w-16 h-16 rounded-full bg-blue-100 border-2 border-blue-500 flex items-center justify-center text-blue-600 font-black text-2xl shadow-sm mb-2" id="match-m1-avatar">M1</div>
+                        <h2 class="text-xl md:text-2xl font-bold text-slate-800 truncate px-2" id="match-m1-name">Manager 1</h2>
+                    </div>
+                    <div class="px-2 md:px-6 text-center shrink-0 flex flex-col items-center justify-center">
+                        <div class="text-5xl md:text-6xl font-black text-slate-900 tracking-widest flex items-center gap-2 md:gap-4 leading-none">
+                            <span id="match-score-1">0</span> 
+                            <span class="text-slate-300 font-normal">-</span> 
+                            <span id="match-score-2">0</span>
+                        </div>
+                        <div id="match-live-time" class="text-green-500 font-bold text-lg mt-2 tracking-widest">0'</div>
+                        <div id="match-speed-controls" class="mt-1 flex items-center justify-center gap-1">
+                            <span class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mr-1">Speed</span>
+                            <button id="speed-btn-1" onclick="setMatchSpeed(1)" class="speed-btn active" aria-pressed="true" title="Normal speed">1×</button>
+                            <button id="speed-btn-2" onclick="setMatchSpeed(2)" class="speed-btn" aria-pressed="false" title="Double speed">2×</button>
+                            <button id="speed-btn-instant" onclick="setMatchSpeed('instant')" class="speed-btn" aria-pressed="false" title="Resolve the match immediately">Instant</button>
+                        </div>
+                    </div>
+                    <div class="text-center flex-1 flex flex-col items-center">
+                        <div class="w-16 h-16 rounded-full bg-red-100 border-2 border-red-500 flex items-center justify-center text-red-600 font-black text-2xl shadow-sm mb-2" id="match-m2-avatar">M2</div>
+                        <h2 class="text-xl md:text-2xl font-bold text-slate-800 truncate px-2" id="match-m2-name">Manager 2</h2>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="match-content" class="flex-1 overflow-y-auto bg-white p-4 md:p-6 custom-scrollbar relative pb-12">
+                <div class="text-center text-xs font-bold text-slate-400 tracking-widest uppercase mb-6 bg-white z-20 relative inline-block px-4 left-1/2 -translate-x-1/2">GOAL TIMELINE</div>
+
+                <div id="pen-board" class="hidden mb-6 w-full max-w-md mx-auto bg-slate-900 border border-slate-700 rounded-xl px-4 py-3"></div>
+
+                <div class="timeline-container" id="match-timeline">
+                    <div class="timeline-center-line"></div>
+                </div>
+
+                <div id="match-stats-container" class="hidden mt-12 w-full max-w-2xl mx-auto border-t border-slate-200 pt-8 pb-4">
+                    <div class="text-center text-xs font-bold text-slate-400 tracking-widest uppercase mb-6" id="stats-title">MATCH STATS</div>
+                    <div class="space-y-4 px-4" id="match-stats-bars"></div>
+                </div>
+
+                <div id="match-actions" class="hidden mt-12 w-full flex flex-wrap gap-3 justify-center pb-8">
+                    <button onclick="toggleMatchRatings()" class="py-3 px-8 bg-slate-700 hover:bg-slate-600 text-white rounded-full font-bold shadow-lg transition text-lg tracking-wide border border-slate-500">Player Ratings</button>
+                    <button onclick="finishMatch()" class="py-3 px-12 bg-green-500 hover:bg-green-600 text-white rounded-full font-bold shadow-lg transition text-lg tracking-wide">Continue</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-slate-800 border border-slate-600 text-white px-6 py-3 rounded-xl shadow-2xl opacity-0 transition-opacity duration-300 pointer-events-none z-50">
+        <span id="toast-msg">Message</span>
+    </div>
+
+    <!-- Player Selection Modal -->
+    <div id="player-modal" class="fixed inset-0 bg-slate-950/80 hidden justify-center items-center z-50 opacity-0 transition-opacity duration-200">
+        <div id="player-modal-panel" class="bg-slate-800 border border-slate-600 p-6 rounded-2xl w-11/12 max-w-md shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-3 shrink-0">
+                <h3 class="text-xl font-bold text-white">Assign to <span id="modal-pos-name" class="text-green-400"></span></h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            </div>
+            <div id="modal-player-list" class="space-y-2 overflow-y-auto pr-2 custom-scrollbar flex-1"></div>
+        </div>
+    </div>
+
+    <!-- Pre-match Tactics Modal -->
+    <div id="tactics-modal" class="fixed inset-0 bg-slate-950/85 hidden justify-center items-center z-[60] opacity-0 transition-opacity duration-200">
+        <div id="tactics-panel" class="bg-slate-800 border border-slate-600 rounded-2xl w-11/12 max-w-md shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[90vh]">
+            <div class="p-5 border-b border-slate-700 shrink-0 flex justify-between items-start gap-3">
+                <div>
+                    <h3 class="text-xl font-black text-white">Match Plan</h3>
+                    <p id="tactics-matchup" class="text-xs text-slate-400 mt-1"></p>
+                </div>
+                <button onclick="closeTacticsModal()" aria-label="Close tactics" class="text-slate-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            </div>
+            <div class="p-5 space-y-5 overflow-y-auto custom-scrollbar flex-1">
+                <div>
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Mentality</div>
+                    <div id="mentality-options" class="grid grid-cols-3 gap-2"></div>
+                </div>
+                <div>
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Pressing</div>
+                    <div id="press-options" class="grid grid-cols-3 gap-2"></div>
+                </div>
+                <div id="tactics-summary" class="bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-300 space-y-1"></div>
+            </div>
+            <div class="p-4 border-t border-slate-700 shrink-0">
+                <button onclick="confirmTactics()" class="w-full py-3 bg-green-500 hover:bg-green-400 text-slate-900 rounded-xl font-black text-lg shadow transition">Kick Off</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Half-time Substitutions Modal (compact) -->
+    <div id="ht-modal" class="fixed inset-0 bg-slate-950/85 hidden justify-center items-center z-[60] opacity-0 transition-opacity duration-200">
+        <div id="ht-panel" class="bg-slate-800 border border-slate-600 rounded-xl w-[94%] max-w-lg shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[88vh]">
+            <div class="px-4 py-3 border-b border-slate-700 shrink-0 flex justify-between items-center gap-3">
+                <div class="min-w-0">
+                    <h3 class="text-lg font-black text-white leading-tight">Half Time</h3>
+                    <p id="ht-score" class="text-xs text-slate-400 truncate leading-tight"></p>
+                </div>
+                <div id="ht-subs-left" class="text-[11px] font-bold text-slate-400 shrink-0"></div>
+            </div>
+            <div class="px-4 py-3 overflow-y-auto custom-scrollbar flex-1 min-h-0">
+                <div id="ht-swap-preview" class="mb-2 min-h-[22px]"></div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="min-w-0">
+                        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">On the pitch</div>
+                        <div id="ht-lineup" class="space-y-1"></div>
+                    </div>
+                    <div class="min-w-0">
+                        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Bench</div>
+                        <div id="ht-bench" class="space-y-1"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="px-4 py-3 border-t border-slate-700 shrink-0">
+                <button onclick="startSecondHalfFromModal()" class="w-full py-3 bg-green-500 hover:bg-green-400 text-slate-900 rounded-lg font-black text-base shadow transition">Start Second Half</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Ratings Modal -->
+    <div id="ratings-modal" class="fixed inset-0 bg-slate-950/85 hidden justify-center items-center z-[60] opacity-0 transition-opacity duration-200">
+        <div id="ratings-panel" class="bg-slate-800 border border-slate-600 rounded-2xl w-11/12 max-w-2xl shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[90vh]">
+            <div class="p-4 border-b border-slate-700 shrink-0 flex justify-between items-center">
+                <h3 class="text-xl font-black text-white">Player Ratings</h3>
+                <button onclick="closeMatchRatings()" class="text-slate-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            </div>
+            <div id="ratings-body" class="p-4 overflow-y-auto custom-scrollbar flex-1"></div>
+        </div>
+    </div>
+
+    <!-- How It Works Guide -->
+    <div id="howto-modal" class="fixed inset-0 bg-slate-950/85 hidden justify-center items-center z-[70] opacity-0 transition-opacity duration-200 p-4">
+        <div id="howto-panel" role="dialog" aria-modal="true" aria-labelledby="howto-title" class="bg-slate-800 border border-slate-600 rounded-2xl w-full max-w-2xl shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[92vh]">
+            <div class="p-4 md:p-5 border-b border-slate-700 shrink-0 flex justify-between items-start gap-3">
+                <div>
+                    <h3 id="howto-title" class="text-xl md:text-2xl font-black text-white">How it works</h3>
+                    <p class="text-xs text-slate-400 mt-1">Roll → bid → reserve → place XI → chemistry → lock. One screen, no surprises.</p>
+                </div>
+                <button onclick="closeHowTo()" aria-label="Close guide" class="text-slate-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            </div>
+            <div class="p-4 md:p-5 overflow-y-auto custom-scrollbar flex-1">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-blue-400 mb-1">1 · Roll</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Press <strong>Roll Draft</strong> to reveal one player. The reel shows nationality and position; the card shows the full profile and rating.</p>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-amber-400 mb-1">2 · Bid</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">A <strong>live auction</strong>: bidders take turns in rotating order, each with a <strong>20-second shot clock</strong>. On your turn you raise (+1, +5, or a masked custom amount you commit), pass, or — if you already hold the top bid — buy. Only the current bidder sees controls, so nobody can read a rival's number before it is public.</p>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-sky-400 mb-1">3 · Online rooms</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Choose a mode, then <strong>Create Room</strong> for a code or <strong>Join Room</strong> with one. The host sets squad size and ghost difficulty, rolls the draft and runs every match; each joined manager bids, picks their XI and sets tactics on their own device.</p>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-orange-400 mb-1">4 · Reserve</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Keep at least <strong>10M</strong> for every remaining starting-XI slot. The tracker shows your maximum bid and the amount already reserved.</p>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-emerald-400 mb-1">5 · Place XI</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Drag players onto the pitch, or <strong>click a player then click a slot</strong> to swap. The + button assigns from your squad; Auto-fill picks the best fit.</p>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-fuchsia-400 mb-1">6 · Chemistry</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Players in the starting XI who share a <strong>nation</strong> link up: 2 linked = +1 each, 3+ linked = +3 each. Linked players get a glowing ring on the pitch.</p>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-yellow-400 mb-1">7 · Lock</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Place all 11 starters, then <strong>Confirm Formation</strong>. Choose a shape (4-4-2, 4-3-3, 3-5-2), set tactics and kick off. Match speed can be changed live: 1×, 2× or Instant.</p>
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-500 mt-3 text-center">Tip: press <kbd class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-200 font-bold">Esc</kbd> to close any modal.</p>
+            </div>
+            <div class="p-4 border-t border-slate-700 shrink-0">
+                <button onclick="closeHowTo()" class="w-full py-3 bg-green-500 hover:bg-green-400 text-slate-900 rounded-xl font-black text-lg shadow transition">Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load the split modules -->
+    <script src="players.js"></script>
+    <script src="config.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="game.js"></script>
+    <script src="net.js"></script>
+    <script src="online.js"></script>
+    <script src="ui.js"></script>
+    <script src="draft.js"></script>
+    <script src="auction.js"></script>
+    <script src="match-engine.js"></script>
+    <script src="season.js"></script>
+</body>
+</html>

@@ -1,0 +1,1194 @@
+// --- Core Helpers ---
+function showScreen(screenId) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(screenId).classList.add('active');
+    // While an online game is running the host's screen is everyone's screen.
+    if (Net.online && Net.isHost && Online.gameLive) Net.publishScreen(screenId);
+}
+
+let toastTimer = null;
+function showToast(msg) {
+    const toast = document.getElementById('toast');
+    document.getElementById('toast-msg').innerText = msg;
+    toast.classList.remove('opacity-0'); toast.classList.add('opacity-100');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); }, 3500);
+}
+
+/** Animate a drafted player from the draft panel into the winning manager's squad card. */
+function playDraftAcquisitionAnimation(player, winnerId, onComplete) {
+    // Mobile-proof scroll lock: pin body with position:fixed (works on iOS where overflow:hidden fails)
+    let scrollLocked = false;
+    let lockedScrollY = 0;
+    const blockTouch = (e) => { e.preventDefault(); };
+
+    const lockScroll = () => {
+        if (scrollLocked) return;
+        scrollLocked = true;
+        lockedScrollY = window.scrollY || window.pageYOffset || 0;
+        document.body.style.position = 'fixed';
+        document.body.style.top = `-${lockedScrollY}px`;
+        document.body.style.left = '0';
+        document.body.style.right = '0';
+        document.body.style.width = '100%';
+        document.body.style.overflow = 'hidden';
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.touchAction = 'none';
+        document.addEventListener('touchmove', blockTouch, { passive: false, capture: true });
+        window.addEventListener('touchmove', blockTouch, { passive: false, capture: true });
+    };
+
+    const unlockScroll = () => {
+        if (!scrollLocked) return;
+        scrollLocked = false;
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.left = '';
+        document.body.style.right = '';
+        document.body.style.width = '';
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+        document.body.style.touchAction = '';
+        document.removeEventListener('touchmove', blockTouch, { capture: true });
+        window.removeEventListener('touchmove', blockTouch, { capture: true });
+        window.scrollTo(0, lockedScrollY);
+    };
+
+    const finish = () => {
+        unlockScroll();
+        gameState.draftAnimating = false;
+        updateRollButton();
+        if (typeof onComplete === 'function') onComplete();
+    };
+
+    const board = document.getElementById('draft-board');
+    const panel = board && board.firstElementChild;
+    const target = document.getElementById(`manager-card-${winnerId}`);
+    if (!panel || !target || !player) return finish();
+
+    if (gameState.draftAnimating || document.getElementById('draft-fly-overlay') || document.querySelector('.draft-sold-stamp')) {
+        if (typeof onComplete === 'function') onComplete();
+        return;
+    }
+
+    gameState.draftAnimating = true;
+    updateRollButton();
+
+    // Instant scroll into view, then lock (so measurements can't drift)
+    try { target.scrollIntoView({ behavior: 'instant', block: 'nearest' }); } catch (_) {
+        try { target.scrollIntoView({ block: 'nearest' }); } catch (__) {}
+    }
+    lockScroll();
+
+    requestAnimationFrame(() => {
+        const src = panel.getBoundingClientRect();
+        const dst = target.getBoundingClientRect();
+        if (src.width < 4 || dst.width < 4) return finish();
+
+        const x0 = src.left + src.width / 2;
+        const y0 = src.bottom - 6;
+        const x1 = dst.left + dst.width / 2;
+        const y1 = dst.top + Math.min(40, dst.height * 0.3);
+
+        const drop = Math.max(36, Math.min(90, (y1 - y0) * 0.5));
+        const cornerY = y0 + drop;
+        const dx = x1 - x0;
+        const useL = Math.abs(dx) > 36;
+
+        let pathD;
+        if (useL) {
+            // Smooth L using cubics only (arcs break dash-length animation in some browsers)
+            const midY = cornerY;
+            pathD = [
+                `M ${x0} ${y0}`,
+                `C ${x0} ${y0 + (midY - y0) * 0.55}, ${x0} ${midY}, ${x0 + (x1 - x0) * 0.15} ${midY}`,
+                `C ${x0 + (x1 - x0) * 0.55} ${midY}, ${x1} ${midY}, ${x1} ${midY + (y1 - midY) * 0.35}`,
+                `L ${x1} ${y1}`
+            ].join(' ');
+        } else {
+            pathD = `M ${x0} ${y0} C ${x0} ${(y0 + y1) / 2}, ${x1} ${(y0 + y1) / 2}, ${x1} ${y1}`;
+        }
+
+        // Stamp as absolute child of the panel so it stays glued even if anything moves
+        const prevPos = panel.style.position;
+        if (!prevPos || prevPos === 'static') panel.style.position = 'relative';
+        const stamp = document.createElement('div');
+        stamp.className = 'draft-sold-stamp draft-sold-stamp-inpanel';
+        stamp.textContent = 'SOLD';
+        stamp.style.left = '50%';
+        stamp.style.top = '50%';
+        panel.appendChild(stamp);
+        void stamp.offsetWidth;
+        stamp.classList.add('stamped');
+
+        panel.classList.add('draft-panel-sold-react');
+
+        const overlay = document.createElement('div');
+        overlay.id = 'draft-fly-overlay';
+
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        // Explicit pixel size + viewBox so path coords (viewport px) map 1:1 on every path shape
+        svg.setAttribute('width', String(vw));
+        svg.setAttribute('height', String(vh));
+        svg.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
+        svg.style.cssText = 'position:absolute;left:0;top:0;overflow:visible;pointer-events:none;';
+
+        // Hidden full path — only used for length / point sampling
+        const guide = document.createElementNS(svgNS, 'path');
+        guide.setAttribute('d', pathD);
+        guide.setAttribute('fill', 'none');
+        guide.setAttribute('stroke', 'none');
+        svg.appendChild(guide);
+
+        // Visible trail that grows by rewriting `d` each frame (reliable on turns)
+        const trail = document.createElementNS(svgNS, 'path');
+        trail.setAttribute('fill', 'none');
+        trail.setAttribute('stroke', '#34d399');
+        trail.setAttribute('stroke-width', '3');
+        trail.setAttribute('stroke-linecap', 'round');
+        trail.setAttribute('stroke-linejoin', 'round');
+        trail.setAttribute('class', 'draft-fly-arrow-line');
+        trail.style.opacity = '1';
+        trail.style.filter = 'drop-shadow(0 0 6px rgba(52, 211, 153, 0.55))';
+        svg.appendChild(trail);
+
+        const head = document.createElementNS(svgNS, 'polygon');
+        head.setAttribute('class', 'draft-fly-arrow-head');
+        head.style.opacity = '0';
+        head.style.fill = '#34d399';
+        head.style.filter = 'drop-shadow(0 0 6px rgba(52, 211, 153, 0.55))';
+        svg.appendChild(head);
+        overlay.appendChild(svg);
+
+        const circle = document.createElement('div');
+        circle.className = 'draft-fly-circle';
+        circle.style.left = `${x0}px`;
+        circle.style.top = `${y0}px`;
+        overlay.appendChild(circle);
+        document.body.appendChild(overlay);
+
+        let pathLen = 0;
+        try { pathLen = guide.getTotalLength() || 0; } catch (_) { pathLen = 0; }
+        if (pathLen < 8) {
+            // Fallback length estimate
+            pathLen = Math.hypot(x1 - x0, y1 - y0) + Math.abs(dx) * 0.3 + 40;
+        }
+
+        const cleanup = () => {
+            if (stamp.parentNode) stamp.remove();
+            if (overlay.parentNode) overlay.remove();
+            panel.classList.remove('draft-panel-sold-react');
+            if (prevPos !== undefined) panel.style.position = prevPos;
+            target.classList.remove('draft-target-receive');
+            finish();
+        };
+
+        const pointAt = (t) => {
+            try {
+                const pt = guide.getPointAtLength(pathLen * t);
+                return { x: pt.x, y: pt.y };
+            } catch (_) {
+                return { x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t };
+            }
+        };
+
+        // Build visible trail up to progress e (0..1) by sampling the guide path
+        const buildTrail = (e) => {
+            const n = Math.max(2, Math.ceil(e * 48));
+            let d = '';
+            for (let i = 0; i <= n; i++) {
+                const p = pointAt(e * (i / n));
+                d += (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
+            }
+            trail.setAttribute('d', d);
+        };
+
+        setTimeout(() => {
+            circle.style.transition = 'opacity 0.2s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
+            circle.style.opacity = '1';
+            circle.style.transform = 'translate(-50%, -50%) scale(1)';
+        }, 220);
+
+        setTimeout(() => {
+            const duration = 1100;
+            const t0 = performance.now();
+
+            function ease(t) {
+                return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            }
+
+            function frame(now) {
+                const t = Math.min(1, (now - t0) / duration);
+                const e = ease(t);
+                const p = pointAt(e);
+
+                buildTrail(e);
+
+                // Point arrowhead along the last segment of the path
+                if (e > 0.05) {
+                    const prev = pointAt(Math.max(0, e - 0.04));
+                    const ang = Math.atan2(p.y - prev.y, p.x - prev.x);
+                    const hl = 12;
+                    head.setAttribute('points', [
+                        `${p.x},${p.y}`,
+                        `${p.x - hl * Math.cos(ang - 0.4)},${p.y - hl * Math.sin(ang - 0.4)}`,
+                        `${p.x - hl * Math.cos(ang + 0.4)},${p.y - hl * Math.sin(ang + 0.4)}`
+                    ].join(' '));
+                    head.style.opacity = e > 0.75 ? String(Math.min(1, (e - 0.75) / 0.25)) : '0';
+                }
+
+                circle.style.left = `${p.x}px`;
+                circle.style.top = `${p.y}px`;
+                const s = 1 + Math.sin(e * Math.PI) * 0.1;
+                circle.style.transform = `translate(-50%, -50%) scale(${s})`;
+
+                if (t < 1) {
+                    requestAnimationFrame(frame);
+                } else {
+                    buildTrail(1);
+                    head.style.opacity = '1';
+                    target.classList.add('draft-target-receive');
+                    circle.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+                    circle.style.opacity = '0';
+                    circle.style.transform = 'translate(-50%, -50%) scale(0.35)';
+                    trail.style.transition = 'opacity 0.85s ease';
+                    head.style.transition = 'opacity 0.85s ease';
+                    trail.style.opacity = '0';
+                    head.style.opacity = '0';
+                    stamp.style.transition = 'opacity 0.35s ease';
+                    stamp.style.opacity = '0';
+                    setTimeout(cleanup, 900);
+                }
+            }
+            requestAnimationFrame(frame);
+        }, 320);
+    });
+}
+
+
+/** SOLD-style stamp when a draft player is skipped / discarded (no fly animation). */
+function playDraftDiscardAnimation(onComplete) {
+    const finish = () => {
+        if (typeof onComplete === 'function') onComplete();
+    };
+
+    const board = document.getElementById('draft-board');
+    const panel = board && board.firstElementChild;
+    if (!panel) return finish();
+
+    // Avoid stacking on top of an in-flight SOLD animation
+    if (document.querySelector('.draft-sold-stamp') || document.getElementById('draft-fly-overlay')) {
+        return finish();
+    }
+
+    gameState.draftAnimating = true; // block Roll until the stamp is gone, otherwise a new roll gets wiped
+    updateRollButton();
+
+    const prevPos = panel.style.position;
+    if (!prevPos || prevPos === 'static') panel.style.position = 'relative';
+
+    const stamp = document.createElement('div');
+    stamp.className = 'draft-sold-stamp draft-sold-stamp-inpanel draft-discard-stamp';
+    stamp.textContent = 'DISCARDED';
+    stamp.style.left = '50%';
+    stamp.style.top = '50%';
+    panel.appendChild(stamp);
+    void stamp.offsetWidth;
+    stamp.classList.add('stamped');
+
+    panel.classList.add('draft-panel-sold-react');
+
+    // Hold the stamp briefly, then fade and clean up
+    setTimeout(() => {
+        stamp.style.transition = 'opacity 0.4s ease';
+        stamp.style.opacity = '0';
+        setTimeout(() => {
+            if (stamp.parentNode) stamp.remove();
+            panel.classList.remove('draft-panel-sold-react');
+            if (prevPos !== undefined) panel.style.position = prevPos;
+            gameState.draftAnimating = false;
+            updateRollButton();
+            finish();
+        }, 420);
+    }, 720);
+}
+
+
+
+function formatBalance(amount) { return amount >= 1000 ? `€${(amount / 1000).toFixed(2)}B` : `€${amount}M`; }
+function formatPositions(player) {
+    if (!player) return "";
+    const main = typeof player.mainPos === "string" ? player.mainPos : "";
+    const subs = Array.isArray(player.subPos) ? player.subPos.filter(p => typeof p === "string") : [];
+    return [main, ...subs].filter(Boolean).join("/");
+}
+function escapeHTML(str) { return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+function shortName(name) {
+    const ex = ["De Bruyne", "van Dijk", "ter Stegen", "Di Maria", "Mac Allister", "Neymar Jr", "Vinicius Jr", "B. Silva", "Alexander-Arnold"];
+    for (let e of ex) if (name.includes(e)) return e;
+    const parts = name.trim().split(/\s+/);
+    return parts[parts.length - 1];
+}
+
+function renderDOMForManagers() {
+    const infoContainer = document.getElementById('managers-info');
+    const pitchContainer = document.getElementById('pitches-container');
+    infoContainer.innerHTML = ''; pitchContainer.innerHTML = '';
+
+    const n = gameState.managers.length;
+    let gridCls, pitchCls;
+    if (n === 1) {
+        gridCls = 'grid grid-cols-1 max-w-xl mx-auto gap-6 mb-6 w-full';
+        pitchCls = 'grid grid-cols-1 max-w-md mx-auto gap-8 w-full';
+    } else if (n === 2) {
+        gridCls = 'grid grid-cols-1 md:grid-cols-2 gap-6 mb-6';
+        pitchCls = 'grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12';
+    } else if (n === 3) {
+        gridCls = 'grid grid-cols-1 md:grid-cols-3 gap-4 mb-6';
+        pitchCls = 'grid grid-cols-1 md:grid-cols-3 gap-6';
+    } else {
+        gridCls = 'grid grid-cols-1 md:grid-cols-2 gap-6 mb-6';
+        pitchCls = 'grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12';
+    }
+    infoContainer.className = gridCls;
+    pitchContainer.className = pitchCls;
+    
+    const colors = ['blue', 'red', 'purple', 'orange'];
+
+    gameState.managers.forEach((m, idx) => {
+        const c = colors[idx % colors.length];
+        
+        infoContainer.innerHTML += `
+            <div id="manager-card-${m.id}" class="bg-slate-800 rounded-xl p-4 border-l-4 border-${c}-500 flex flex-col">
+                <div class="flex justify-between items-center mb-1">
+                    <h3 class="text-xl font-bold text-white">${escapeHTML(m.name)}</h3>
+                    <div class="text-right">
+                        <div class="text-sm font-bold text-yellow-400">Team OVR: <span id="m${m.id}-ovr-live">0</span></div>
+                        <div class="text-xs font-bold text-slate-400"><span id="m${m.id}-count">0</span>/${MAX_SQUAD_SIZE} Squad</div>
+                    </div>
+                </div>
+                <p class="text-green-400 font-mono text-xl mb-3" id="m${m.id}-balance">€1.00B</p>
+                <div id="m${m.id}-budget" class="mb-3 hidden">
+                    <div class="flex justify-between items-center text-[10px] font-bold mb-1 gap-2">
+                        <span class="text-slate-400 truncate">Max bid <span id="m${m.id}-maxbid" class="text-emerald-400 font-mono">€0M</span></span>
+                        <span class="text-slate-400 truncate">Reserved <span id="m${m.id}-reserve" class="text-amber-400 font-mono">€0M</span></span>
+                    </div>
+                    <div class="w-full h-1.5 rounded-full overflow-hidden bg-slate-700 flex" title="Green = available to bid · Amber = reserved to fill remaining starting XI slots">
+                        <div id="m${m.id}-budget-bar" class="h-full bg-emerald-500 transition-all duration-300" style="width:100%"></div>
+                        <div id="m${m.id}-reserve-bar" class="h-full bg-amber-500 transition-all duration-300" style="width:0%"></div>
+                    </div>
+                </div>
+                <div id="m${m.id}-chem" class="mb-3 text-[10px] leading-tight text-slate-400"></div>
+                <div class="bg-slate-900 rounded border border-slate-700 flex flex-col h-32 text-sm">
+                    <div class="p-2 overflow-y-auto custom-scrollbar flex-1"><ul id="m${m.id}-squad" class="space-y-1 text-slate-300"></ul></div>
+                </div>
+            </div>`;
+
+        pitchContainer.innerHTML += `
+            <div class="flex flex-col items-center">
+                <h3 class="text-lg font-bold mb-1 text-${c}-400">${escapeHTML(m.name)} Formation</h3>
+                <div class="flex items-center justify-center gap-1.5 mb-1.5" id="formation-presets-${m.id}">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1">Shape</span>
+                    <button type="button" data-shape="4-4-2" onclick="setFormationPreset(${m.id}, '4-4-2')" class="shape-btn">4-4-2</button>
+                    <button type="button" data-shape="4-3-3" onclick="setFormationPreset(${m.id}, '4-3-3')" class="shape-btn">4-3-3</button>
+                    <button type="button" data-shape="3-5-2" onclick="setFormationPreset(${m.id}, '3-5-2')" class="shape-btn">3-5-2</button>
+                </div>
+                <p id="m${m.id}-formation-hint" class="text-[10px] text-slate-400 text-center mb-2 max-w-[400px] leading-tight"></p>
+                <div class="pitch" id="pitch-${m.id}">
+                    <div class="center-circle"></div><div class="center-dot"></div>
+                    <div class="penalty-box-top"></div><div class="six-yard-top"></div>
+                    <div class="penalty-box-bottom"></div><div class="six-yard-bottom"></div>
+                </div>
+                <div class="w-full mt-4 max-w-[400px]">
+                    <h4 class="text-sm font-bold text-slate-400 text-center mb-1">Bench (${BENCH_SLOTS} slots)</h4>
+                    <div id="bench-${m.id}" class="bench-area"></div>
+                </div>
+                <button id="lock-btn-${m.id}" onclick="lockFormation(${m.id})" class="mt-4 w-full max-w-[400px] py-3 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold border border-slate-500 transition shadow-lg text-white">Confirm Formation</button>
+                <button onclick="autoFillLineup(${m.id})" id="autofill-btn-${m.id}" class="mt-2 w-full max-w-[400px] py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold border border-blue-400 transition shadow-lg text-white">Auto-fill Best XI</button>
+            </div>`;
+    });
+
+    gameState.managers.forEach(m => { updateDashboard(m.id); initPitch(m.id); });
+
+    // Remote clubs are read-only here: their manager edits the XI on their own device.
+    if (Net.online) {
+        gameState.managers.forEach(m => {
+            if (Net.canControl(m.id)) return;
+            const shapes = document.getElementById(`formation-presets-${m.id}`);
+            if (shapes) shapes.querySelectorAll('button').forEach(b => { b.disabled = true; b.classList.add('opacity-40', 'cursor-not-allowed'); });
+            [`lock-btn-${m.id}`, `autofill-btn-${m.id}`].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) { btn.disabled = true; btn.classList.add('opacity-40', 'cursor-not-allowed'); }
+            });
+            const hint = document.getElementById(`m${m.id}-formation-hint`);
+            if (hint) hint.innerHTML = '<span class="text-slate-500 italic">This manager sets their own XI on their device.</span>';
+        });
+    }
+}
+
+function updateDashboard(id) {
+    const m = gameState.managers.find(x => x.id === id);
+    if(!m) return;
+    
+    const balEl = document.getElementById(`m${id}-balance`);
+    const isSolo = gameState.managers.length === 1;
+    
+    if (balEl) {
+        if (isSolo) {
+            balEl.classList.add('hidden');
+        } else {
+            balEl.innerText = formatBalance(m.balance);
+            balEl.classList.remove('hidden');
+        }
+    }
+    
+    document.getElementById(`m${id}-count`).innerText = m.squad.length;
+    const list = document.getElementById(`m${id}-squad`);
+    list.innerHTML = m.squad.length === 0 ? '<li class="text-slate-500 italic">Empty.</li>' : m.squad.map(p => `
+        <li class="flex justify-between items-center bg-slate-800 p-1.5 rounded mb-1 border border-slate-700 text-xs">
+            <div class="flex items-center min-w-0 w-full overflow-hidden">
+                <span class="font-bold text-slate-400 text-[10px] min-w-[55px] max-w-[65px] shrink-0 border-r border-slate-600 mr-2 truncate text-left pr-1">${escapeHTML(formatPositions(p))}</span>
+                <span class="text-slate-100 font-semibold truncate flex-1">${escapeHTML(p.name)}</span>
+            </div>
+            ${!isSolo ? `<span class="text-green-400 font-bold ml-2 shrink-0">€${p.price}M</span>` : ''}
+        </li>`).join('');
+
+    updateBudgetTracker(id);
+    updateChemistryDisplay(id);
+}
+
+function updateBudgetTracker(id) {
+    const m = gameState.managers.find(x => x.id === id);
+    const wrap = document.getElementById(`m${id}-budget`);
+    if (!m || !wrap) return;
+
+    if (gameState.managers.length === 1) {
+        wrap.classList.add('hidden');
+        return;
+    }
+
+    const reserve = getManagerReserve(m);
+    const maxBid = getManagerMaxBid(m);
+    const total = Math.max(1, m.balance);
+    const spendPct = Math.max(0, Math.min(100, (maxBid / total) * 100));
+    const reservePct = Math.max(0, Math.min(100, (reserve / total) * 100));
+
+    wrap.classList.remove('hidden');
+    const maxEl = document.getElementById(`m${id}-maxbid`);
+    const reserveEl = document.getElementById(`m${id}-reserve`);
+    const spendBar = document.getElementById(`m${id}-budget-bar`);
+    const reserveBar = document.getElementById(`m${id}-reserve-bar`);
+    if (maxEl) maxEl.innerText = `€${maxBid}M`;
+    if (reserveEl) reserveEl.innerText = `€${reserve}M`;
+    if (spendBar) spendBar.style.width = `${spendPct}%`;
+    if (reserveBar) reserveBar.style.width = `${reservePct}%`;
+}
+
+function updateChemistryDisplay(id) {
+    const m = gameState.managers.find(x => x.id === id);
+    const el = document.getElementById(`m${id}-chem`);
+    if (!m || !el) return;
+
+    const chem = getFormationChemistry(m);
+    if (!chem.players.length) {
+        el.innerHTML = '<span class="text-slate-500">🧪 Chemistry: place players to build nation links.</span>';
+        return;
+    }
+
+    const groups = getChemistryGroups(chem.players);
+    const detail = groups.length
+        ? groups.map(group => `<span class="text-slate-300">${escapeHTML(group.nation)} ${group.count}×</span> <span class="text-emerald-400 font-bold">+${group.bonus}</span>`).join(' · ')
+        : '<span class="text-slate-500">No nation links in the XI.</span>';
+
+    el.innerHTML = `
+        <div class="font-bold text-slate-400">🧪 Chemistry</div>
+        <div class="mt-0.5 truncate" title="${escapeHTML(groups.map(group => `${group.nation} ${group.count}× +${group.bonus}`).join(' · '))}">${detail}</div>`;
+}
+
+function updateTeamOVR(id) {
+    const m = gameState.managers.find(x => x.id === id);
+    if (!m) return;
+    const { total, count } = sumFormationOVR(m);
+    const ovr = count === 0 ? 0 : Math.round(total / count);
+    document.getElementById(`m${id}-ovr-live`).innerText = String(ovr);
+}
+
+// --- Core Rules & OVR ---
+function buildFormationFromPreset(key) {
+    const preset = getFormationPreset(key);
+    return preset.slots.map((slot, index) => ({
+        id: index,
+        x: slot.x,
+        y: slot.y,
+        isGK: !!slot.isGK,
+        pos: slot.pos || (slot.isGK ? 'GK' : calcPosition(slot.x, slot.y, false)),
+        assignedPlayerId: null
+    }));
+}
+
+function initPitch(id) {
+    const m = gameState.managers.find(x => x.id === id);
+    m.formationPreset = m.formationPreset || '4-4-2';
+    m.formation = buildFormationFromPreset(m.formationPreset);
+    renderPitchNodes(id); renderBenchNodes(id);
+    updateFormationPresetUI(id);
+}
+
+function getFormationFit(manager) {
+    if (!manager || !Array.isArray(manager.formation)) return 0;
+    let total = 0, count = 0;
+    manager.formation.forEach(node => {
+        const player = manager.squad.find(p => p.id === node.assignedPlayerId);
+        if (!player || !player.rating) return;
+        total += getDynamicOVR(player, node.pos) / player.rating;
+        count++;
+    });
+    return count ? Math.round((total / count) * 100) : 0;
+}
+
+function updateFormationPresetUI(managerId) {
+    const m = gameState.managers.find(x => x.id === managerId);
+    if (!m) return;
+    const wrap = document.getElementById(`formation-presets-${managerId}`);
+    if (wrap) {
+        wrap.querySelectorAll('.shape-btn').forEach(btn => {
+            const active = btn.dataset.shape === m.formationPreset;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+    }
+    const hint = document.getElementById(`m${managerId}-formation-hint`);
+    if (!hint) return;
+    const preset = getFormationPreset(m.formationPreset);
+    const placed = m.formation.filter(node => node.assignedPlayerId).length;
+    if (!placed) {
+        hint.innerHTML = `${escapeHTML(preset.hint)} <span class="text-slate-500">Place players to see fit.</span>`;
+        return;
+    }
+    const groups = getChemistryGroups(getFormationChemistry(m).players);
+    const fit = getFormationFit(m);
+    hint.innerHTML = `${escapeHTML(preset.hint)} <span class="text-slate-200 font-bold">Fit ${fit}% · ${groups.length} chemistry link group${groups.length === 1 ? '' : 's'}.</span>`;
+}
+
+function setFormationPreset(managerId, key) {
+    const m = gameState.managers.find(x => x.id === managerId);
+    if (!m || !FORMATION_PRESETS[key]) return;
+    if (!Net.canControl(managerId)) return showToast('That is another manager’s club.');
+    if (m.formationLocked) return showToast('Formation is locked.');
+    const draft = gameState.activeDraft;
+    if (draft && (draft.state === 'spinning' || (draft.state === 'revealed' && !draft.player.sold))) {
+        return showToast('Resolve the current player before changing shape.');
+    }
+
+    clearLineupSelection();
+    const currentPlayers = m.formation
+        .map(node => m.squad.find(p => p.id === node.assignedPlayerId))
+        .filter(Boolean);
+    m.formationPreset = key;
+    m.formation = buildFormationFromPreset(key);
+    const assignment = optimalLineupAssignment(m.formation, currentPlayers);
+    m.formation.forEach((node, index) => {
+        node.assignedPlayerId = assignment[index] ? assignment[index].id : null;
+    });
+
+    renderPitchNodes(m.id);
+    renderBenchNodes(m.id);
+    updateTeamOVR(m.id);
+    updateDashboard(m.id);
+    updateFormationPresetUI(m.id);
+    Net.publishOwn(m.id);
+
+    const fit = getFormationFit(m);
+    const groups = getChemistryGroups(getFormationChemistry(m).players);
+    showToast(`${key} applied — ${fit}% fit, ${groups.length} chemistry link group${groups.length === 1 ? '' : 's'}.`);
+}
+
+
+// OVR shown for a player in a formation slot, including the chemistry bonus.
+function formationOvrInfo(player, node, chemBonus) {
+    const baseOVR = getDynamicOVR(player, node.pos);
+    const dynamicOVR = baseOVR + chemBonus;
+    const isFit = baseOVR >= player.rating - 1;
+    if (isFit && player.rank) {
+        return { label: player.displayOVR, color: player.rank === 'GOAT' ? 'text-amber-300' : 'text-fuchsia-300' };
+    }
+    const color = dynamicOVR < player.rating * 0.7 ? 'text-red-400' : (dynamicOVR < player.rating ? 'text-yellow-400' : 'text-green-400');
+    return { label: String(Math.min(100, dynamicOVR)), color };
+}
+
+function renderPitchNodes(managerId) {
+    const pitch = document.getElementById(`pitch-${managerId}`);
+    pitch.querySelectorAll('.pitch-node').forEach(n => n.remove());
+    const m = gameState.managers.find(x => x.id === managerId);
+    const chemistry = getFormationChemistry(m);
+    // In an online room a rival's pitch is a preview: no handles, no dragging.
+    const editable = !m.formationLocked && Net.canControl(managerId);
+    
+    m.formation.forEach(nodeData => {
+        const el = document.createElement('div'); el.className = 'pitch-node';
+        el.style.left = `${nodeData.x}%`; el.style.top = `${nodeData.y}%`;
+        el.dataset.managerId = String(m.id);
+        el.dataset.nodeId = String(nodeData.id);
+        el.dataset.slotType = 'pitch';
+        const player = m.squad.find(p => p.id === nodeData.assignedPlayerId);
+        const color = nodeData.isGK ? 'bg-yellow-500' : 'bg-slate-700';
+
+        const chemBonus = player ? (chemistry.bonuses.get(player.id) || 0) : 0;
+        const ovrInfo = player ? formationOvrInfo(player, nodeData, chemBonus) : null;
+        const chemRing = chemBonus >= CHEMISTRY.STRONG_BONUS ? 'chem-strong' : (chemBonus > 0 ? 'chem-warm' : '');
+
+    el.innerHTML = `
+        <div class="relative">
+            <div class="pitch-node-circle ${color} ${chemRing} ${m.formationLocked ? 'locked' : ''} ${nodeData.isGK ? 'gk-fixed' : ''}">
+                <span class="node-pos font-bold">${nodeData.pos}</span>
+            </div>
+            ${editable && !player ? `<button onclick="openPlayerSelect(${m.id}, ${nodeData.id}, 'pitch')" class="absolute -top-2 -right-2 bg-green-500 text-slate-900 rounded-full w-5 h-5 flex items-center justify-center font-black shadow z-20">+</button>` : ''}
+            ${editable && player ? `<button onclick="removePlayerFromNode(${m.id}, ${nodeData.id}, 'pitch')" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center font-black shadow z-20">&times;</button>` : ''}
+        </div>
+        ${player ? `<div class="pitch-node-label flex flex-col items-center leading-none pb-1" title="${escapeHTML(player.team || 'Player')}${chemBonus ? ` · Chemistry +${chemBonus}` : ''}"><span class="text-white text-[10px] truncate w-14 text-center mt-0.5">${escapeHTML(shortName(player.name))}</span><span class="${ovrInfo.color}">${ovrInfo.label}${chemBonus ? ` <span class="text-emerald-300 text-[9px] font-black">+${chemBonus}</span>` : ''}</span></div>` : ''}
+    `;
+        pitch.appendChild(el);
+        if (!nodeData.isGK && editable) makeDraggable(el, pitch, m, nodeData);
+    });
+
+    updateFormationPresetUI(managerId);
+}
+
+function renderBenchNodes(managerId) {
+    const container = document.getElementById(`bench-${managerId}`);
+    container.innerHTML = '';
+    const m = gameState.managers.find(x => x.id === managerId);
+    const editable = !m.formationLocked && Net.canControl(managerId);
+    m.bench.forEach(nodeData => {
+        const el = document.createElement('div'); el.className = 'bench-node';
+        el.dataset.managerId = String(m.id);
+        el.dataset.nodeId = String(nodeData.id);
+        el.dataset.slotType = 'bench';
+        const player = m.squad.find(p => p.id === nodeData.assignedPlayerId);
+        el.innerHTML = `
+            <div class="bench-circle ${player ? 'filled' : ''}">
+                ${player ? `<span class="truncate px-1 text-[10px] text-white">${escapeHTML(shortName(player.name))}</span>` : `<span class="text-[10px]">SUB</span>`}
+            </div>
+            ${editable && !player ? `<button onclick="openPlayerSelect(${m.id}, '${nodeData.id}', 'bench')" class="absolute -top-2 -right-2 bg-slate-500 text-white rounded-full w-5 h-5 flex items-center justify-center font-black shadow z-20">+</button>` : ''}
+            ${editable && player ? `<button onclick="removePlayerFromNode(${m.id}, '${nodeData.id}', 'bench')" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center font-black shadow z-20">&times;</button>` : ''}
+            ${player ? `<div class="pitch-node-label mt-1 text-[9px]"><span class="${player.rank ? 'text-amber-300' : 'text-green-400'}">${player.displayOVR ?? player.rating}</span></div>` : ''}
+        `;
+        container.appendChild(el);
+        if (player && editable) makeBenchDraggable(el, m, nodeData);
+    });
+}
+
+function refreshLineup(managerId) {
+    clearLineupSelection();
+    renderPitchNodes(managerId);
+    renderBenchNodes(managerId);
+    updateTeamOVR(managerId);
+    updateDashboard(managerId);
+    Net.publishOwn(managerId);
+}
+
+function swapLineupSlots(managerId, pitchNodeId, benchNodeId) {
+    const m = gameState.managers.find(x => x.id === managerId);
+    if (!m || m.formationLocked || !Net.canControl(managerId)) return false;
+    const pitchNode = m.formation.find(node => String(node.id) === String(pitchNodeId));
+    const benchNode = m.bench.find(node => String(node.id) === String(benchNodeId));
+    if (!pitchNode || !benchNode) return false;
+
+    const pitchPlayerId = pitchNode.assignedPlayerId || null;
+    const benchPlayerId = benchNode.assignedPlayerId || null;
+    if (!pitchPlayerId && !benchPlayerId) return false;
+
+    pitchNode.assignedPlayerId = benchPlayerId;
+    benchNode.assignedPlayerId = pitchPlayerId;
+    refreshLineup(m.id);
+    return true;
+}
+
+function swapPitchSlots(managerId, firstNodeId, secondNodeId) {
+    const m = gameState.managers.find(x => x.id === managerId);
+    if (!m || m.formationLocked || !Net.canControl(managerId)) return false;
+    const first = m.formation.find(node => String(node.id) === String(firstNodeId));
+    const second = m.formation.find(node => String(node.id) === String(secondNodeId));
+    if (!first || !second || first === second) return false;
+    if (!first.assignedPlayerId && !second.assignedPlayerId) return false;
+
+    const temp = first.assignedPlayerId || null;
+    first.assignedPlayerId = second.assignedPlayerId || null;
+    second.assignedPlayerId = temp;
+    refreshLineup(m.id);
+    return true;
+}
+
+function swapBenchSlots(managerId, firstNodeId, secondNodeId) {
+    const m = gameState.managers.find(x => x.id === managerId);
+    if (!m || m.formationLocked || !Net.canControl(managerId)) return false;
+    const first = m.bench.find(node => String(node.id) === String(firstNodeId));
+    const second = m.bench.find(node => String(node.id) === String(secondNodeId));
+    if (!first || !second || first === second) return false;
+    if (!first.assignedPlayerId && !second.assignedPlayerId) return false;
+
+    const temp = first.assignedPlayerId || null;
+    first.assignedPlayerId = second.assignedPlayerId || null;
+    second.assignedPlayerId = temp;
+    refreshLineup(m.id);
+    return true;
+}
+
+// Click-to-swap: click a filled player, then click another slot. Clicking the same
+// player again cancels. Empty slots can still be assigned with the + button.
+let lineupSelection = null;
+
+function lineupNodeFor(manager, type, nodeId) {
+    if (!manager) return null;
+    return type === 'pitch'
+        ? manager.formation.find(node => String(node.id) === String(nodeId))
+        : manager.bench.find(node => String(node.id) === String(nodeId));
+}
+
+function clearLineupSelection() {
+    lineupSelection = null;
+    document.querySelectorAll('.pitch-node.selected, .bench-node.selected')
+        .forEach(node => node.classList.remove('selected'));
+}
+
+function highlightLineupSelection() {
+    document.querySelectorAll('.pitch-node.selected, .bench-node.selected')
+        .forEach(node => node.classList.remove('selected'));
+    if (!lineupSelection) return;
+    const container = document.getElementById(
+        lineupSelection.type === 'pitch' ? `pitch-${lineupSelection.managerId}` : `bench-${lineupSelection.managerId}`
+    );
+    if (!container) return;
+    const target = [...container.querySelectorAll('[data-node-id]')]
+        .find(node => String(node.dataset.nodeId) === String(lineupSelection.nodeId));
+    if (target) target.classList.add('selected');
+}
+
+function handleLineupClick(manager, type, nodeId) {
+    if (!manager || manager.formationLocked) return;
+    const node = lineupNodeFor(manager, type, nodeId);
+    if (!node) return;
+
+    if (!lineupSelection || lineupSelection.managerId !== manager.id) {
+        if (!node.assignedPlayerId) {
+            openPlayerSelect(manager.id, nodeId, type);
+            return;
+        }
+        lineupSelection = { managerId: manager.id, type, nodeId };
+        highlightLineupSelection();
+        return;
+    }
+
+    const sameNode = lineupSelection.type === type && String(lineupSelection.nodeId) === String(nodeId);
+    if (sameNode) {
+        clearLineupSelection();
+        return;
+    }
+
+    if (lineupSelection.type === 'pitch' && type === 'pitch') {
+        swapPitchSlots(manager.id, lineupSelection.nodeId, nodeId);
+    } else if (lineupSelection.type === 'bench' && type === 'bench') {
+        swapBenchSlots(manager.id, lineupSelection.nodeId, nodeId);
+    } else {
+        swapLineupSlots(manager.id, lineupSelection.type === 'pitch' ? lineupSelection.nodeId : nodeId,
+            lineupSelection.type === 'bench' ? lineupSelection.nodeId : nodeId);
+    }
+    clearLineupSelection();
+}
+
+
+function clearDropTargets() {
+    document.querySelectorAll('.pitch-node.drop-target, .bench-node.drop-target')
+        .forEach(node => node.classList.remove('drop-target'));
+}
+
+function dropTargetAt(clientX, clientY, managerId, selector) {
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    const under = document.elementFromPoint(clientX, clientY);
+    const target = under && under.closest(selector);
+    if (!target || String(target.dataset.managerId) !== String(managerId)) return null;
+    return target;
+}
+
+function makeBenchDraggable(element, m, nodeData) {
+    let isDragging = false, moved = false, startX = 0, startY = 0, lastPoint = null;
+    const getPoint = e => e.touches ? e.touches[0] : e;
+
+    const doDrag = e => {
+        if (!isDragging) return;
+        if (e.cancelable) e.preventDefault();
+        const point = getPoint(e);
+        if (!point) return;
+        if (Math.abs(point.clientX - startX) + Math.abs(point.clientY - startY) > 6) moved = true;
+        lastPoint = point;
+        if (!moved) return;
+        clearDropTargets();
+        const target = dropTargetAt(point.clientX, point.clientY, m.id, `.pitch-node[data-manager-id="${m.id}"]`);
+        if (target) target.classList.add('drop-target');
+    };
+
+    const endDrag = e => {
+        if (!isDragging) return;
+        isDragging = false;
+        document.removeEventListener('mousemove', doDrag);
+        document.removeEventListener('mouseup', endDrag);
+        document.removeEventListener('touchmove', doDrag);
+        document.removeEventListener('touchend', endDrag);
+        element.style.pointerEvents = '';
+        element.classList.remove('dragging');
+        clearDropTargets();
+
+        if (!moved) {
+            handleLineupClick(m, 'bench', nodeData.id);
+            return;
+        }
+
+        const point = lastPoint || getPoint(e);
+        const target = point && dropTargetAt(point.clientX, point.clientY, m.id, `.pitch-node[data-manager-id="${m.id}"]`);
+        if (target) swapLineupSlots(m.id, target.dataset.nodeId, nodeData.id);
+    };
+
+    const startDrag = e => {
+        if (m.formationLocked || !nodeData.assignedPlayerId || e.target.closest('button')) return;
+        if (e.type === 'touchstart' && e.cancelable) e.preventDefault();
+        const point = getPoint(e);
+        if (!point) return;
+        startX = point.clientX; startY = point.clientY; lastPoint = point; moved = false;
+        isDragging = true;
+        element.style.pointerEvents = 'none';
+        element.classList.add('dragging');
+        document.addEventListener('mousemove', doDrag);
+        document.addEventListener('mouseup', endDrag);
+        document.addEventListener('touchmove', doDrag, { passive: false });
+        document.addEventListener('touchend', endDrag);
+    };
+
+    element.onmousedown = startDrag;
+    element.ontouchstart = startDrag;
+}
+
+function makeDraggable(element, container, m, nodeData) {
+    let isDragging = false, moved = false, startX, startY, lastPoint = null;
+    const getPoint = e => e.touches ? e.touches[0] : e;
+    
+    const doDrag = e => {
+        if (!isDragging) return;
+        if (e.cancelable) e.preventDefault();
+        const pt = getPoint(e);
+        if (!pt) return;
+        if (Math.abs(pt.clientX - startX) + Math.abs(pt.clientY - startY) > 6) moved = true;
+        lastPoint = pt;
+        if (!moved) return;
+
+        const rect = container.getBoundingClientRect();
+        let px = (nodeData.x/100)*rect.width + (pt.clientX - startX);
+        let py = (nodeData.y/100)*rect.height + (pt.clientY - startY);
+        px = Math.max(20, Math.min(px, rect.width - 20));
+        py = Math.max(20, Math.min(py, rect.height - 20));
+        element.style.left = `${(px/rect.width)*100}%`;
+        element.style.top = `${(py/rect.height)*100}%`;
+        
+        const posSpan = element.querySelector('.node-pos');
+        if (posSpan) posSpan.innerText = calcPosition((px/rect.width)*100, (py/rect.height)*100, false);
+
+        clearDropTargets();
+        const benchTarget = dropTargetAt(pt.clientX, pt.clientY, m.id, `.bench-node[data-manager-id="${m.id}"]`);
+        if (benchTarget) benchTarget.classList.add('drop-target');
+    };
+    
+    const endDrag = () => {
+        if (!isDragging) return;
+        isDragging = false;
+        document.removeEventListener('mousemove', doDrag); document.removeEventListener('mouseup', endDrag);
+        document.removeEventListener('touchmove', doDrag); document.removeEventListener('touchend', endDrag);
+        element.style.zIndex = 10;
+        element.style.pointerEvents = '';
+        clearDropTargets();
+
+        if (!moved) {
+            handleLineupClick(m, 'pitch', nodeData.id);
+            return;
+        }
+
+        if (lastPoint) {
+            const benchTarget = dropTargetAt(lastPoint.clientX, lastPoint.clientY, m.id, `.bench-node[data-manager-id="${m.id}"]`);
+            if (benchTarget) {
+                swapLineupSlots(m.id, nodeData.id, benchTarget.dataset.nodeId);
+                return;
+            }
+        }
+        
+        nodeData.x = parseFloat(element.style.left);
+        nodeData.y = parseFloat(element.style.top);
+        nodeData.pos = calcPosition(nodeData.x, nodeData.y, false);
+        renderPitchNodes(m.id); updateTeamOVR(m.id);
+        Net.publishOwn(m.id);
+    };
+
+    const startDrag = e => {
+        if (m.formationLocked || e.target.closest('button')) return;
+        if (e.type === 'touchstart' && e.cancelable) e.preventDefault();
+        const pt = getPoint(e); if (!pt) return;
+        startX = pt.clientX; startY = pt.clientY; lastPoint = pt; moved = false;
+        isDragging = true; element.style.zIndex = 100;
+        element.style.pointerEvents = 'none';
+        document.addEventListener('mousemove', doDrag); document.addEventListener('mouseup', endDrag);
+        document.addEventListener('touchmove', doDrag, { passive: false }); document.addEventListener('touchend', endDrag);
+    };
+    element.onmousedown = startDrag; element.ontouchstart = startDrag;
+}
+
+// --- Modals ---
+let modalState = { managerId: null, nodeId: null, type: null, timer: null };
+function openPlayerSelect(mId, nId, type) {
+    clearLineupSelection();
+    clearTimeout(modalState.timer);
+    modalState = { managerId: mId, nodeId: nId, type, timer: null };
+    const m = gameState.managers.find(x => x.id === mId);
+    const node = type === 'pitch' ? m.formation.find(n => n.id === nId) : m.bench.find(n => n.id === nId);
+    document.getElementById('modal-pos-name').innerText = node.pos;
+    const assigned = [...m.formation, ...m.bench].map(n => n.assignedPlayerId).filter(id => id);
+    const avail = m.squad.filter(p => !assigned.includes(p.id));
+    
+    const list = document.getElementById('modal-player-list');
+    list.innerHTML = avail.length ? avail.map(p => {
+        const dOvr = getDynamicOVR(p, node.pos);
+        const isFit = node.pos === 'SUB' || dOvr >= p.rating - 1;
+        let label, color;
+        if (isFit && p.rank) {
+            label = p.displayOVR;
+            color = p.rank === 'GOAT' ? 'text-amber-300' : 'text-fuchsia-300';
+        } else {
+            label = String(Math.min(100, dOvr));
+            color = node.pos === 'SUB' ? 'text-green-400' : (dOvr < p.rating * 0.7 ? 'text-red-400' : (dOvr < p.rating ? 'text-yellow-400' : 'text-green-400'));
+        }
+        return `
+            <div class="flex justify-between items-center bg-slate-700 p-3 rounded-lg border border-slate-600">
+                <div>
+                    <div class="font-bold text-white text-lg">${escapeHTML(p.name)}</div>
+                    <div class="text-xs text-slate-300">Pos: ${escapeHTML(formatPositions(p))}${p.team ? ' · ' + escapeHTML(p.team) : ''}</div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="text-right"><div class="text-[10px] text-slate-400 uppercase">OVR</div><div class="font-black ${color} text-xl leading-none">${label}</div></div>
+                    <button onclick="assignPlayer(${p.id})" class="px-4 py-2 bg-blue-500 hover:bg-blue-400 text-white rounded-lg font-bold shadow">Select</button>
+                </div>
+            </div>`;
+    }).join('') : '<p class="text-slate-400 italic text-center py-4">No available players.</p>';
+
+    const modal = document.getElementById('player-modal'), panel = document.getElementById('player-modal-panel');
+    modal.classList.remove('hidden'); modal.classList.add('flex');
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        panel.classList.remove('scale-95');
+        const first = panel.querySelector('#modal-player-list button') || panel.querySelector('button');
+        if (first) first.focus();
+    }, 10);
+}
+function closeModal() {
+    const modal = document.getElementById('player-modal'), panel = document.getElementById('player-modal-panel');
+    modal.classList.add('opacity-0'); panel.classList.add('scale-95');
+    clearTimeout(modalState.timer);
+    modalState.timer = setTimeout(() => { modal.classList.remove('flex'); modal.classList.add('hidden'); }, 200);
+}
+function assignPlayer(pId) {
+    const m = gameState.managers.find(x => x.id === modalState.managerId);
+    if (!m || !Net.canControl(m.id)) return;
+    const node = modalState.type === 'pitch' ? m.formation.find(n => n.id === modalState.nodeId) : m.bench.find(n => n.id === modalState.nodeId);
+    node.assignedPlayerId = pId;
+    modalState.type === 'pitch' ? renderPitchNodes(m.id) : renderBenchNodes(m.id);
+    updateTeamOVR(m.id); updateDashboard(m.id); closeModal();
+    Net.publishOwn(m.id);
+}
+function removePlayerFromNode(mId, nId, type) {
+    const m = gameState.managers.find(x => x.id === mId);
+    if (!m || !Net.canControl(mId)) return;
+    const node = type === 'pitch' ? m.formation.find(n => n.id === nId) : m.bench.find(n => n.id === nId);
+    node.assignedPlayerId = null;
+    type === 'pitch' ? renderPitchNodes(mId) : renderBenchNodes(mId);
+    updateTeamOVR(mId); updateDashboard(mId);
+    Net.publishOwn(mId);
+}
+function optimalLineupAssignment(nodes, squad) {
+    const slotCount = nodes.length;
+    const assignment = new Array(slotCount).fill(null);
+    if (!slotCount || !squad.length) return assignment;
+
+    const isGK = p => p.mainPos === 'GK' || (Array.isArray(p.subPos) && p.subPos.includes('GK'));
+    const canFill = (p, node) => node.isGK ? isGK(p) : p.mainPos !== 'GK';
+    const values = squad.map(p => nodes.map(node => {
+        if (!canFill(p, node)) return -Infinity;
+        return getDynamicOVR(p, node.pos) + (p.mainPos === node.pos ? 0.01 : 0);
+    }));
+
+    const full = 1 << slotCount;
+    const layers = Array.from({ length: squad.length + 1 }, () => new Float64Array(full).fill(-Infinity));
+    const picked = Array.from({ length: squad.length + 1 }, () => new Int8Array(full).fill(-1));
+    layers[0][0] = 0;
+
+    for (let i = 0; i < squad.length; i++) {
+        const prev = layers[i], next = layers[i + 1], pick = picked[i + 1], vals = values[i];
+        for (let mask = 0; mask < full; mask++) {
+            const score = prev[mask];
+            if (score === -Infinity) continue;
+            if (score > next[mask]) { next[mask] = score; pick[mask] = -1; }
+            for (let j = 0; j < slotCount; j++) {
+                const gain = vals[j];
+                if (gain === -Infinity || (mask & (1 << j))) continue;
+                const nextMask = mask | (1 << j);
+                if (score + gain > next[nextMask]) { next[nextMask] = score + gain; pick[nextMask] = j; }
+            }
+        }
+    }
+
+    let bestMask = 0, bestScore = -Infinity;
+    for (let mask = 0; mask < full; mask++) {
+        if (layers[squad.length][mask] > bestScore) { bestScore = layers[squad.length][mask]; bestMask = mask; }
+    }
+
+    let mask = bestMask;
+    for (let i = squad.length; i > 0; i--) {
+        const slot = picked[i][mask];
+        if (slot >= 0) { assignment[slot] = squad[i - 1]; mask ^= 1 << slot; }
+    }
+    return assignment;
+}
+
+function autoFillLineup(mId) {
+    const m = gameState.managers.find(x => x.id === mId);
+    if (!m || m.formationLocked) return;
+    if (!Net.canControl(mId)) return showToast('Only that manager can set their own XI.');
+    const draft = gameState.activeDraft;
+    if (draft && (draft.state === 'spinning' || (draft.state === 'revealed' && !draft.player.sold))) {
+        return showToast('Resolve the current player before auto-filling.');
+    }
+    if (!m.squad.length) return showToast('No players drafted yet.');
+
+    const used = new Set();
+    const assignment = optimalLineupAssignment(m.formation, m.squad);
+    let filled = 0;
+    m.formation.forEach((node, index) => {
+        const player = assignment[index];
+        node.assignedPlayerId = player ? player.id : null;
+        if (player) { used.add(player.id); filled++; }
+    });
+
+    m.bench.forEach(slot => {
+        let best = null, bestRating = -Infinity;
+        m.squad.forEach(p => {
+            if (used.has(p.id)) return;
+            if (p.rating > bestRating) { bestRating = p.rating; best = p; }
+        });
+        slot.assignedPlayerId = best ? best.id : null;
+        if (best) used.add(best.id);
+    });
+
+    renderPitchNodes(mId); renderBenchNodes(mId); updateTeamOVR(mId); updateDashboard(mId);
+    Net.publishOwn(mId);
+    const gkNode = m.formation.find(n => n.isGK);
+    const noGkNote = filled > 0 && gkNode && !gkNode.assignedPlayerId ? ' No GK in squad — goalkeeper slot left open.' : '';
+    showToast(`${filled}/${STARTERS} starters placed for ${m.name}.${noGkNote}`);
+}
+
+let pendingTacticsManagerId = null;
+
+function openTacticsModalForManager(mId) {
+    pendingTacticsManagerId = mId;
+    const m = gameState.managers.find(x => x.id === mId);
+    document.getElementById('tactics-matchup').innerText = `${m.name} Tactics`;
+    matchTactics = { mentality: 'balanced', press: 'mid', ...(m.tactics || {}) };
+    renderTacticsOptions();
+    const modal = document.getElementById('tactics-modal'), panel = document.getElementById('tactics-panel');
+    modal.classList.remove('hidden'); modal.classList.add('flex');
+    setTimeout(() => { modal.classList.remove('opacity-0'); panel.classList.remove('scale-95'); }, 10);
+}
+
+function lockFormation(mId) {
+    const m = gameState.managers.find(x => x.id === mId);
+    if (!m || m.formationLocked) return;
+    if (!Net.canControl(mId)) return showToast('Only that manager can lock their own club.');
+    const draft = gameState.activeDraft;
+    if (draft && (draft.state === 'spinning' || (draft.state === 'revealed' && !draft.player.sold))) {
+        return showToast('Resolve the current player before locking formations.');
+    }
+    if (m.formation.filter(n => n.assignedPlayerId).length < STARTERS) return showToast(`Place ${STARTERS} players first!`);
+    
+    const gkNode = m.formation.find(n => n.isGK), gk = m.squad.find(p => p.id === gkNode.assignedPlayerId);
+    if (gk && m.gkWarned !== gk.id && getDynamicOVR(gk, 'GK') < gk.rating) {
+        m.gkWarned = gk.id; return showToast(`${gk.name} isn't a GK. Press Confirm again to lock anyway.`);
+    }
+    openTacticsModalForManager(mId);
+}
+
+function checkMatchReady() {
+    const wrap = document.getElementById('matchup-btn-container');
+    if (!wrap) return;
+    const allLocked = gameState.managers.every(m => m.formationLocked);
+    if (!Net.ownsGame()) {
+        // Running the matches is the host's button; guests just wait for it.
+        wrap.classList.add('hidden');
+        wrap.classList.remove('flex');
+        if (allLocked) Online.note('All clubs locked — waiting for the host to start the matches');
+        return;
+    }
+    if (allLocked) {
+        wrap.classList.remove('hidden');
+        wrap.classList.add('flex');
+    }
+}
+
+// --- How it works guide ---
+let howToReturnFocus = null;
+
+function openHowTo() {
+    const modal = document.getElementById('howto-modal'), panel = document.getElementById('howto-panel');
+    if (!modal || !panel) return;
+    if (modal.classList.contains('hidden')) howToReturnFocus = document.activeElement;
+    modal.classList.remove('hidden'); modal.classList.add('flex');
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        panel.classList.remove('scale-95');
+        const closeBtn = panel.querySelector('button[aria-label="Close guide"]');
+        if (closeBtn) closeBtn.focus();
+    }, 10);
+}
+
+function closeHowTo() {
+    const modal = document.getElementById('howto-modal'), panel = document.getElementById('howto-panel');
+    if (!modal || !panel) return;
+    modal.classList.add('opacity-0'); panel.classList.add('scale-95');
+    const restore = howToReturnFocus;
+    howToReturnFocus = null;
+    setTimeout(() => {
+        modal.classList.remove('flex');
+        modal.classList.add('hidden');
+        if (restore && typeof restore.focus === 'function') restore.focus();
+    }, 200);
+}
+
+function closeTacticsModal() {
+    const modal = document.getElementById('tactics-modal'), panel = document.getElementById('tactics-panel');
+    if (!modal || modal.classList.contains('hidden')) return;
+    modal.classList.add('opacity-0');
+    if (panel) panel.classList.add('scale-95');
+    setTimeout(() => { modal.classList.remove('flex'); modal.classList.add('hidden'); }, 200);
+    pendingTacticsManagerId = null;
+}
+
+// Escape closes the topmost dismissible modal.
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const isOpen = id => {
+        const modal = document.getElementById(id);
+        return modal && !modal.classList.contains('hidden') && modal.classList.contains('flex');
+    };
+    if (isOpen('howto-modal')) { closeHowTo(); return; }
+    if (isOpen('player-modal')) { closeModal(); return; }
+    if (isOpen('tactics-modal')) { closeTacticsModal(); return; }
+    if (isOpen('ratings-modal')) { closeMatchRatings(); return; }
+    // The half-time window has no cancel state: Escape deliberately does nothing.
+});
+
