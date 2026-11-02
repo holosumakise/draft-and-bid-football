@@ -72,11 +72,7 @@ function chooseOnline() {
     const nameInput = document.getElementById('online-manager-name');
     if (nameInput && stored) nameInput.value = stored;
     const note = document.getElementById('online-hub-mode');
-    if (note) {
-        note.innerText = pendingMode === 'H2H'
-            ? 'H2H · you plus one other manager'
-            : 'Tournament · the host sets squad size and ghost difficulty';
-    }
+    if (note) note.innerText = pendingMode;
     setHubStatus(Net.config() ? '' : 'No Firebase project found — put your web config in firebase-config.js.');
     showScreen('screen-online-hub');
 }

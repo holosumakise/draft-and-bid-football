@@ -111,7 +111,22 @@ function openAuctionTurn() {
             a.turnIdx = a.order.indexOf(lastMan);
             a.turnEndsAt = Date.now() + SHOT_CLOCK_MS;
             bidEntry = '';
-            Net.publishAuction();
+            Net.publishAuctionNow();
+            renderDraftBoard();
+            return;
+        }
+
+        // The high bidder can only stop being eligible by being marked out for
+        // affordability, so the last club still in takes the player at their own
+        // best bid; that keeps BUY's price honest for the club that is pressing it.
+        if (active.length === 1) {
+            const lastMan = active[0];
+            a.highBidderId = lastMan;
+            a.highBid = a.topBidOf[lastMan] || MIN_BID;
+            a.turnIdx = a.order.indexOf(lastMan);
+            a.turnEndsAt = Date.now() + SHOT_CLOCK_MS;
+            bidEntry = '';
+            Net.publishAuctionNow();
             renderDraftBoard();
             return;
         }
@@ -120,7 +135,7 @@ function openAuctionTurn() {
         if (!a.out[bidderId] && auctionCanAffordToRaise(bidderId)) {
             a.turnEndsAt = Date.now() + SHOT_CLOCK_MS;
             bidEntry = '';
-            Net.publishAuction();
+            Net.publishAuctionNow();
             renderDraftBoard();
             return;
         }
@@ -261,11 +276,18 @@ function finishAuctionSold() {
 
     gameState.auction = null;
     bidEntry = '';
-    Net.publishAuction();
+    // Publish the settled card now, not when the local fly animation ends: the
+    // host's tab is often backgrounded while it waits on a guest, and guests use
+    // player.sold to know they may lock their XI again.
+    Net.publishAuctionNow();
+    Net.publishDraftNow();
     Net.publishManagers(winner.id);
     playDraftAcquisitionAnimation(draft.player, winner.id, () => {
         updateDashboard(winner.id);
         gameState.activeDraft = null;
+        // Remote devices must see the card go away, or their "resolve the
+        // current player first" guard blocks them from ever locking an XI.
+        Net.publishDraftNow();
         renderDraftBoard();
         updateRollButton();
     });
@@ -290,10 +312,12 @@ function finishAuctionUnsold(player, free) {
 
     gameState.auction = null;
     bidEntry = '';
-    Net.publishAuction();
+    Net.publishAuctionNow();
+    Net.publishDraftNow();
 
     const finish = () => {
         gameState.activeDraft = null;
+        Net.publishDraftNow();
         renderDraftBoard();
         updateRollButton();
     };
@@ -377,7 +401,19 @@ function renderAuctionPanel() {
             <div class="flex-1 flex flex-col items-center justify-center gap-2 text-center py-4">
                 <span class="text-sm font-black text-white">${escapeHTML(bidder ? bidder.name : 'Next bidder')} is up</span>
                 <span class="text-xs text-slate-400">${holdsHighBid ? `Decides whether to raise or buy at €${a.highBid}M.` : `Must reach €${floor}M to stay in.`}</span>
-                <span class="text-[11px] text-slate-500">Your bid is public, so pass the device when it is your turn.</span>
+            </div>`;
+    }
+
+    // Everyone else has passed, so there is nothing left to bid against: the only
+    // real choice is taking the player at the price already on the table.
+    const standing = auctionActiveIds();
+    if (standing.length === 1 && standing[0] === bidderId) {
+        return `
+            ${header}
+            <div class="flex-1 flex flex-col justify-center gap-2">
+                <div class="text-[11px] font-bold text-slate-300">Only club left · €${a.highBid}M is the price</div>
+                <button type="button" onclick="auctionControl('hammer')"
+                   class="w-full py-3 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-base shadow">BUY AT €${a.highBid}M</button>
             </div>`;
     }
 
@@ -400,7 +436,7 @@ function renderAuctionPanel() {
                 ? `<button type="button" onclick="auctionControl('hammer')"
                        class="w-full py-2.5 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-sm shadow">BUY AT €${a.highBid}M</button>`
                 : `<button type="button" id="btn-bid-raise" onclick="auctionControl('raise', bidEntryValue())" ${canRaise && bidEntry ? '' : 'disabled'}
-                       class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-900 rounded-lg font-black text-sm shadow">RAISE TO MY AMOUNT</button>
+                       class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-900 rounded-lg font-black text-sm shadow">RAISE</button>
                    <button type="button" onclick="auctionControl('pass')" ${(a.mustBuy && canRaise) ? 'disabled' : ''}
                        class="w-full py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm">PASS</button>`}
             ${!canRaise ? '<p class="text-[10px] font-bold text-red-400">You cannot cover the current bid.</p>' : ''}

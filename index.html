@@ -441,25 +441,6 @@
             box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18);
         }
 
-        /* Formation preset buttons */
-        .shape-btn {
-            padding: 2px 7px;
-            border-radius: 9999px;
-            border: 1px solid #475569;
-            background: #1e293b;
-            color: #cbd5e1;
-            font-size: 10px;
-            font-weight: 900;
-            line-height: 16px;
-            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-        }
-        .shape-btn:hover { border-color: #60a5fa; color: #bfdbfe; }
-        .shape-btn.active {
-            background: #3b82f6;
-            border-color: #60a5fa;
-            color: #ffffff;
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
-        }
     </style>
 </head>
 <body class="font-sans antialiased text-slate-100">
@@ -525,8 +506,7 @@
     <!-- Screen 2a: Choose local or online -->
     <div id="screen-play-choose" class="screen justify-center items-center p-6">
         <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700 text-center">
-            <h2 class="text-2xl md:text-3xl font-bold mb-2 text-green-400" id="choose-title">Choose how to play</h2>
-            <p class="text-sm text-slate-400 mb-6">Local runs entirely on this device. Online shares one room code through Firebase — the host runs the draft and every match, and each manager plays their own club on their own device.</p>
+            <h2 class="text-2xl md:text-3xl font-bold mb-6 text-green-400" id="choose-title">Choose how to play</h2>
             <div class="flex flex-col gap-3">
                 <button onclick="chooseLocal()" class="w-full py-4 px-6 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-lg shadow-lg transition text-white">
                     Play Locally
@@ -587,7 +567,6 @@
                 </div>
                 <button onclick="copyRoomCode()" class="shrink-0 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-bold border border-slate-500 transition">Copy</button>
             </div>
-            <p class="text-[11px] text-slate-500 -mt-3 mb-5">Send this code to the other manager(s). They pick the same mode and join here.</p>
 
             <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Managers</div>
             <div id="lobby-roster" class="space-y-2 mb-5"></div>
@@ -609,14 +588,12 @@
                         <button type="button" data-diff="hard" onclick="selectLobbyDifficulty('hard')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400">Hard</button>
                         <button type="button" data-diff="legend" onclick="selectLobbyDifficulty('legend')" class="diff-btn py-2 rounded-lg text-sm font-bold border transition border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400">Legend</button>
                     </div>
-                    <p id="lobby-difficulty-desc" class="text-[11px] text-slate-500 mt-2"></p>
                 </div>
                 <button onclick="startRoom()" id="btn-start-room" class="w-full py-3 px-4 bg-green-500 hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-black text-slate-900 transition-colors shadow-lg">Start Game</button>
             </div>
 
             <div id="lobby-guest-note" class="border-t border-slate-700 pt-4 text-center">
-                <p class="text-sm text-slate-300 font-bold">Waiting for the host to start</p>
-                <p class="text-[11px] text-slate-500 mt-1">The host picks the squad size and difficulty. You play your own club from the first roll.</p>
+                <p class="text-sm text-slate-300 font-bold">Waiting for host...</p>
             </div>
 
             <button onclick="leaveRoomFromLobby()" class="w-full mt-4 py-2.5 px-4 bg-slate-600 hover:bg-slate-500 rounded-xl font-bold transition-colors text-sm">Leave Room</button>
@@ -660,7 +637,6 @@
                     </h2>
                     <div class="flex items-center gap-3">
                         <button onclick="openHowTo()" aria-label="How it works" title="How it works" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 font-black transition-colors">?</button>
-                        <span id="online-room-badge" class="hidden text-[10px] font-bold px-2 py-1 rounded-lg border text-purple-300 bg-purple-950 border-purple-700 whitespace-nowrap"></span>
                         <span id="skips-left-label" class="text-xs font-bold px-2 py-1 rounded-lg border text-slate-400 bg-slate-800 border-slate-700">Skips: 10</span>
                         <button onclick="rollPlayers()" id="btn-roll" class="py-2 px-6 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold transition shadow-md">
                             Roll Draft
@@ -723,7 +699,6 @@
             </div>
 
             <div id="season-legend" class="flex flex-wrap gap-3 justify-center mt-3 text-xs font-bold shrink-0"></div>
-            <p class="text-center text-[11px] text-slate-500 mt-2 shrink-0">Lines = league position over 38 matchdays · icons = W / D / L each game</p>
             <div id="season-next-wrap" class="hidden justify-center mt-4 shrink-0">
                 <button onclick="showSeasonResults()" class="py-3 px-10 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded-full font-black text-lg shadow-lg transition">
                     Next · Season Results →
@@ -822,7 +797,7 @@
             </div>
             <p id="h2h-score-note" class="text-sm text-slate-500 mb-8">—</p>
             <div class="flex gap-3 justify-center flex-wrap">
-                <button onclick="h2hRematch()" class="py-3 px-8 bg-green-500 hover:bg-green-400 text-slate-900 rounded-xl font-bold shadow-lg transition">Rematch</button>
+                <button id="h2h-rematch-btn" onclick="h2hRematch()" class="py-3 px-8 bg-green-500 hover:bg-green-400 text-slate-900 rounded-xl font-bold shadow-lg transition">Rematch</button>
                 <button onclick="showScreen('screen-main')" class="py-3 px-8 bg-slate-600 hover:bg-slate-500 text-white rounded-xl font-bold shadow-lg transition">Main Menu</button>
             </div>
         </div>
@@ -926,35 +901,6 @@
         </div>
     </div>
 
-    <!-- Half-time Substitutions Modal (compact) -->
-    <div id="ht-modal" class="fixed inset-0 bg-slate-950/85 hidden justify-center items-center z-[60] opacity-0 transition-opacity duration-200">
-        <div id="ht-panel" class="bg-slate-800 border border-slate-600 rounded-xl w-[94%] max-w-lg shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[88vh]">
-            <div class="px-4 py-3 border-b border-slate-700 shrink-0 flex justify-between items-center gap-3">
-                <div class="min-w-0">
-                    <h3 class="text-lg font-black text-white leading-tight">Half Time</h3>
-                    <p id="ht-score" class="text-xs text-slate-400 truncate leading-tight"></p>
-                </div>
-                <div id="ht-subs-left" class="text-[11px] font-bold text-slate-400 shrink-0"></div>
-            </div>
-            <div class="px-4 py-3 overflow-y-auto custom-scrollbar flex-1 min-h-0">
-                <div id="ht-swap-preview" class="mb-2 min-h-[22px]"></div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="min-w-0">
-                        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">On the pitch</div>
-                        <div id="ht-lineup" class="space-y-1"></div>
-                    </div>
-                    <div class="min-w-0">
-                        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Bench</div>
-                        <div id="ht-bench" class="space-y-1"></div>
-                    </div>
-                </div>
-            </div>
-            <div class="px-4 py-3 border-t border-slate-700 shrink-0">
-                <button onclick="startSecondHalfFromModal()" class="w-full py-3 bg-green-500 hover:bg-green-400 text-slate-900 rounded-lg font-black text-base shadow transition">Start Second Half</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Live Ratings Modal -->
     <div id="ratings-modal" class="fixed inset-0 bg-slate-950/85 hidden justify-center items-center z-[60] opacity-0 transition-opacity duration-200">
         <div id="ratings-panel" class="bg-slate-800 border border-slate-600 rounded-2xl w-11/12 max-w-2xl shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[90vh]">
@@ -972,7 +918,7 @@
             <div class="p-4 md:p-5 border-b border-slate-700 shrink-0 flex justify-between items-start gap-3">
                 <div>
                     <h3 id="howto-title" class="text-xl md:text-2xl font-black text-white">How it works</h3>
-                    <p class="text-xs text-slate-400 mt-1">Roll → bid → reserve → place XI → chemistry → lock. One screen, no surprises.</p>
+                    <p class="text-xs text-slate-400 mt-1">Roll → bid → reserve → place XI → chemistry → lock → play.</p>
                 </div>
                 <button onclick="closeHowTo()" aria-label="Close guide" class="text-slate-400 hover:text-white transition text-2xl leading-none">&times;</button>
             </div>
@@ -980,34 +926,38 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-blue-400 mb-1">1 · Roll</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Press <strong>Roll Draft</strong> to reveal one player. The reel shows nationality and position; the card shows the full profile and rating.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">Press <strong>Roll Draft</strong> to reveal one player from the pool. Everyone sees the same card.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-amber-400 mb-1">2 · Bid</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">A <strong>live auction</strong>: bidders take turns in rotating order, each with a <strong>20-second shot clock</strong>. On your turn you raise (+1, +5, or a masked custom amount you commit), pass, or — if you already hold the top bid — buy. Only the current bidder sees controls, so nobody can read a rival's number before it is public.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">A <strong>live auction</strong> with rotating turn order and a <strong>20-second shot clock</strong>. On your turn: raise (+1, +5 or a typed amount), or pass. Only the current bidder gets controls, so no bid is ever read before it is public.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
-                        <div class="text-[10px] font-black uppercase tracking-wider text-sky-400 mb-1">3 · Online rooms</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Choose a mode, then <strong>Create Room</strong> for a code or <strong>Join Room</strong> with one. The host sets squad size and ghost difficulty, rolls the draft and runs every match; each joined manager bids, picks their XI and sets tactics on their own device.</p>
+                        <div class="text-[10px] font-black uppercase tracking-wider text-orange-400 mb-1">3 · Reserve</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Keep <strong>10M</strong> for every starting-XI slot you have not filled yet. The tracker shows your maximum bid and what is already reserved.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
-                        <div class="text-[10px] font-black uppercase tracking-wider text-orange-400 mb-1">4 · Reserve</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Keep at least <strong>10M</strong> for every remaining starting-XI slot. The tracker shows your maximum bid and the amount already reserved.</p>
+                        <div class="text-[10px] font-black uppercase tracking-wider text-emerald-400 mb-1">4 · Place XI</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Drag players onto the pitch, or <strong>click a player then click a slot</strong>. Auto-fill picks the best fit; the pitch shows how each assignment is rated.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
-                        <div class="text-[10px] font-black uppercase tracking-wider text-emerald-400 mb-1">5 · Place XI</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Drag players onto the pitch, or <strong>click a player then click a slot</strong> to swap. The + button assigns from your squad; Auto-fill picks the best fit.</p>
+                        <div class="text-[10px] font-black uppercase tracking-wider text-fuchsia-400 mb-1">5 · Chemistry</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Starters who share a <strong>nation</strong> link up: 2 linked = +1 each, 3 or more = +3 each. Linked players get a glowing ring.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
-                        <div class="text-[10px] font-black uppercase tracking-wider text-fuchsia-400 mb-1">6 · Chemistry</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Players in the starting XI who share a <strong>nation</strong> link up: 2 linked = +1 each, 3+ linked = +3 each. Linked players get a glowing ring on the pitch.</p>
+                        <div class="text-[10px] font-black uppercase tracking-wider text-yellow-400 mb-1">6 · Lock</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Fill all 11 starters and the bench, choose your <strong>tactics</strong>, then <strong>Confirm Formation</strong>. You cannot bid while your XI is locked — unlock it when you want to spend again.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
-                        <div class="text-[10px] font-black uppercase tracking-wider text-yellow-400 mb-1">7 · Lock</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Place all 11 starters, then <strong>Confirm Formation</strong>. Choose a shape (4-4-2, 4-3-3, 3-5-2), set tactics and kick off. Match speed can be changed live: 1×, 2× or Instant.</p>
+                        <div class="text-[10px] font-black uppercase tracking-wider text-green-400 mb-1">7 · Match</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Matches play minute by minute with a live timeline, ratings and stats. Fatigue is tracked, so the <strong>bench is used automatically</strong> in the second half. Speed: 1×, 2× or Instant.</p>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-sky-400 mb-1">8 · Online</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Pick a mode, then <strong>Create Room</strong> for a code or <strong>Join Room</strong> with one. The host sets squad size and difficulty and runs the game; every manager bids, picks their XI and sets tactics on their own device.</p>
                     </div>
                 </div>
-                <p class="text-[11px] text-slate-500 mt-3 text-center">Tip: press <kbd class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-200 font-bold">Esc</kbd> to close any modal.</p>
+                <p class="text-[11px] text-slate-500 mt-3 text-center">Press <kbd class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-200 font-bold">Esc</kbd> to close any modal.</p>
             </div>
             <div class="p-4 border-t border-slate-700 shrink-0">
                 <button onclick="closeHowTo()" class="w-full py-3 bg-green-500 hover:bg-green-400 text-slate-900 rounded-xl font-black text-lg shadow transition">Got it</button>

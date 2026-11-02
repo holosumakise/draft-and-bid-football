@@ -177,7 +177,6 @@ function getGoal(t) {
 
 let matchTactics = { mentality: 'balanced', press: 'mid' };
 let matchRatingsOpen = false;
-let htSelection = null;
 
 function getTacticsMultipliers() {
     return getTacticsMultipliersFor(matchTactics);
@@ -374,37 +373,25 @@ function simulateMatchSequence(t1, t2) {
         view: { s1: 0, s2: 0 },
         minuteCount: 0, lastGoalMinute: -15,
         ratings: {},
-        htSubs: [],
         penRes: null,
         penLine: null,
         penStarted: false,
         stats: null,
         finished: false,
         injuryExtraMinutes: 0,   // accumulated from player subs → real added time
-        pendingStoppageSubs: [], // subs made in current window (for timeline)
         timelineTimer: null,
-        broadcastLog: [],        // every simulated minute, mirrored to remote devices
-        onSubModalClose: null
+        broadcastLog: []         // every simulated minute, mirrored to remote devices
     };
     sim.ratings = createMatchRatings(sim);
     gameState.matchSim = sim;
 
-    // Live first half → HT dead-ball window → second half → (ET/pens if needed)
+    // Live first half → second half → (ET/pens if needed). Half time is a beat in
+    // the timeline, not a substitution window — the bench is used by the sim.
     runLivePeriod(sim, 1, 45, false, () => {
         appendTimelineLabel('HALF TIME');
         const htClock = document.getElementById('match-live-time');
         if (htClock) htClock.innerText = 'HT';
-        openSubstitutionModal(sim, {
-            title: 'Half Time',
-            subtitle: 'Make substitutions, then continue.',
-            continueLabel: 'Start Second Half',
-            forceOpen: true,
-            onContinue: () => {
-                runLivePeriod(sim, 46, 90, false, () => {
-                    finishOrExtraTime(sim);
-                });
-            }
-        });
+        setTimeout(() => runLivePeriod(sim, 46, 90, false, () => finishOrExtraTime(sim)), matchDelay(1400));
     });
 }
 
@@ -422,24 +409,19 @@ function finishOrExtraTime(sim) {
     if (clock) clock.innerText = 'ET';
     runLivePeriod(sim, 91, 105, true, () => {
         appendTimelineLabel('HALF TIME (ET)');
-        openSubstitutionModal(sim, {
-            title: 'Half Time (ET)',
-            subtitle: 'Extra-time substitutions.',
-            continueLabel: 'Continue Extra Time',
-            forceOpen: true,
-            onContinue: () => {
-                runLivePeriod(sim, 106, 120, true, () => {
-                    appendTimelineLabel('END OF EXTRA TIME');
-                    if (sim.s1 !== sim.s2) {
-                        setTimeout(() => finishMatchSimulation(sim), matchDelay(600));
-                    } else {
-                        appendTimelineLabel('PENALTY SHOOTOUT');
-                        if (clock) clock.innerText = 'PEN';
-                        startPenaltyShootout(sim);
-                    }
-                });
-            }
-        });
+        setTimeout(() => {
+            runLivePeriod(sim, 106, 120, true, () => {
+                appendTimelineLabel('END OF EXTRA TIME');
+                if (sim.s1 !== sim.s2) {
+                    setTimeout(() => finishMatchSimulation(sim), matchDelay(600));
+                } else {
+                    appendTimelineLabel('PENALTY SHOOTOUT');
+                    const penClock = document.getElementById('match-live-time');
+                    if (penClock) penClock.innerText = 'PEN';
+                    startPenaltyShootout(sim);
+                }
+            });
+        }, matchDelay(1400));
     });
 }
 
@@ -454,6 +436,8 @@ function getTacticsMultipliersFor(tactics) {
 function simulateMinute(sim, displayTime, isOT) {
     const { t1, t2 } = sim;
     sim.minuteCount++;
+    // Minutes actually spent on the pitch, which added time and substitutions both extend.
+    [t1, t2].forEach(tm => (tm.lineup || []).forEach(slot => { slot.min = (slot.min || 0) + 1; }));
     const events = [];
     const strengthDifference = getStrength(t1) - getStrength(t2);
     const goalChancePerMinute = 0.042;
@@ -506,39 +490,86 @@ function simulateMinute(sim, displayTime, isOT) {
                 }
             }
         }
-
-        // Auto-subs for both teams based on tactics/calculated approach
-        [1, 2].forEach(tn => {
-            const tm = tn === 1 ? t1 : t2;
-            if (sim.minuteCount > 55 && Math.random() < 0.035) {
-                if ((tm.subs || 0) < MAX_SUBS && tm.bench && tm.bench.length) {
-                    const outC = tm.lineup.filter(l => l.pos !== 'GK');
-                    const inC = tm.bench.filter(p => p.mainPos !== 'GK');
-                    if (outC.length && inC.length) {
-                        outC.sort((a, b) => getDynamicOVR(a.player, a.pos) - getDynamicOVR(b.player, b.pos));
-                        let bestOut = null; let bestIn = null; let bestGain = -999;
-                        for (let o of outC) {
-                            for (let i of inC) {
-                                const gain = (getDynamicOVR(i, o.pos) + (sim.minuteCount > 75 ? 3 : 1)) - getDynamicOVR(o.player, o.pos);
-                                if (gain > bestGain) { bestGain = gain; bestOut = o; bestIn = i; }
-                            }
-                        }
-                        if (!bestOut || !bestIn) { bestOut = pickRand(outC); bestIn = pickRand(inC); }
-                        if (bestOut && bestIn) {
-                            const outName = bestOut.player.name;
-                            tm.bench = tm.bench.filter(x => x.id !== bestIn.id);
-                            bestOut.player = bestIn; bestOut.yel = 0;
-                            tm.subs = (tm.subs || 0) + 1;
-                            ensureRatingEntry(sim, bestIn, tn, bestOut.pos);
-                            events.push({ type: 'sub', t: tn, inName: bestIn.name, outName, id: bestIn.id });
-                            sim.injuryExtraMinutes = (sim.injuryExtraMinutes || 0) + 0.5 + Math.random() * 0.5;
-                        }
-                    }
-                }
-            }
-        });
     }
+
+    // Substitutions are decided outside the goal branch: a minute that produces a
+    // goal still has to run the bench check, or changes bunch up after quiet spells.
+    [1, 2].forEach(tn => applyAutomaticSub(sim, tn === 1 ? t1 : t2, tn, events));
+
     return { displayTime, events };
+}
+
+// --- Automatic substitutions ---
+// A starter holds their form for about an hour, then loses it every minute at a rate
+// set by their body; the bench is only used when fresh legs really beat that fade, and
+// which position gets refreshed follows the scoreline rather than the ratings alone.
+const SUB_WINDOW_START = 57;
+const SUB_FIRST_CHECK = 63;
+const SUB_MIN_GAIN = 0.5;      // below this the swap is noise, so leave the starter on
+
+function getStaminaFade(slot, tactics) {
+    const played = (slot.min || 0) - SUB_WINDOW_START;
+    if (played <= 0) return 0;
+    const stats = (slot.player && slot.player.stats) || {};
+    const engine = 1 + ((stats.PHY || 65) - 65) / 90 + ((stats.PAC || 65) - 65) / 260;
+    const running = tactics && tactics.press === 'high' ? 1.35 : tactics && tactics.press === 'low' ? 0.85 : 1;
+    return Math.min(0.18, played * 0.005 * running / Math.max(0.6, engine));
+}
+
+function getLiveOVR(slot, tactics) {
+    return getDynamicOVR(slot.player, slot.pos) * (1 - getStaminaFade(slot, tactics));
+}
+
+function pitchUnit(pos) {
+    const meta = POSITION_META[pos];
+    return meta ? meta.unit : 1;
+}
+
+function pickAutoSub(sim, tm, tn) {
+    const onPitch = tm.lineup.filter(slot => slot.pos !== 'GK' && slot.player);
+    const bench = (tm.bench || []).filter(p => p.mainPos !== 'GK');
+    if (!onPitch.length || !bench.length) return null;
+
+    const margin = tn === 1 ? sim.s1 - sim.s2 : sim.s2 - sim.s1;
+    const late = sim.minuteCount > 74;
+    // Chasing pushes bodies forward; protecting a lead wants the fresh legs at the back.
+    const demand = margin < 0 ? (late ? 1.2 : 0.7) : margin > 0 && late ? -0.9 : 0;
+
+    let best = null;
+    onPitch.forEach(out => {
+        const live = getLiveOVR(out, tm.tactics);
+        bench.forEach(inn => {
+            const naturalFit = inn.mainPos === out.pos || (inn.subPos || []).includes(out.pos) ? 0.8 : 0;
+            const gain = (getDynamicOVR(inn, out.pos) - live) + naturalFit
+                + (pitchUnit(inn.mainPos) - pitchUnit(out.pos)) * demand;
+            if (!best || gain > best.gain) best = { out, inn, gain };
+        });
+    });
+    if (!best) return null;
+
+    // A gassed player is a liability even when the bench cannot offer an upgrade, so
+    // fatigue on its own can force the change.
+    if (best.gain < SUB_MIN_GAIN && getStaminaFade(best.out, tm.tactics) < 0.12) return null;
+    return best;
+}
+
+function applyAutomaticSub(sim, tm, tn, events) {
+    if (sim.minuteCount < (tm.nextSubCheckMinute || SUB_FIRST_CHECK)) return;
+    tm.nextSubCheckMinute = sim.minuteCount + 6 + Math.floor(Math.random() * 6);
+    if ((tm.subs || 0) >= MAX_SUBS) return;
+
+    const choice = pickAutoSub(sim, tm, tn);
+    if (!choice) return;
+
+    const outName = choice.out.player.name;
+    tm.bench = tm.bench.filter(x => x.id !== choice.inn.id);
+    choice.out.player = choice.inn;
+    choice.out.min = 0;
+    choice.out.yel = 0;
+    tm.subs = (tm.subs || 0) + 1;
+    ensureRatingEntry(sim, choice.inn, tn, choice.out.pos);
+    events.push({ type: 'sub', t: tn, inName: choice.inn.name, outName, id: choice.inn.id });
+    sim.injuryExtraMinutes = (sim.injuryExtraMinutes || 0) + 0.5 + Math.random() * 0.5;
 }
 
 function runLivePeriod(sim, start, end, isOT, onDone) {
@@ -555,12 +586,6 @@ function runLivePeriod(sim, start, end, isOT, onDone) {
 
     function tick() {
         if (sim.finished) return;
-
-        // Pause if a sub window is open
-        if (sim.subModalOpen) {
-            scheduleNext(200);
-            return;
-        }
 
         if (phase === 'regular') {
             if (minute > end) {
@@ -662,184 +687,6 @@ function displayTimelineStep(step, sim) {
             if (tl.parentElement) tl.parentElement.scrollTop = tl.parentElement.scrollHeight;
         }
     });
-}
-
-function openSubstitutionModal(sim, opts = {}) {
-    if (!opts.forceOpen) {
-        if (opts.onContinue) opts.onContinue();
-        return;
-    }
-    // Instant speed resolves the match without stopping at half-time windows.
-    if (matchSpeed === 'instant') {
-        if (typeof opts.onContinue === 'function') setTimeout(opts.onContinue, 0);
-        return;
-    }
-    sim.subModalOpen = true;
-    sim.onSubModalClose = opts.onContinue || null;
-
-    // Online: the away club's manager decides on their own device.
-    if (Net.online && Net.isHost && !Net.canControl(sim.t1.id)) {
-        Online.askRemoteHalfTime(sim, opts);
-        return;
-    }
-
-    htSelection = null;
-    sim.pendingSwap = null; // { outIndex, inIndex, outName, inName }
-
-    // Reuse ht-score line as status (no match result)
-    const scoreEl = document.getElementById('ht-score');
-    if (scoreEl) {
-        scoreEl.innerText = opts.subtitle || 'Tap pitch player → then bench player';
-        scoreEl.classList.add('text-slate-400', 'text-xs');
-        scoreEl.classList.remove('text-sm');
-    }
-    // Try to set modal heading without showing the scoreline
-    const panel = document.getElementById('ht-panel');
-    if (panel) {
-        const heading = panel.querySelector('h2, h3, .ht-heading');
-        if (heading) heading.innerText = opts.title || 'Substitution';
-    }
-
-    const contBtn = document.querySelector('#ht-modal button[onclick*="startSecondHalf"], #ht-continue, button[onclick*="startSecondHalfFromModal"]');
-    if (contBtn) contBtn.innerText = opts.continueLabel || 'Resume Match';
-
-    document.getElementById('ht-subs-left').innerText = `Subs left: ${Math.max(0, MAX_SUBS - (sim.t1.subs || 0))}`;
-    renderHalfTimeLists(sim);
-
-    // Swap preview lives in the compact HT panel markup
-    updateSwapPreview(sim);
-
-    const modal = document.getElementById('ht-modal');
-    if (modal) {
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-        setTimeout(() => {
-            modal.classList.remove('opacity-0');
-            if (panel) panel.classList.remove('scale-95');
-        }, 10);
-    }
-}
-
-function updateSwapPreview(sim) {
-    const preview = document.getElementById('ht-swap-preview');
-    if (!preview) return;
-    if (htSelection == null) {
-        preview.innerHTML = `<p class="text-xs text-slate-500 text-center leading-tight">Tap pitch player → then bench player</p>`;
-        return;
-    }
-    const out = sim.t1.lineup[htSelection];
-    if (!out) { preview.innerHTML = ''; return; }
-    preview.innerHTML = `
-        <div class="flex items-center justify-center gap-2 text-xs font-bold">
-            <span class="px-2 py-1 rounded bg-red-500/20 text-red-300 border border-red-500/40 truncate max-w-[44%]">↓ ${escapeHTML(out.player.name)}</span>
-            <span class="text-slate-400">⇄</span>
-            <span class="px-2 py-1 rounded bg-emerald-500/15 text-emerald-300/80 border border-emerald-500/30 border-dashed truncate max-w-[44%]">↑ Pick bench</span>
-        </div>`;
-}
-
-function renderHalfTimeLists(sim) {
-    const lineupEl = document.getElementById('ht-lineup');
-    const benchEl = document.getElementById('ht-bench');
-    if (!lineupEl || !benchEl) return;
-
-    lineupEl.innerHTML = sim.t1.lineup.map((slot, index) => {
-        const selected = htSelection === index;
-        const fit = getDynamicOVR(slot.player, slot.pos);
-        return `<button type="button" onclick="selectHalfTimePlayer(${index})" class="w-full flex items-center justify-between gap-1.5 px-2 py-1 rounded border text-left transition ${selected ? 'border-red-400 bg-red-500/20 ring-1 ring-red-400/50' : 'border-slate-700 bg-slate-900 hover:border-slate-500'}">
-            <span class="flex items-center gap-1 min-w-0">
-                ${selected ? '<span class="text-red-400 shrink-0 text-xs" title="Coming off">↓</span>' : ''}
-                <span class="text-xs font-bold text-white truncate leading-tight">${escapeHTML(slot.player.name)}</span>
-            </span>
-            <span class="text-[10px] font-black text-slate-400 shrink-0">${slot.pos} · ${Math.min(100, Math.round(fit))}</span>
-        </button>`;
-    }).join('');
-
-    benchEl.innerHTML = sim.t1.bench.length ? sim.t1.bench.map((player, index) => {
-        const canClick = htSelection != null;
-        return `<button type="button" onclick="subOnHalfTime(${index})" class="w-full flex items-center justify-between gap-1.5 px-2 py-1 rounded border text-left transition ${canClick ? 'border-slate-700 bg-slate-900 hover:border-emerald-400' : 'border-slate-800 bg-slate-900/60 opacity-70'}">
-            <span class="flex items-center gap-1 min-w-0">
-                ${canClick ? '<span class="text-emerald-400 shrink-0 text-xs">↑</span>' : ''}
-                <span class="text-xs font-bold text-white truncate leading-tight">${escapeHTML(player.name)}</span>
-            </span>
-            <span class="text-[10px] font-black ${player.mainPos === 'GK' ? 'text-yellow-400' : 'text-slate-400'} shrink-0">${player.mainPos} · ${Math.min(100, player.rating)}</span>
-        </button>`;
-    }).join('') : '<p class="text-xs text-slate-500 italic py-1">Bench is empty.</p>';
-
-    updateSwapPreview(sim);
-}
-
-function selectHalfTimePlayer(index) {
-    htSelection = htSelection === index ? null : index;
-    if (gameState.matchSim) renderHalfTimeLists(gameState.matchSim);
-}
-
-function subOnHalfTime(benchIndex) {
-    const sim = gameState.matchSim;
-    if (!sim) return;
-    if (htSelection == null) return showToast('Select a player on the pitch first.');
-    if ((sim.t1.subs || 0) >= MAX_SUBS) return showToast('No substitutions left.');
-    if (!applyHalfTimeSwap(sim, htSelection, benchIndex)) return;
-    htSelection = null;
-    const subsLeft = document.getElementById('ht-subs-left');
-    if (subsLeft) subsLeft.innerText = `Subs left: ${Math.max(0, MAX_SUBS - sim.t1.subs)}`;
-    renderHalfTimeLists(sim);
-}
-
-// One substitution on the simulated side, shared by the local modal and by a
-// remote manager's decision relayed through the host.
-function applyHalfTimeSwap(sim, outIndex, benchIndex) {
-    const slot = sim.t1.lineup[outIndex];
-    const incoming = sim.t1.bench[benchIndex];
-    if (!slot || !incoming) return false;
-    if ((sim.t1.subs || 0) >= MAX_SUBS) return false;
-
-    const outgoing = slot.player;
-    sim.t1.bench.splice(benchIndex, 1); // substituted players cannot return
-    sim.t1.lineup[outIndex] = { player: incoming, pos: slot.pos, yel: 0 };
-    sim.t1.subs = (sim.t1.subs || 0) + 1;
-    ensureRatingEntry(sim, incoming, 1, slot.pos);
-
-    // Each human sub adds real injury time (~30–60s → rounded into extra minutes)
-    sim.injuryExtraMinutes = (sim.injuryExtraMinutes || 0) + 0.5 + Math.random() * 0.5;
-
-    const subEvent = { type: 'sub', t: 1, inName: incoming.name, outName: outgoing.name };
-    sim.htSubs.push(subEvent);
-    // Show on timeline immediately when subbing mid-match
-    const clock = document.getElementById('match-live-time');
-    displayTimelineStep({ displayTime: (clock && clock.innerText) || "SUB", events: [subEvent] }, sim);
-    showToast(`${incoming.name} ⇄ ${outgoing.name}`);
-    return true;
-}
-
-function startSecondHalfFromModal() {
-    if (Online.finishHt()) return;
-    closeSubstitutionModal(true);
-}
-
-function closeSubstitutionModal(runContinue) {
-    const sim = gameState.matchSim;
-    if (Net.online && Net.isHost) {
-        Online.clearHtWait();
-        Net.publishLock(null);
-    }
-    const modal = document.getElementById('ht-modal');
-    const panel = document.getElementById('ht-panel');
-    if (modal) {
-        modal.classList.add('opacity-0');
-        if (panel) panel.classList.add('scale-95');
-        setTimeout(() => {
-            modal.classList.remove('flex');
-            modal.classList.add('hidden');
-        }, 200);
-    }
-    if (sim) {
-        sim.subModalOpen = false;
-        const cb = sim.onSubModalClose;
-        sim.onSubModalClose = null;
-        if (runContinue && typeof cb === 'function') {
-            setTimeout(cb, matchDelay(250));
-        }
-    }
 }
 
 // ============================================================
@@ -1040,6 +887,13 @@ function showH2HResult(sim) {
         ? `Penalties: ${penRes.p1} - ${penRes.p2}`
         : 'Decided in normal time';
     showScreen('screen-h2h-result');
+    const rematch = document.getElementById('h2h-rematch-btn');
+    if (rematch) {
+        const guest = Net.online && !Net.ownsGame();
+        rematch.disabled = guest;
+        rematch.classList.toggle('opacity-40', guest);
+        rematch.classList.toggle('cursor-not-allowed', guest);
+    }
 }
 
 function h2hRematch() {

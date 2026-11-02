@@ -995,7 +995,7 @@ function launchEuropeMatch() {
     t1State.name = match.t1.name;
     t2State.name = match.t2.name;
 
-    // Tactics, substitutions and the "ask referee" button always control side 1,
+    // Tactics and the "ask referee" button always control side 1,
     // so a human drawn as the second team is moved to side 1 (the result is mapped back afterwards).
     euro.current.swapped = !human1 && !!human2;
     if (euro.current.swapped) [t1State, t2State] = [t2State, t1State];
@@ -1013,10 +1013,11 @@ function launchEuropeMatch() {
 function cloneTeamStateForMatch(team) {
     return {
         ...team,
-        lineup: (team.lineup || []).map(slot => ({ ...slot, yel: 0 })),
+        lineup: (team.lineup || []).map(slot => ({ ...slot, yel: 0, min: 0 })),
         bench: (team.bench || []).slice(),
         reserves: (team.reserves || []).slice(),
-        subs: 0
+        subs: 0,
+        nextSubCheckMinute: 0
     };
 }
 

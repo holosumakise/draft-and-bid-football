@@ -21,9 +21,7 @@
         },
 
         "cmd": {
-            "$clientId": {
-                "$pushId": { ".validate": "newData().hasChild('type')" }
-            }
+            "$key": { ".validate": "newData().hasChild('type') && newData().hasChild('from')" }
         }
       }
     }

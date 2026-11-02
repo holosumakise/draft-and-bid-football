@@ -15,9 +15,18 @@ function showToast(msg) {
     toastTimer = setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); }, 3500);
 }
 
+// A backgrounded tab never paints, so rAF callbacks are never reached. An online
+// host normally sits in a background tab while it waits for a guest's bid, and
+// the fly-over is the only thing that re-enables the Roll button — hence the timer.
+function runWhenPainted(fn) {
+    let done = false;
+    const run = () => { if (done) return; done = true; fn(); };
+    requestAnimationFrame(run);
+    setTimeout(run, 300);
+}
+
 /** Animate a drafted player from the draft panel into the winning manager's squad card. */
-function playDraftAcquisitionAnimation(player, winnerId, onComplete) {
-    // Mobile-proof scroll lock: pin body with position:fixed (works on iOS where overflow:hidden fails)
+function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mobile-proof scroll lock: pin body with position:fixed (works on iOS where overflow:hidden fails)
     let scrollLocked = false;
     let lockedScrollY = 0;
     const blockTouch = (e) => { e.preventDefault(); };
@@ -80,7 +89,7 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {
     }
     lockScroll();
 
-    requestAnimationFrame(() => {
+    runWhenPainted(() => {
         const src = panel.getBoundingClientRect();
         const dst = target.getBoundingClientRect();
         if (src.width < 4 || dst.width < 4) return finish();
@@ -391,12 +400,6 @@ function renderDOMForManagers() {
         pitchContainer.innerHTML += `
             <div class="flex flex-col items-center">
                 <h3 class="text-lg font-bold mb-1 text-${c}-400">${escapeHTML(m.name)} Formation</h3>
-                <div class="flex items-center justify-center gap-1.5 mb-1.5" id="formation-presets-${m.id}">
-                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1">Shape</span>
-                    <button type="button" data-shape="4-4-2" onclick="setFormationPreset(${m.id}, '4-4-2')" class="shape-btn">4-4-2</button>
-                    <button type="button" data-shape="4-3-3" onclick="setFormationPreset(${m.id}, '4-3-3')" class="shape-btn">4-3-3</button>
-                    <button type="button" data-shape="3-5-2" onclick="setFormationPreset(${m.id}, '3-5-2')" class="shape-btn">3-5-2</button>
-                </div>
                 <p id="m${m.id}-formation-hint" class="text-[10px] text-slate-400 text-center mb-2 max-w-[400px] leading-tight"></p>
                 <div class="pitch" id="pitch-${m.id}">
                     <div class="center-circle"></div><div class="center-dot"></div>
@@ -418,8 +421,6 @@ function renderDOMForManagers() {
     if (Net.online) {
         gameState.managers.forEach(m => {
             if (Net.canControl(m.id)) return;
-            const shapes = document.getElementById(`formation-presets-${m.id}`);
-            if (shapes) shapes.querySelectorAll('button').forEach(b => { b.disabled = true; b.classList.add('opacity-40', 'cursor-not-allowed'); });
             [`lock-btn-${m.id}`, `autofill-btn-${m.id}`].forEach(id => {
                 const btn = document.getElementById(id);
                 if (btn) { btn.disabled = true; btn.classList.add('opacity-40', 'cursor-not-allowed'); }
@@ -535,7 +536,7 @@ function initPitch(id) {
     m.formationPreset = m.formationPreset || '4-4-2';
     m.formation = buildFormationFromPreset(m.formationPreset);
     renderPitchNodes(id); renderBenchNodes(id);
-    updateFormationPresetUI(id);
+    updateFormationFitUI(id);
 }
 
 function getFormationFit(manager) {
@@ -550,61 +551,16 @@ function getFormationFit(manager) {
     return count ? Math.round((total / count) * 100) : 0;
 }
 
-function updateFormationPresetUI(managerId) {
+function updateFormationFitUI(managerId) {
     const m = gameState.managers.find(x => x.id === managerId);
     if (!m) return;
-    const wrap = document.getElementById(`formation-presets-${managerId}`);
-    if (wrap) {
-        wrap.querySelectorAll('.shape-btn').forEach(btn => {
-            const active = btn.dataset.shape === m.formationPreset;
-            btn.classList.toggle('active', active);
-            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-        });
-    }
     const hint = document.getElementById(`m${managerId}-formation-hint`);
     if (!hint) return;
-    const preset = getFormationPreset(m.formationPreset);
     const placed = m.formation.filter(node => node.assignedPlayerId).length;
-    if (!placed) {
-        hint.innerHTML = `${escapeHTML(preset.hint)} <span class="text-slate-500">Place players to see fit.</span>`;
-        return;
-    }
+    if (!placed) { hint.innerHTML = ''; return; }
     const groups = getChemistryGroups(getFormationChemistry(m).players);
     const fit = getFormationFit(m);
-    hint.innerHTML = `${escapeHTML(preset.hint)} <span class="text-slate-200 font-bold">Fit ${fit}% · ${groups.length} chemistry link group${groups.length === 1 ? '' : 's'}.</span>`;
-}
-
-function setFormationPreset(managerId, key) {
-    const m = gameState.managers.find(x => x.id === managerId);
-    if (!m || !FORMATION_PRESETS[key]) return;
-    if (!Net.canControl(managerId)) return showToast('That is another manager’s club.');
-    if (m.formationLocked) return showToast('Formation is locked.');
-    const draft = gameState.activeDraft;
-    if (draft && (draft.state === 'spinning' || (draft.state === 'revealed' && !draft.player.sold))) {
-        return showToast('Resolve the current player before changing shape.');
-    }
-
-    clearLineupSelection();
-    const currentPlayers = m.formation
-        .map(node => m.squad.find(p => p.id === node.assignedPlayerId))
-        .filter(Boolean);
-    m.formationPreset = key;
-    m.formation = buildFormationFromPreset(key);
-    const assignment = optimalLineupAssignment(m.formation, currentPlayers);
-    m.formation.forEach((node, index) => {
-        node.assignedPlayerId = assignment[index] ? assignment[index].id : null;
-    });
-
-    renderPitchNodes(m.id);
-    renderBenchNodes(m.id);
-    updateTeamOVR(m.id);
-    updateDashboard(m.id);
-    updateFormationPresetUI(m.id);
-    Net.publishOwn(m.id);
-
-    const fit = getFormationFit(m);
-    const groups = getChemistryGroups(getFormationChemistry(m).players);
-    showToast(`${key} applied — ${fit}% fit, ${groups.length} chemistry link group${groups.length === 1 ? '' : 's'}.`);
+    hint.innerHTML = `<span class="text-slate-200 font-bold">Fit ${fit}% · ${groups.length} chemistry link group${groups.length === 1 ? '' : 's'}.</span>`;
 }
 
 
@@ -655,7 +611,7 @@ function renderPitchNodes(managerId) {
         if (!nodeData.isGK && editable) makeDraggable(el, pitch, m, nodeData);
     });
 
-    updateFormationPresetUI(managerId);
+    updateFormationFitUI(managerId);
 }
 
 function renderBenchNodes(managerId) {
@@ -1131,7 +1087,7 @@ function checkMatchReady() {
         // Running the matches is the host's button; guests just wait for it.
         wrap.classList.add('hidden');
         wrap.classList.remove('flex');
-        if (allLocked) Online.note('All clubs locked — waiting for the host to start the matches');
+        if (allLocked) Online.note('Waiting for host...');
         return;
     }
     if (allLocked) {
@@ -1189,6 +1145,5 @@ document.addEventListener('keydown', (event) => {
     if (isOpen('player-modal')) { closeModal(); return; }
     if (isOpen('tactics-modal')) { closeTacticsModal(); return; }
     if (isOpen('ratings-modal')) { closeMatchRatings(); return; }
-    // The half-time window has no cancel state: Escape deliberately does nothing.
 });
 

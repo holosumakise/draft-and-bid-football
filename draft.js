@@ -367,8 +367,8 @@ function rollPlayers() {
 
     updateRollButton();
     renderDraftBoard();
-    Net.publishDraft();
-    Net.publishAuction();
+    Net.publishDraftNow();
+    Net.publishAuctionNow();
 
     const allPos = ['GK','CB','LB','RB','LWB','RWB','CDM','CM','CAM','LM','RM','LW','RW','CF','ST'];
     const allNats = availablePlayers.length
@@ -424,7 +424,9 @@ function rollPlayers() {
         setTimeout(() => {
             if (gameState.activeDraft !== draft) return; // game was reset while the reels were spinning
             draft.state = 'revealed';
-            Net.publishDraft();
+            // Immediate: the shot clock for the opener starts in the same tick, and
+            // a guest must not be handed a turn before the card reaches its screen.
+            Net.publishDraftNow();
             if (gameState.managers.length > 1 && Net.ownsGame()) startAuction();
             renderDraftBoard(); updateRollButton();
         }, GAP_AFTER);
@@ -459,6 +461,9 @@ function renderDraftBoard() {
             // Successful sale is already shown by the fly animation — clear and wait for next roll
             if (won) {
                 gameState.activeDraft = null;
+                // This clear can happen before the fly animation's own callback, so
+                // it has to publish — otherwise guests keep a SOLD card forever.
+                Net.publishDraftNow();
                 board.innerHTML = '<div class="text-slate-400 italic">Press Roll Draft</div>';
                 return;
             }

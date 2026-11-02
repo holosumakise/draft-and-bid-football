@@ -55,37 +55,16 @@ const RANK_OVR_TABLE = [
 ];
 const DEFAULT_FORMATION = [ { x: 50, y: 86, isGK: true }, { x: 20, y: 70 }, { x: 40, y: 70 }, { x: 60, y: 70 }, { x: 80, y: 70 }, { x: 20, y: 45 }, { x: 40, y: 50 }, { x: 60, y: 50 }, { x: 80, y: 45 }, { x: 50, y: 25 }, { x: 50, y: 12 } ];
 
-// Formation presets. Each slot declares its own position so the pitch UI, auto-fill
-// and the match engine all agree on the shape. The trade-off is positional fit:
-// more forwards = more attacking slots but fewer natural midfielders, and so on.
+// The one shape every club plays. Each slot declares its own position so the pitch
+// UI, auto-fill and the match engine all agree. The trade-off is positional fit:
+// two strikers means fewer natural midfield slots to hide an out-of-position star.
 const FORMATION_PRESETS = Object.freeze({
     '4-4-2': {
         label: '4-4-2',
-        hint: 'Balanced width and two strikers. The easiest shape to fit.',
         slots: [
             { x: 50, y: 86, isGK: true, pos: 'GK' },
             { x: 15, y: 70, pos: 'LB' }, { x: 38, y: 72, pos: 'CB' }, { x: 62, y: 72, pos: 'CB' }, { x: 85, y: 70, pos: 'RB' },
             { x: 15, y: 48, pos: 'LM' }, { x: 38, y: 49, pos: 'CM' }, { x: 62, y: 49, pos: 'CM' }, { x: 85, y: 48, pos: 'RM' },
-            { x: 38, y: 24, pos: 'ST' }, { x: 62, y: 24, pos: 'ST' }
-        ]
-    },
-    '4-3-3': {
-        label: '4-3-3',
-        hint: 'Three forwards and one holding mid. Rewards wingers, but can leave the midfield light.',
-        slots: [
-            { x: 50, y: 86, isGK: true, pos: 'GK' },
-            { x: 15, y: 70, pos: 'LB' }, { x: 38, y: 72, pos: 'CB' }, { x: 62, y: 72, pos: 'CB' }, { x: 85, y: 70, pos: 'RB' },
-            { x: 25, y: 52, pos: 'CM' }, { x: 50, y: 56, pos: 'CDM' }, { x: 75, y: 52, pos: 'CM' },
-            { x: 18, y: 28, pos: 'LW' }, { x: 50, y: 20, pos: 'ST' }, { x: 82, y: 28, pos: 'RW' }
-        ]
-    },
-    '3-5-2': {
-        label: '3-5-2',
-        hint: 'Three centre-backs and wing-backs. Strong midfield links, but full-backs must adapt.',
-        slots: [
-            { x: 50, y: 86, isGK: true, pos: 'GK' },
-            { x: 25, y: 72, pos: 'CB' }, { x: 50, y: 74, pos: 'CB' }, { x: 75, y: 72, pos: 'CB' },
-            { x: 10, y: 50, pos: 'LWB' }, { x: 35, y: 50, pos: 'CM' }, { x: 50, y: 55, pos: 'CDM' }, { x: 65, y: 50, pos: 'CM' }, { x: 90, y: 50, pos: 'RWB' },
             { x: 38, y: 24, pos: 'ST' }, { x: 62, y: 24, pos: 'ST' }
         ]
     }

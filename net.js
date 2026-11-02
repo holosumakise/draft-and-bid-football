@@ -58,7 +58,7 @@ const Net = {
     async connect() {
         if (this.fb) return true;
         const cfg = this.config();
-        if (!cfg) throw new Error('No Firebase project configured. Open Online settings and paste your web config.');
+        if (!cfg) throw new Error('No Firebase project configured. Paste your web config into firebase-config.js — it needs a databaseURL — then reload.');
         await this.loadSdk();
         if (!this.fb) {
             const app = typeof firebase.apps === 'function' && firebase.apps.length ? firebase.app() : firebase.initializeApp(cfg);
@@ -170,7 +170,7 @@ const Net = {
             const managers = this.roomRef.child('game/managers');
             this.listeners.push([managers, managers.on('value', v => Online.onManagersNode(v.val()))]);
         } else {
-            ['draft', 'auction', 'managers', 'info', 'screen', 'season', 'europe', 'match', 'lock'].forEach(key => {
+            ['draft', 'auction', 'managers', 'info', 'screen', 'season', 'europe', 'match'].forEach(key => {
                 const ref = this.roomRef.child('game').child(key);
                 this.listeners.push([ref, ref.on('value', v => this.onGameState(key, v.val()))]);
             });
@@ -196,19 +196,24 @@ const Net = {
     // --- client -> host ---
     send(type, payload) {
         if (!this.online || this.isHost || !this.roomRef) return;
-        // One child per command: re-using a key would fire child_changed, which
-        // a child_added listener never sees.
-        this.roomRef.child('cmd').child(this.selfId).push({
-            type, payload: payload === undefined ? null : payload, at: this.serverNow()
+        // Commands must land as direct children of cmd, one per command. A
+        // cmd/{clientId}/{pushId} nesting fires child_added only for the first
+        // command of each client; every later one is a child_changed the host
+        // listener never sees, so bids would silently vanish.
+        const key = `${this.selfId}__${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        this.roomRef.child('cmd').child(key).set({
+            from: this.selfId, type, payload: payload === undefined ? null : payload, at: this.serverNow()
         });
     },
 
     onCommand(snap) {
         const cmd = snap.val();
-        const clientId = snap.ref.parent.key;
-        if (!cmd || !cmd.type) return;
+        // Anything we can't read is dropped for good, or it would sit in the
+        // mailbox and mask the commands behind it.
+        if (!cmd || !cmd.type) { snap.ref.remove().catch(() => {}); return; }
+        const clientId = cmd.from || String(snap.key).split('__')[0];
         const slot = this.slotOfClient(clientId);
-        if (slot === null) return;
+        if (slot === null) { snap.ref.remove().catch(() => {}); return; }
         const handler = this._handlers.onAction;
         // Consume it: a stored command would replay on the host's next reload.
         snap.ref.remove().catch(() => {});
@@ -250,6 +255,8 @@ const Net = {
     publishDraft() { this.publish('draft', serializeDraft(gameState.activeDraft)); },
     // A club's data has two authors, so it has two paths: the host owns the squad
     // list and the wallet, the player who owns the club owns the XI and the plan.
+    publishAuctionNow() { this.publishNow('auction', serializeAuction(gameState.auction)); },
+    publishDraftNow() { this.publishNow('draft', serializeDraft(gameState.activeDraft)); },
     publishManagers(managerId) {
         if (!this.online || !this.isHost) return;
         const list = managerId === undefined || managerId === null
@@ -259,10 +266,12 @@ const Net = {
     },
     // Works for the host's own club and for a guest's club.
     publishOwn(managerId) {
-        if (!this.online) return;
+        if (!this.online || !this.roomRef) return;
         const m = gameState.managers.find(x => x.id === managerId);
-        if (!m || !this.roomRef) return;
-        this.publish(`managers/${m.id}/own`, serializeManagerOwn(m));
+        if (!m) return;
+        // Own fields belong to that manager's device, so this write is direct:
+        // the throttled publish queue is host-only and would drop every client.
+        this.roomRef.child('game/managers').child(m.id).child('own').set(serializeManagerOwn(m)).catch(() => {});
     },
     publishInfo() {
         this.publish('info', {
@@ -273,7 +282,6 @@ const Net = {
         });
     },
     publishScreen(screenId) { this.publish('screen', screenId); },
-    publishLock(data) { this.publishNow('lock', data); },
     publishSeason() { this.publishNow('season', serializeSeason(gameState.season)); },
     publishEurope() { this.publishNow('europe', serializeEurope(gameState.europe)); },
     publishMatch(value, force) { force ? this.publishNow('match', value) : this.publish('match', value); },
@@ -305,7 +313,7 @@ const Net = {
     },
 
     onGameState(key, value) {
-        if (value === null && key !== 'draft' && key !== 'auction' && key !== 'lock') return;
+        if (value === null && key !== 'draft' && key !== 'auction') return;
         const handler = this._handlers.onState;
         if (handler) handler(key, value);
     },
@@ -322,7 +330,7 @@ const Net = {
             dot.classList.remove('hidden');
             dot.className = `inline-block w-2.5 h-2.5 rounded-full ${this._conn.connected ? 'bg-emerald-400' : 'bg-red-500 animate-pulse'}`;
         }
-        if (label) label.innerText = this._conn.connected ? `Room ${this.roomCode}` : 'Reconnecting…';
+        if (label) label.innerText = this._conn.connected ? '' : 'Reconnecting…';
     }
 };
 
@@ -377,7 +385,10 @@ function serializeAuction(a) {
     return {
         playerId: a.playerId, order: a.order.slice(), turnIdx: a.turnIdx, highBid: a.highBid,
         highBidderId: a.highBidderId, topBidOf: { ...a.topBidOf }, out: { ...a.out },
-        status: a.status, turnEndsAt: a.turnEndsAt, mustBuy: !!a.mustBuy
+        status: a.status, turnEndsAt: a.turnEndsAt, mustBuy: !!a.mustBuy,
+        // Remote devices rebase their countdown from this instead of comparing
+        // turnEndsAt to their own wall clock, which is not the host's wall clock.
+        turnRemaining: a.turnEndsAt ? Math.max(0, a.turnEndsAt - Date.now()) : 0
     };
 }
 

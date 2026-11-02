@@ -9,15 +9,17 @@
 //
 // Leaving this empty is safe: local play never touches the network, and the
 // Online screen shows a "No Firebase project configured" message instead.
-// A config saved through the in-app settings box (localStorage key
-// 'dbf.firebase') takes priority over this file, so you can test without
-// editing anything.
+// A config saved in localStorage under 'dbf.firebase' (DevTools console)
+// takes priority over this file, so you can test without editing anything.
 // ============================================================
 
 window.FIREBASE_CONFIG = {
   apiKey: "AIzaSyBuKMShkWH2JoZjX_Ywma4rvgxitYmB2OI",
   authDomain: "draft-bid-football-d30a9.firebaseapp.com",
   projectId: "draft-bid-football-d30a9",
+  // Not in your paste — the console only shows it once a Realtime Database
+  // exists. Checked reachable: GET on this URL returns 200 with null.
+  databaseURL: "https://draft-bid-football-d30a9-default-rtdb.firebaseio.com",
   storageBucket: "draft-bid-football-d30a9.firebasestorage.app",
   messagingSenderId: "291651528240",
   appId: "1:291651528240:web:01b7daa83c103d1683aff5",

@@ -13,8 +13,6 @@ const Online = {
     mirror: null,        // client-side stand-in for the host's match sim
     mirrorSeen: 0,
     mirrorKey: null,
-    ht: null,            // client's open half-time window
-    htTimeout: null,     // host-side wait for a remote half-time decision
     pendingManagers: null,
 
     install() {
@@ -31,12 +29,8 @@ const Online = {
         this.mirror = null;
         this.mirrorSeen = 0;
         this.mirrorKey = null;
-        this.ht = null;
         this.pendingManagers = null;
-        clearTimeout(this.htTimeout);
-        this.htTimeout = null;
         this.note('');
-        this.updateBadge();
     },
 
     // --- Lobby ---
@@ -106,31 +100,23 @@ const Online = {
                     start.disabled = !enough;
                     start.innerText = enough ? 'Start Game' : `Waiting for managers (${Object.keys(roster || {}).length}/${wanted})`;
                 }
-            } else {
-                const note = document.getElementById('lobby-difficulty-desc');
-                if (note) note.innerText = '';
             }
         }
-        this.updateBadge();
     },
 
     paintLobbyDifficulty(key) {
-        const preset = DIFFICULTY_PRESETS[key] || DIFFICULTY_PRESETS.normal;
         document.querySelectorAll('#lobby-difficulty-options .diff-btn').forEach(btn => {
             const active = btn.dataset.diff === key;
             btn.className = `diff-btn py-2 rounded-lg text-sm font-bold border transition ${active
                 ? 'border-green-400 bg-green-500 text-slate-900'
                 : 'border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400'}`;
         });
-        const desc = document.getElementById('lobby-difficulty-desc');
-        if (desc) desc.innerText = preset.desc;
     },
 
     // --- Start of play ---
     beginGame() {
         this.gameLive = true;
         this.pendingManagers = null;
-        this.updateBadge();
         if (!Net.online) return;
         if (!Net.isHost) return;
         Net.roomRef.child('meta').update({ status: 'live', startedAt: Net.serverNow(), playerCount: gameState.managers.length });
@@ -143,17 +129,6 @@ const Online = {
         Net.publishNow('europe', null);
         Net.publishNow('match', null);
         Net.publishScreen('screen-game');
-    },
-
-    updateBadge() {
-        const badge = document.getElementById('online-room-badge');
-        if (!badge) return;
-        if (!Net.online) { badge.classList.add('hidden'); badge.innerText = ''; return; }
-        badge.classList.remove('hidden');
-        const me = Net._roster?.[Net.selfId]?.name || '';
-        badge.innerText = Net.isHost
-            ? `ROOM ${Net.roomCode} · HOST${me ? ` · ${me}` : ''}`
-            : `ROOM ${Net.roomCode} · YOU: ${me}`;
     },
 
     note(msg) {
@@ -170,65 +145,7 @@ const Online = {
             // A command may only ever act for the manager who sent it.
             if (payload.managerId !== slot) return;
             applyAuctionAction(slot, payload.action || {});
-            return;
         }
-        if (type === 'ht') {
-            const sim = gameState.matchSim;
-            if (!sim || sim.finished || sim.t1?.id !== slot) return;
-            applyHalfTimeSwap(sim, payload.outIndex, payload.benchIndex);
-            Net.publishMatch(serializeMatchView(sim));
-            this.armHtWait(slot);
-            return;
-        }
-        if (type === 'htdone') {
-            const sim = gameState.matchSim;
-            if (!sim || sim.t1?.id !== slot) return;
-            this.clearHtWait();
-            closeSubstitutionModal(true);
-        }
-    },
-
-    // The host cannot resume the second half until the remote manager has had
-    // their say — but never longer than this, in case they close the tab.
-    armHtWait(managerId) {
-        clearTimeout(this.htTimeout);
-        this.htTimeout = setTimeout(() => {
-            const sim = gameState.matchSim;
-            if (sim && sim.subModalOpen) {
-                showToast('Half-time window closed — second half underway.');
-                closeSubstitutionModal(true);
-            }
-        }, 60000);
-        void managerId;
-    },
-
-    clearHtWait() {
-        clearTimeout(this.htTimeout);
-        this.htTimeout = null;
-    },
-
-    // The host runs the match, but half-time changes belong to the other
-    // manager. Publish the squad as plain data and let their device decide.
-    askRemoteHalfTime(sim, opts) {
-        Net.publishLock({
-            type: 'ht',
-            managerId: sim.t1.id,
-            title: opts.title || 'Half Time',
-            subtitle: opts.subtitle || 'Tap pitch player → then bench player',
-            continueLabel: opts.continueLabel || 'Resume Match',
-            subs: sim.t1.subs || 0,
-            lineup: sim.t1.lineup.map((slot, index) => ({
-                index,
-                name: slot.player.name,
-                pos: slot.pos,
-                ovr: getDynamicOVR(slot.player, slot.pos)
-            })),
-            bench: sim.t1.bench.map((p, index) => ({
-                index, name: p.name, mainPos: p.mainPos, ovr: p.rating
-            }))
-        });
-        this.armHtWait(sim.t1.id);
-        this.note(`${sim.t1.name}: waiting for the manager to make half-time changes.`);
     },
 
     // --- Client: host state arriving as snapshots ---
@@ -237,7 +154,6 @@ const Online = {
         gameState.playerCount = meta?.playerCount || (gameState.mode === 'H2H' ? 2 : (Net._lobby?.playerCount || 4));
         gameState.difficulty = meta?.difficulty || Net._lobby?.difficulty || 'normal';
         initGame();
-        this.updateBadge();
     },
 
     onRoomClosed() {
@@ -256,7 +172,6 @@ const Online = {
             case 'match': this.applyMatch(value); break;
             case 'season': this.applySeason(value); break;
             case 'europe': this.applyEurope(value); break;
-            case 'lock': this.applyLockPrompt(value); break;
         }
     },
 
@@ -310,7 +225,7 @@ const Online = {
                 if (Net.canControl(m.id)) return;
                 renderPitchNodes(m.id);
                 renderBenchNodes(m.id);
-                updateFormationPresetUI(m.id);
+                updateFormationFitUI(m.id);
                 const btn = document.getElementById(`lock-btn-${m.id}`);
                 if (btn && m.formationLocked) {
                     btn.innerText = 'Formation & Tactics Confirmed';
@@ -338,6 +253,11 @@ const Online = {
             return;
         }
         gameState.auction = { ...auction, out: auction.out || {}, topBidOf: auction.topBidOf || {}, order: auction.order || [] };
+        // A guest's clock is its own; rebasing the deadline from the remaining
+        // time keeps its countdown honest even when the two devices disagree.
+        if (auction.status === 'open' && Number.isFinite(auction.turnRemaining)) {
+            gameState.auction.turnEndsAt = Date.now() + auction.turnRemaining;
+        }
         if (auction.status === 'open' && !auctionClockId) {
             auctionClockId = setInterval(tickAuctionClock, AUCTION_TICK_MS);
         }
@@ -369,10 +289,7 @@ const Online = {
     },
 
     describeScreen(id) {
-        if (id === 'screen-game') { this.note(''); return; }
-        if (id === 'screen-season') { this.note('The host is running the league…'); return; }
-        if (id === 'screen-match') { this.note('Match in progress — hosted on another device'); return; }
-        if (id === 'screen-euro-bracket') { this.note('European bracket — the host plays each tie'); return; }
+        if (id === 'screen-season' || id === 'screen-euro-bracket') { this.note('Waiting for host...'); return; }
         this.note('');
     },
 
@@ -405,7 +322,7 @@ const Online = {
             sim.penRes = view.penRes || null;
             // The host's "Continue" button is theirs alone; the client just watches.
             document.getElementById('match-actions')?.classList.add('hidden');
-            this.note(`Full time ${view.s1}-${view.s2} · waiting for the host`);
+            this.note('Waiting for host...');
         }
     },
 
@@ -476,91 +393,6 @@ const Online = {
         }
     },
 
-    // --- Client half-time window (rendered from the host's prompt) ---
-    applyLockPrompt(data) {
-        if (!data) { if (this.ht) this.closeHt(); return; }
-        if (data.type !== 'ht' || data.managerId !== Net.myManagerId) return;
-        this.ht = { lineup: data.lineup || [], bench: data.bench || [], subs: data.subs || 0, sel: null };
-        const scoreEl = document.getElementById('ht-score');
-        if (scoreEl) scoreEl.innerText = data.subtitle || 'Tap pitch player → then bench player';
-        const heading = document.querySelector('#ht-panel h3');
-        if (heading) heading.innerText = data.title || 'Half Time';
-        const cont = document.querySelector('#ht-modal button[onclick*="startSecondHalf"]');
-        if (cont) cont.innerText = data.continueLabel || 'Resume Match';
-        const left = document.getElementById('ht-subs-left');
-        if (left) left.innerText = `Subs left: ${Math.max(0, MAX_SUBS - this.ht.subs)}`;
-        this.renderHtLists();
-        const modal = document.getElementById('ht-modal');
-        if (modal) {
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-            setTimeout(() => { modal.classList.remove('opacity-0'); document.getElementById('ht-panel')?.classList.remove('scale-95'); }, 10);
-        }
-    },
-
-    renderHtLists() {
-        const st = this.ht;
-        if (!st) return;
-        const lineupEl = document.getElementById('ht-lineup');
-        const benchEl = document.getElementById('ht-bench');
-        if (lineupEl) lineupEl.innerHTML = st.lineup.map((slot, index) => {
-            const selected = st.sel === index;
-            return `<button type="button" onclick="Online.selectHt(${index})" class="w-full flex items-center justify-between gap-1.5 px-2 py-1 rounded border text-left transition ${selected ? 'border-red-400 bg-red-500/20 ring-1 ring-red-400/50' : 'border-slate-700 bg-slate-900 hover:border-slate-500'}">
-                <span class="text-xs font-bold text-white truncate leading-tight">${escapeHTML(slot.name)}</span>
-                <span class="text-[10px] font-black text-slate-400 shrink-0">${escapeHTML(slot.pos)} · ${slot.ovr}</span>
-            </button>`;
-        }).join('');
-        if (benchEl) benchEl.innerHTML = st.bench.length ? st.bench.map((p, index) =>
-            `<button type="button" onclick="Online.subHt(${index})" class="w-full flex items-center justify-between gap-1.5 px-2 py-1 rounded border text-left transition ${st.sel != null ? 'border-slate-700 bg-slate-900 hover:border-emerald-400' : 'border-slate-800 bg-slate-900/60 opacity-70'}">
-                <span class="text-xs font-bold text-white truncate leading-tight">${escapeHTML(p.name)}</span>
-                <span class="text-[10px] font-black text-slate-400 shrink-0">${escapeHTML(p.mainPos)} · ${p.ovr}</span>
-            </button>`).join('') : '<p class="text-xs text-slate-500 italic py-1">Bench is empty.</p>';
-        const preview = document.getElementById('ht-swap-preview');
-        if (preview) preview.innerHTML = st.sel == null
-            ? '<p class="text-xs text-slate-500 text-center leading-tight">Tap pitch player → then bench player</p>'
-            : `<p class="text-xs font-bold text-center text-red-300">↓ ${escapeHTML(st.lineup[st.sel]?.name || '')} — now pick a bench player</p>`;
-    },
-
-    selectHt(index) {
-        if (!this.ht) return;
-        this.ht.sel = this.ht.sel === index ? null : index;
-        this.renderHtLists();
-    },
-
-    subHt(benchIndex) {
-        const st = this.ht;
-        if (!st) return;
-        if (st.sel == null) return showToast('Select a player on the pitch first.');
-        if (st.subs >= MAX_SUBS) return showToast('No substitutions left.');
-        Net.send('ht', { outIndex: st.sel, benchIndex });
-        st.subs++;
-        st.lineup[st.sel] = { ...st.lineup[st.sel], name: st.bench[benchIndex].name, ovr: st.bench[benchIndex].ovr };
-        st.bench.splice(benchIndex, 1);
-        st.sel = null;
-        const left = document.getElementById('ht-subs-left');
-        if (left) left.innerText = `Subs left: ${Math.max(0, MAX_SUBS - st.subs)}`;
-        this.renderHtLists();
-    },
-
-    closeHt() {
-        this.ht = null;
-        const modal = document.getElementById('ht-modal');
-        const panel = document.getElementById('ht-panel');
-        if (modal) {
-            modal.classList.add('opacity-0');
-            panel?.classList.add('scale-95');
-            setTimeout(() => { modal.classList.remove('flex'); modal.classList.add('hidden'); }, 200);
-        }
-    },
-
-    // "Start Second Half" on a client only releases the host's clock.
-    finishHt() {
-        if (!Net.online || Net.isHost) return false;
-        if (!this.ht) return false;
-        Net.send('htdone', {});
-        this.closeHt();
-        return true;
-    }
 };
 
 function fillNode(n) {
