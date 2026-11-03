@@ -201,6 +201,7 @@ function managerNamesForGame(count) {
 
 function initGame() {
     clearAuctionTimer();
+    if (typeof SaveGame !== 'undefined') SaveGame.resetFinished();
     if (Net.ownsGame()) initializePlayerDB();
     gameState.matchQueue = [];
     gameState.currentMatchData = null;

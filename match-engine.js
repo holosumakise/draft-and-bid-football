@@ -437,8 +437,6 @@ function simulateMatchSequence(t1, t2) {
     };
     sim.ratings = createMatchRatings(sim);
     gameState.matchSim = sim;
-    // Pre-match availability: injuries, suspensions and tired legs for both sides.
-    if (typeof renderMatchAvailability === 'function') renderMatchAvailability(t1, t2);
 
     // Live first half → second half → (ET/pens if needed). Half time is a beat in
     // the timeline, not a substitution window — the bench is used by the sim.
@@ -958,6 +956,7 @@ function showH2HResult(sim) {
         ? `Penalties: ${penRes.p1} - ${penRes.p2}`
         : 'Decided in normal time';
     showScreen('screen-h2h-result');
+    if (typeof SaveGame !== 'undefined' && !Net.online) SaveGame.markFinished();
     const rematch = document.getElementById('h2h-rematch-btn');
     if (rematch) {
         const guest = Net.online && !Net.ownsGame();
@@ -969,6 +968,7 @@ function showH2HResult(sim) {
 
 function h2hRematch() {
     if (Net.online && !Net.ownsGame()) return showToast('Only the host starts a rematch.');
+    if (typeof SaveGame !== 'undefined') SaveGame.resetFinished();
     const [m1, m2] = gameState.managers;
     gameState.matchQueue = [{ t1: createTeamState(m1), t2: createTeamState(m2), label: 'H2H' }];
     Net.publishInfo();

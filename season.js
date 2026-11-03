@@ -81,8 +81,7 @@ function initSeasonPlayerStats(manager) {
         map[p.id] = {
             id: p.id, name: p.name, team: manager.name, teamId: manager.id, mainPos: p.mainPos,
             goals: 0, assists: 0, cleanSheets: 0, apps: 0, minutes: 0,
-            yellows: 0, reds: 0, ratingSum: 0, ratingCount: 0, goalsConcededAsGK: 0,
-            fatigue: 0, injuredUntil: 0, suspended: 0, seasonYellows: 0
+            yellows: 0, reds: 0, ratingSum: 0, ratingCount: 0, goalsConcededAsGK: 0
         };
     });
     return map;
@@ -96,128 +95,11 @@ function initGhostTeamStats(team) {
             map[player.id] = {
                 id: player.id, name: player.name, team: team.name, teamId: team.id, mainPos: player.mainPos,
                 goals: 0, assists: 0, cleanSheets: 0, apps: 0, minutes: 0,
-                yellows: 0, reds: 0, ratingSum: 0, ratingCount: 0, goalsConcededAsGK: 0,
-                fatigue: 0, injuredUntil: 0, suspended: 0, seasonYellows: 0
+                yellows: 0, reds: 0, ratingSum: 0, ratingCount: 0, goalsConcededAsGK: 0
             };
         });
     return map;
 }
-
-// --- Availability badges -------------------------------------------------
-// The league sim already rests tired players and suspends carded ones. These
-// helpers turn that hidden state into a badge on the squad list and on the
-// match screen, so rotation is never a mystery.
-function availabilityRefMatchday() {
-    if (gameState.europe && Number.isFinite(gameState.europe.currentRoundIdx)) {
-        return SEASON_MATCHDAYS + gameState.europe.currentRoundIdx * 3;
-    }
-    return SEASON_MATCHDAYS;
-}
-
-function availabilityForState(stats, refMatchday = availabilityRefMatchday()) {
-    if (!stats) return null;
-    const injured = Number(stats.injuredUntil) || 0;
-    if (injured > refMatchday) {
-        const left = Math.max(1, injured - refMatchday);
-        return { kind: 'injured', label: `🩹 ${left}`, title: `Injured — out for ${left} more match${left === 1 ? '' : 'es'}`, tone: 'text-red-300 bg-red-950 border-red-700' };
-    }
-    const suspended = Number(stats.suspended) || 0;
-    if (suspended > 0) {
-        return { kind: 'suspended', label: `🟥 ${suspended}`, title: `Suspended — ${suspended} match${suspended === 1 ? '' : 'es'} remaining`, tone: 'text-red-300 bg-red-950 border-red-700' };
-    }
-    const fatigue = Number(stats.fatigue) || 0;
-    if (fatigue >= AVAILABILITY.TIRED) {
-        return { kind: 'tired', label: '😴', title: `Tired — fatigue ${Math.round(fatigue)}% (likely rested)`, tone: 'text-amber-300 bg-amber-950 border-amber-700' };
-    }
-    if (fatigue >= AVAILABILITY.WORN) {
-        return { kind: 'worn', label: '🥵', title: `Worn — fatigue ${Math.round(fatigue)}%`, tone: 'text-amber-200 bg-amber-950/60 border-amber-800' };
-    }
-    return null;
-}
-
-function availabilityForPlayer(managerId, player) {
-    const season = gameState.season;
-    if (!season || !player) return null;
-    const group = (season.playerStatsByManager || {})[managerId];
-    if (!group) return null;
-    return availabilityForState(group[player.id]);
-}
-
-function availabilityBadgeHTML(managerId, player) {
-    const availability = availabilityForPlayer(managerId, player);
-    if (!availability) return '';
-    return `<span title="${escapeHTML(availability.title)}" class="ml-1 text-[9px] font-black px-1 py-0.5 rounded border ${availability.tone} whitespace-nowrap shrink-0">${availability.label}</span>`;
-}
-
-function availabilityStatsForTeam(team) {
-    const season = gameState.season;
-    if (!season || !team) return null;
-    if (team.isGhost) {
-        const groups = Object.values(season.ghostStatsById || {});
-        for (const group of groups) {
-            const list = Object.values(group || {});
-            if (list.length && list[0].team === team.name) return group;
-        }
-        return null;
-    }
-    const managerId = team.managerId ?? (gameState.managers.find(m => m.name === team.name) || {}).id;
-    if (managerId == null) return null;
-    return (season.playerStatsByManager || {})[managerId] || null;
-}
-
-// Compact strip under the scoreboard: who cannot play, or is about to be rested.
-function renderMatchAvailability(t1, t2) {
-    const el = document.getElementById('match-availability');
-    if (!el) return;
-
-    const ref = availabilityRefMatchday();
-    const groups = [t1, t2].map(team => {
-        const stats = availabilityStatsForTeam(team);
-        if (!stats) return '';
-        const rows = Object.values(stats)
-            .map(st => {
-                const availability = availabilityForState(st, ref);
-                if (!availability) return null;
-                return `<span title="${escapeHTML(availability.title)}" class="text-[10px] font-bold px-1.5 py-0.5 rounded border ${availability.tone} whitespace-nowrap">${escapeHTML(st.name)} ${availability.label}</span>`;
-            })
-            .filter(Boolean);
-        if (!rows.length) return '';
-        return `<div class="flex flex-wrap items-center justify-center gap-1">
-            <span class="text-[9px] font-black uppercase tracking-wider text-slate-400 mr-1">${escapeHTML(team.name || '')}</span>
-            ${rows.slice(0, 8).join('')}
-        </div>`;
-    }).filter(Boolean);
-
-    if (!groups.length) {
-        el.innerHTML = '';
-        el.classList.add('hidden');
-        return;
-    }
-    el.innerHTML = `<div class="text-[9px] font-black uppercase tracking-wider text-slate-500 mb-1">Availability</div>${groups.join('')}`;
-    el.classList.remove('hidden');
-}
-
-// League rotation log: which players missed out and why, kept for the results screen.
-function logSeasonAvailability(manager, stats, matchday, activeLineup) {
-    if (!manager || !stats) return;
-    if (!gameState.season) gameState.season = {};
-    if (!gameState.season.availabilityLog) gameState.season.availabilityLog = {};
-    const key = manager.id;
-    if (!gameState.season.availabilityLog[key]) gameState.season.availabilityLog[key] = {};
-    const activeIds = new Set((activeLineup || []).map(slot => slot.player && slot.player.id));
-    Object.values(stats).forEach(st => {
-        const availability = availabilityForState(st, matchday);
-        if (!availability || activeIds.has(st.id)) return;
-        const entry = gameState.season.availabilityLog[key][st.id] || {
-            id: st.id, name: st.name, mainPos: st.mainPos, injured: 0, suspended: 0, rested: 0
-        };
-        if (availability.kind === 'injured') entry.injured++;
-        else if (availability.kind === 'suspended') entry.suspended++;
-        else entry.rested++;
-        gameState.season.availabilityLog[key][st.id] = entry;
-    });
-}
-
 
 function ratingRole(pos) {
     if (pos === 'GK') return 'GK';
@@ -282,68 +164,20 @@ function sofaScoreMatchRating({ goals, assists, isGK, isDEF, cleanSheet, goalsCo
     return clamp(Math.round(rating * 10) / 10, 4.0, 10.0);
 }
 
-function selectActiveLineup(team, playerStats, matchday) {
-    const eligible = (player) => {
-        const stats = playerStats?.[player.id];
-        return !stats || (stats.injuredUntil <= matchday && stats.suspended <= 0);
-    };
-    const fatigueOf = (player) => playerStats?.[player.id]?.fatigue || 0;
-    const starters = (team.lineup || []).filter(slot => slot?.player);
-    let active = starters.filter(slot => eligible(slot.player));
-    const vacancies = starters.filter(slot => !eligible(slot.player)).map(slot => slot.pos);
-
-    const restCandidates = active
-        .filter(slot => slot.pos !== 'GK' && fatigueOf(slot.player) > 65)
-        .sort((a, b) => fatigueOf(b.player) - fatigueOf(a.player));
-    const restCount = Math.min(2, restCandidates.length, Math.max(0, active.length - 9));
-    restCandidates.slice(0, restCount).forEach(slot => {
-        active = active.filter(current => current !== slot);
-        vacancies.push(slot.pos);
-    });
-
-    const alreadyActive = new Set(active.map(slot => slot.player.id));
-    const reserves = [...(team.bench || []), ...(team.reserves || [])]
-        .filter(player => player && !alreadyActive.has(player.id) && eligible(player));
-
-    vacancies.forEach(position => {
-        if (!reserves.length) return;
-        reserves.sort((a, b) => {
-            const scoreA = getDynamicOVR(a, position) - fatigueOf(a) * 0.08;
-            const scoreB = getDynamicOVR(b, position) - fatigueOf(b) * 0.08;
-            return scoreB - scoreA;
-        });
-        let candidateIndex = reserves.findIndex(player => getDynamicOVR(player, position) >= player.rating * 0.65);
-        if (candidateIndex < 0) candidateIndex = 0;
-        const [candidate] = reserves.splice(candidateIndex, 1);
-        active.push({
-            player: candidate,
-            pos: position,
-            yel: 0
-        });
-    });
-
-    return active.map(slot => {
-        const fatigue = fatigueOf(slot.player);
-        const fatiguePenalty = fatigue > 70 ? 6 : fatigue > 50 ? 3 : fatigue > 30 ? 1 : 0;
-        return {
-            ...slot,
-            player: { ...slot.player, rating: Math.max(40, slot.player.rating - fatiguePenalty) },
-            yel: 0
-        };
-    });
+function selectActiveLineup(team) {
+    return (team.lineup || [])
+        .filter(slot => slot?.player)
+        .map(slot => ({ ...slot, yel: 0 }));
 }
 
-function applySideMatchEffects(activeLineup, playerStats, matchday, goalsAgainst, trackScoring) {
+function applySideMatchEffects(activeLineup, playerStats, goalsAgainst, trackScoring) {
     if (!playerStats) return;
     const isDefPos = position => ['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB'].includes(position);
     const cleanSheet = goalsAgainst === 0;
-    const playedIds = new Set();
-    const suspensionsAtStart = new Map(Object.values(playerStats).map(stats => [stats.id, stats.suspended || 0]));
 
     activeLineup.forEach(slot => {
         const stats = playerStats[slot.player.id];
         if (!stats) return;
-        playedIds.add(slot.player.id);
 
         let minutes = 90;
         if (Math.random() < 0.12) minutes = 60 + Math.floor(Math.random() * 25);
@@ -356,24 +190,13 @@ function applySideMatchEffects(activeLineup, playerStats, matchday, goalsAgainst
             red = true;
             stats.reds++;
             minutes = Math.min(minutes, 30 + Math.floor(Math.random() * 40));
-            stats.suspended = Math.max(stats.suspended, 1);
         } else if (cardRoll < 0.082) {
             yellow = true;
             stats.yellows++;
-            stats.seasonYellows++;
         }
-
-        if (yellow && stats.seasonYellows >= 5) {
-            stats.suspended = Math.max(stats.suspended, 1);
-            stats.seasonYellows = 0;
-        }
-
-        if (minutes < 50 && Math.random() < 0.45) stats.injuredUntil = matchday + 2 + Math.floor(Math.random() * 3);
-        else if (Math.random() < 0.02) stats.injuredUntil = matchday + 2 + Math.floor(Math.random() * 2);
 
         stats.apps++;
         stats.minutes += minutes;
-        stats.fatigue = clamp((stats.fatigue || 0) + minutes * 0.35, 0, 100);
         if (cleanSheet && isDefPos(slot.pos)) stats.cleanSheets++;
         if (slot.pos === 'GK') stats.goalsConcededAsGK += goalsAgainst;
 
@@ -398,32 +221,16 @@ function applySideMatchEffects(activeLineup, playerStats, matchday, goalsAgainst
             defActions: actions.defActions,
             keyPasses: actions.keyPasses
         });
-        const fatiguePenalty = stats.fatigue > 60 ? 0.15 : 0;
-        stats.ratingSum += Math.max(3, rating - fatiguePenalty);
+        stats.ratingSum += Math.max(3, rating);
         stats.ratingCount++;
-    });
-
-    Object.values(playerStats).forEach(stats => {
-        const played = playedIds.has(stats.id);
-        stats.fatigue = clamp(stats.fatigue - (played ? 8 : 18), 0, 100);
-        const suspensionAtKickoff = suspensionsAtStart.get(stats.id) || 0;
-        if (suspensionAtKickoff > 0) stats.suspended = Math.max(0, suspensionAtKickoff - 1);
     });
 }
 
-function simulateLeagueMatch(teamA, teamB, statsA, statsB, matchday) {
+function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
     const originalLineupA = teamA.lineup;
     const originalLineupB = teamB.lineup;
-    teamA.lineup = selectActiveLineup(teamA, statsA, matchday);
-    teamB.lineup = selectActiveLineup(teamB, statsB, matchday);
-
-    // Why a starter is missing: injury, suspension or an automatic rest.
-    if (!teamA.isGhost && teamA.managerId != null) {
-        logSeasonAvailability(gameState.managers.find(m => m.id === teamA.managerId), statsA, matchday, teamA.lineup);
-    }
-    if (!teamB.isGhost && teamB.managerId != null) {
-        logSeasonAvailability(gameState.managers.find(m => m.id === teamB.managerId), statsB, matchday, teamB.lineup);
-    }
+    teamA.lineup = selectActiveLineup(teamA);
+    teamB.lineup = selectActiveLineup(teamB);
 
     try {
         // ATT/MID/DEF edge + home advantage, then the same tactics multipliers the
@@ -461,8 +268,8 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB, matchday) {
             if (goal.assisterId != null) assistIdsB.push(goal.assisterId);
         }
 
-        applySideMatchEffects(teamA.lineup, statsA, matchday, goalsForB, { goals: goalIdsA, assists: assistIdsA, result: resultA });
-        applySideMatchEffects(teamB.lineup, statsB, matchday, goalsForA, { goals: goalIdsB, assists: assistIdsB, result: resultB });
+        applySideMatchEffects(teamA.lineup, statsA, goalsForB, { goals: goalIdsA, assists: assistIdsA, result: resultA });
+        applySideMatchEffects(teamB.lineup, statsB, goalsForA, { goals: goalIdsB, assists: assistIdsB, result: resultB });
         return { gf: goalsForA, ga: goalsForB, result: resultA };
     } finally {
         teamA.lineup = originalLineupA;
@@ -572,7 +379,7 @@ function startGhostSeason() {
         for (const [teamA, teamB] of schedule[matchday - 1]) {
             const statsA = getSeasonStatsForTeam(teamA, playerStatsByManager, ghostStatsById);
             const statsB = getSeasonStatsForTeam(teamB, playerStatsByManager, ghostStatsById);
-            const { gf, ga, result } = simulateLeagueMatch(teamA, teamB, statsA, statsB, matchday);
+            const { gf, ga, result } = simulateLeagueMatch(teamA, teamB, statsA, statsB);
             const resultB = result === 'W' ? 'L' : result === 'L' ? 'W' : 'D';
 
             applyMatchResult(rowsById.get(teamA.id), gf, ga, result);
@@ -601,8 +408,7 @@ function startGhostSeason() {
         playerStatsByManager,
         ghostStatsById,
         humanSeries: seriesList,
-        leagueSize: table.length,
-        availabilityLog: (gameState.season && gameState.season.availabilityLog) || {}
+        leagueSize: table.length
     };
 
     showScreen('screen-season');
@@ -1827,6 +1633,8 @@ function showFinalSummary() {
     }).join('');
 
     showScreen('screen-final-summary');
+    // The run is over: nothing left to resume from the main menu.
+    if (typeof SaveGame !== 'undefined' && !Net.online) SaveGame.markFinished();
 }
 
 function renderBracket() {

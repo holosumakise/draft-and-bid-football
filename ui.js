@@ -489,7 +489,6 @@ function updateDashboard(id) {
             <div class="flex items-center min-w-0 w-full overflow-hidden">
                 <span class="font-bold text-slate-400 text-[10px] min-w-[55px] max-w-[65px] shrink-0 border-r border-slate-600 mr-2 truncate text-left pr-1">${escapeHTML(formatPositions(p))}</span>
                 <span class="text-slate-100 font-semibold truncate flex-1">${escapeHTML(p.name)}</span>
-                ${typeof availabilityBadgeHTML === 'function' ? availabilityBadgeHTML(id, p) : ''}
             </div>
             ${!isSolo ? `<span class="text-green-400 font-bold ml-2 shrink-0">€${p.price}M</span>` : ''}
         </li>`).join('');

@@ -12,6 +12,7 @@ const SaveGame = {
     MAX_AGE_MS: 30 * 24 * 60 * 60 * 1000,   // forget saves older than a month
     _timer: null,
     _warned: false,
+    _finished: false,
 
     // Online rooms are never saved: the host owns the simulation and a guest's
     // state lives in the room, so a local snapshot of one would be meaningless.
@@ -66,7 +67,7 @@ const SaveGame = {
     },
 
     save() {
-        if (this._blocked()) return;
+        if (this._blocked() || this._finished) return;
         if (typeof gameState === 'undefined' || !Array.isArray(gameState.managers) || !gameState.managers.length) return;
         try {
             localStorage.setItem(this.KEY, JSON.stringify(this.snapshot()));
@@ -82,7 +83,7 @@ const SaveGame = {
 
     // Draft animations fire several updates in a row; debounce so we write once.
     schedule(delay = 700) {
-        if (this._blocked()) return;
+        if (this._blocked() || this._finished) return;
         clearTimeout(this._timer);
         this._timer = setTimeout(() => { this._timer = null; this.save(); }, delay);
     },
@@ -102,8 +103,21 @@ const SaveGame = {
     },
 
     clear() {
+        clearTimeout(this._timer);
+        this._timer = null;
         try { localStorage.removeItem(this.KEY); } catch (e) {}
         this.setResumeVisible(false);
+    },
+
+    // A finished run must never offer "Resume": drop the snapshot and keep later
+    // autosaves (tab hidden, page unload) from writing the final state back.
+    markFinished() {
+        this._finished = true;
+        this.clear();
+    },
+
+    resetFinished() {
+        this._finished = false;
     }
 };
 

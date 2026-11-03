@@ -42,13 +42,6 @@ const DRAFT_OVR_BASELINE = 85;
 const DRAFT_OVR_WEIGHT = 0.06;
 const DRAFT_OVR_MIN_WEIGHT = 0.25;
 
-// Availability thresholds used by the squad/dashboard badges.
-const AVAILABILITY = Object.freeze({
-    TIRED: 65,     // auto-rest candidates
-    WORN: 45,      // shows a fatigue badge
-    INJURED_MATCHES: 3
-});
-
 // Online room housekeeping.
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // a room older than this is treated as expired and deleted when someone touches it
 // Bump on every deploy. A room records the build that created it and refuses guests

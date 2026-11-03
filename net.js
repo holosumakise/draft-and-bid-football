@@ -684,10 +684,7 @@ function serializeSeason(season) {
         awards: season.awards || null,
         ceremony: season.ceremony || null,
         playerStatsByManager: season.playerStatsByManager || null,
-        ghostStatsById: season.ghostStatsById || null,
-        // Rotations travel too: a guest should be able to see who was rested,
-        // injured or suspended without asking the host.
-        availabilityLog: season.availabilityLog || null
+        ghostStatsById: season.ghostStatsById || null
     };
 }
 
