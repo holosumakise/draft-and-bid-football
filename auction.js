@@ -306,8 +306,8 @@ function applyAuctionAction(managerId, action) {
         return;
     }
 
-    if (managerId !== a.order[a.turnIdx]) return;
-    const holdsHighBid = a.highBidderId === managerId && a.highBid > 0;
+    if (Number(managerId) !== Number(a.order[a.turnIdx])) return;
+    const holdsHighBid = Number(a.highBidderId) === Number(managerId) && a.highBid > 0;
 
     if (action.type === 'raise') {
         // You cannot outbid yourself. The only decisions while leading are buy
@@ -350,7 +350,7 @@ function applyAuctionAction(managerId, action) {
 function auctionControl(type, amount, step) {
     const a = getOpenAuction();
     const bidderId = auctionCurrentBidderId();
-    if (!a || !bidderId) return;
+    if (!a || bidderId == null) return;
     if (!Net.canControl(bidderId)) return showToast('Not your turn.');
 
     if (type === 'raise') {

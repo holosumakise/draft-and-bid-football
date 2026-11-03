@@ -28,7 +28,8 @@ const Net = {
     // --- role helpers ---
     canControl(managerId) {
         if (!this.online) return true;
-        return managerId !== null && managerId !== undefined && managerId === this.myManagerId;
+        if (managerId === null || managerId === undefined || this.myManagerId === null || this.myManagerId === undefined) return false;
+        return Number(managerId) === Number(this.myManagerId);
     },
     // Only one device may end a turn on a shot-clock expiry, or bids would double-fire.
     ownsAuctionClock() { return !this.online || this.isHost; },
@@ -108,8 +109,10 @@ const Net = {
                 user = cred.user;
             }
             this._authUser = user;
-            this.authUid = user.uid;
         }
+        // Always refresh — a stale authUid breaks cmd rules (from must equal auth.uid)
+        // and the host can no longer map the joiner to a roster seat.
+        this.authUid = this._authUser.uid;
         if (!this.selfId) {
             // Per-tab client id (survives refresh in this tab, unique across tabs).
             try {
@@ -387,8 +390,13 @@ const Net = {
         // command of each client; every later one is a child_changed the host
         // listener never sees, so bids would silently vanish.
         const key = `${this.selfId}__${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        const fromUid = (this._authUser && this._authUser.uid) || this.authUid || (this.fb && this.fb.auth && this.fb.auth().currentUser && this.fb.auth().currentUser.uid) || this.selfId;
+        this.authUid = fromUid;
         this.roomRef.child('cmd').child(key).set({
-            from: this.authUid || this.selfId, type, payload: payload === undefined ? null : payload, at: this.serverNow()
+            from: fromUid, type, payload: payload === undefined ? null : payload, at: this.serverNow()
+        }).catch(err => {
+            try { showToast('Bid failed to send — check connection.', 4000); } catch (e) {}
+            console.warn('Net.send failed', err);
         });
     },
 
@@ -398,12 +406,25 @@ const Net = {
         // mailbox and mask the commands behind it.
         if (!cmd || !cmd.type) { snap.ref.remove().catch(() => {}); return; }
         const clientId = cmd.from || String(snap.key).split('__')[0];
-        const slot = this.slotOfClient(clientId);
-        if (slot === null) { snap.ref.remove().catch(() => {}); return; }
+        let slot = this.slotOfClient(clientId);
+        const payload = cmd.payload || {};
+        // Prefer the seat claimed in the payload when it belongs to this sender
+        // (guards against uid/clientId mismatches after roster-key changes).
+        const claimed = payload.managerId;
+        if (claimed != null && this._roster) {
+            const entry = this._roster[String(claimed)]
+                || Object.values(this._roster).find(r => r && Number(r.slot) === Number(claimed));
+            // Only trust the claimed seat when the sender owns it.
+            if (entry && (entry.uid === clientId || entry.clientId === clientId)) {
+                slot = Number(entry.slot != null ? entry.slot : claimed);
+            }
+        }
+        if (slot === null || !Number.isFinite(Number(slot))) { snap.ref.remove().catch(() => {}); return; }
+        slot = Number(slot);
         const handler = this._handlers.onAction;
         // Consume it: a stored command would replay on the host's next reload.
         snap.ref.remove().catch(() => {});
-        if (handler) handler(slot, cmd.type, cmd.payload || {});
+        if (handler) handler(slot, cmd.type, payload);
     },
 
     slotOfClient(clientId) {
@@ -438,9 +459,10 @@ const Net = {
     },
 
     auctionAction(managerId, action) {
-        if (managerId !== this.myManagerId && this.online && !this.isHost) return;
-        if (!this.online || this.isHost) { applyAuctionAction(managerId, action); return; }
-        this.send('auction', { managerId, action });
+        const mid = Number(managerId);
+        if (this.online && !this.isHost && mid !== Number(this.myManagerId)) return;
+        if (!this.online || this.isHost) { applyAuctionAction(mid, action); return; }
+        this.send('auction', { managerId: mid, action });
     },
 
     // --- host -> clients (throttled per subtree) ---

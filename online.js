@@ -172,8 +172,10 @@ const Online = {
         if (!Net.isHost) return;
         if (type === 'auction') {
             // A command may only ever act for the manager who sent it.
-            if (payload.managerId !== slot) return;
-            applyAuctionAction(slot, payload.action || {});
+            const claimed = Number(payload && payload.managerId);
+            const seat = Number(slot);
+            if (!Number.isFinite(claimed) || claimed !== seat) return;
+            applyAuctionAction(seat, (payload && payload.action) || {});
         }
     },
 
