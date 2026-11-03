@@ -53,7 +53,7 @@ const AVAILABILITY = Object.freeze({
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // a room older than this is treated as expired and deleted when someone touches it
 // Bump on every deploy. A room records the build that created it and refuses guests
 // running a different one, so host and guests never simulate with different rules.
-const BUILD_ID = '2026-11-03.2';
+const BUILD_ID = '2026-11-03.3';
 
 // Once the room's skips are gone, an unwanted player is handed to one club picked at
 // random. The wheel spins this long, then pauses before the sale is announced.

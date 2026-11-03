@@ -96,8 +96,10 @@ const Net = {
             this.fb = firebase;
             this.root = app.database().ref();
         }
-        // Anonymous sign-in gives every device a stable uid that the RTDB rules
-        // can enforce. Persistence is on by default, so a refresh keeps the same id.
+        // Anonymous sign-in gives a stable auth uid for security rules.
+        // Roster seats are keyed by slot, not uid — so two tabs in the same
+        // browser (same auth uid) can still occupy different seats without
+        // overwriting each other.
         if (!this._authUser) {
             const auth = this.fb.auth();
             let user = auth.currentUser;
@@ -106,7 +108,21 @@ const Net = {
                 user = cred.user;
             }
             this._authUser = user;
-            this.selfId = user.uid;
+            this.authUid = user.uid;
+        }
+        if (!this.selfId) {
+            // Per-tab client id (survives refresh in this tab, unique across tabs).
+            try {
+                const key = 'dbf.clientId';
+                let id = sessionStorage.getItem(key);
+                if (!id) {
+                    id = this.newSelfId();
+                    sessionStorage.setItem(key, id);
+                }
+                this.selfId = id;
+            } catch (e) {
+                this.selfId = this.newSelfId();
+            }
         }
         return true;
     },
@@ -131,9 +147,19 @@ const Net = {
             const result = await ref.transaction(current => {
                 if (current) return; // taken: abort
                 return {
-                    meta: { code: candidate, hostId: this.selfId, status: 'lobby', mode, build: BUILD_ID, createdAt: this.serverNow() },
+                    meta: { code: candidate, hostId: this.authUid, status: 'lobby', mode, build: BUILD_ID, createdAt: this.serverNow() },
                     lobby: { playerCount: mode === 'H2H' ? 2 : 4, difficulty: 'normal' },
-                    roster: { [this.selfId]: { name, slot: 1, isHost: true, joinedAt: this.serverNow(), connected: true } }
+                    roster: {
+                        '1': {
+                            uid: this.authUid,
+                            clientId: this.selfId,
+                            name,
+                            slot: 1,
+                            isHost: true,
+                            joinedAt: this.serverNow(),
+                            connected: true
+                        }
+                    }
                 };
             });
             if (result && result.committed && result.snapshot.exists()) {
@@ -176,8 +202,16 @@ const Net = {
         if (!slot) throw new Error(takenSlots.length >= 4 ? 'The room is full.' : 'All slots for this room are taken.');
 
         this.roomRef = roomRef;
-        await this.roomRef.child('roster').child(this.selfId).set({
-            name, slot, isHost: false, joinedAt: this.serverNow(), connected: true
+        // Seats are keyed by slot number so a second device (or tab) never
+        // overwrites the host's roster entry.
+        await this.roomRef.child('roster').child(String(slot)).set({
+            uid: this.authUid,
+            clientId: this.selfId,
+            name,
+            slot,
+            isHost: false,
+            joinedAt: this.serverNow(),
+            connected: true
         });
         this.online = true;
         this.isHost = false;
@@ -196,9 +230,6 @@ const Net = {
         const s = this.loadSession();
         if (!s || this.online) return false;
         await this.connect();
-        // After anonymous auth, selfId is the persisted uid. Prefer it over the
-        // session copy so a device that signed in again still owns its seat.
-        const uid = this.selfId || s.selfId;
         const roomRef = this.root.child('rooms').child(s.code);
         const room = (await roomRef.once('value')).val();
         if (!room || !room.meta || this.isExpired(room.meta)) {
@@ -208,25 +239,26 @@ const Net = {
             return false;
         }
         const roster = room.roster || {};
-        if (!roster[uid]) {
-            // Fall back to the session selfId key if the auth uid changed (rare).
-            const legacy = roster[s.selfId];
-            if (legacy && legacy.slot === s.slot) {
-                await roomRef.child('roster').child(uid).set({
-                    name: s.name, slot: s.slot, isHost: false, joinedAt: this.serverNow(), connected: true
-                });
-                roomRef.child('roster').child(s.selfId).remove().catch(() => {});
-                roster[uid] = { name: s.name, slot: s.slot, isHost: false, connected: true };
-            } else {
-                const seatTaken = Object.values(roster).some(r => r && r.slot === s.slot);
-                if (seatTaken) { this.clearSession(); return false; }
-                await roomRef.child('roster').child(uid).set({
-                    name: s.name, slot: s.slot, isHost: false, joinedAt: this.serverNow(), connected: true
-                });
-                roster[uid] = { name: s.name, slot: s.slot, isHost: false, connected: true };
-            }
+        const slotKey = String(s.slot);
+        const seat = roster[slotKey] || Object.values(roster).find(r => r && r.slot === s.slot);
+        // Prefer restoring the same seat if it is free or still ours.
+        const ours = seat && (seat.clientId === this.selfId || seat.uid === this.authUid || seat.clientId === s.selfId);
+        if (!seat || ours) {
+            await roomRef.child('roster').child(slotKey).set({
+                uid: this.authUid,
+                clientId: this.selfId,
+                name: s.name,
+                slot: s.slot,
+                isHost: false,
+                joinedAt: this.serverNow(),
+                connected: true
+            });
+            roster[slotKey] = { uid: this.authUid, clientId: this.selfId, name: s.name, slot: s.slot, isHost: false, connected: true };
+        } else {
+            // Seat taken by someone else after we left.
+            this.clearSession();
+            return false;
         }
-        this.selfId = uid;
         this.roomRef = roomRef;
         this.online = true;
         this.isHost = false;
@@ -261,12 +293,16 @@ const Net = {
             // Without this a stale disconnect handler would write into the room (or
             // recreate it as a stub) the next time this tab goes offline.
             try { this.roomRef.onDisconnect().cancel(); } catch (e) {}
-            try { this.roomRef.child('roster').child(this.selfId).onDisconnect().cancel(); } catch (e) {}
+            try {
+                if (this.myManagerId != null) {
+                    this.roomRef.child('roster').child(String(this.myManagerId)).onDisconnect().cancel();
+                }
+            } catch (e) {}
             if (this.isHost) {
                 // The host leaving deletes the whole room; every guest sees meta vanish.
                 this.roomRef.remove().catch(() => {});
-            } else {
-                this.roomRef.child('roster').child(this.selfId).remove().catch(() => {});
+            } else if (this.myManagerId != null) {
+                this.roomRef.child('roster').child(String(this.myManagerId)).remove().catch(() => {});
             }
         }
         this.online = false;
@@ -320,13 +356,21 @@ const Net = {
             // The host owns the simulation, so a host that goes away (closed tab,
             // refresh, lost connection) takes the room with it.
             this.roomRef.onDisconnect().remove();
+            // Keep seat 1 marked connected while the host is here.
+            if (this.myManagerId != null) {
+                const seat = this.roomRef.child('roster').child(String(this.myManagerId));
+                seat.update({ connected: true, uid: this.authUid, clientId: this.selfId }).catch(() => {});
+            }
             return;
         }
-        const me = this.roomRef.child('roster').child(this.selfId);
+        if (this.myManagerId == null) return;
+        const me = this.roomRef.child('roster').child(String(this.myManagerId));
         me.onDisconnect().update({ connected: false });
-        me.update({ connected: true });
+        me.update({ connected: true, uid: this.authUid, clientId: this.selfId });
         clearInterval(this._heartbeat);
-        this._heartbeat = setInterval(() => { if (this._conn.connected) me.update({ connected: true, seen: this.serverNow() }); }, 10000);
+        this._heartbeat = setInterval(() => {
+            if (this._conn.connected) me.update({ connected: true, seen: this.serverNow() });
+        }, 10000);
     },
 
     detach() {
@@ -344,7 +388,7 @@ const Net = {
         // listener never sees, so bids would silently vanish.
         const key = `${this.selfId}__${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
         this.roomRef.child('cmd').child(key).set({
-            from: this.selfId, type, payload: payload === undefined ? null : payload, at: this.serverNow()
+            from: this.authUid || this.selfId, type, payload: payload === undefined ? null : payload, at: this.serverNow()
         });
     },
 
@@ -363,8 +407,15 @@ const Net = {
     },
 
     slotOfClient(clientId) {
-        const r = this._roster && this._roster[clientId];
-        return r ? r.slot : null;
+        if (!this._roster || clientId == null) return null;
+        // Roster is keyed by slot; match auth uid or per-tab clientId on the entry.
+        for (const [key, r] of Object.entries(this._roster)) {
+            if (!r) continue;
+            if (r.uid === clientId || r.clientId === clientId || String(r.slot) === String(clientId) || key === String(clientId)) {
+                return Number.isFinite(r.slot) ? r.slot : Number(key);
+            }
+        }
+        return null;
     },
 
     // Online only: is the device that owns this manager still connected?
@@ -372,16 +423,18 @@ const Net = {
     // so a brief RTDB blip does not auto-pass a turn.
     isManagerConnected(managerId) {
         if (!this.online || !this._roster) return true;
-        const entry = Object.values(this._roster).find(r => r && r.slot === managerId);
+        const entry = this._roster[String(managerId)]
+            || Object.values(this._roster).find(r => r && r.slot === managerId);
         if (!entry) return true;
         return entry.connected !== false;
     },
 
-    // Client id (auth uid) for a manager slot, or null.
+    // Auth uid for a manager slot, or null.
     clientIdForSlot(managerId) {
         if (!this._roster) return null;
-        const pair = Object.entries(this._roster).find(([, r]) => r && r.slot === managerId);
-        return pair ? pair[0] : null;
+        const entry = this._roster[String(managerId)]
+            || Object.values(this._roster).find(r => r && r.slot === managerId);
+        return entry ? (entry.uid || entry.clientId || null) : null;
     },
 
     auctionAction(managerId, action) {
