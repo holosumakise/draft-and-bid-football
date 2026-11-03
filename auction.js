@@ -621,38 +621,12 @@ function renderAuctionPanel() {
             <div class="flex flex-wrap gap-1 mt-2">${a.order.map(id => auctionStatusChip(id)).join('')}</div>
         </div>`;
 
-    // Proxy controls belong to the device's own club, so a guest can leave a
-    // ceiling even while somebody else is on the clock.
-    const viewerId = auctionViewerManagerId();
-    const viewer = auctionManagerById(viewerId);
-    const viewerIn = viewerId !== null && viewerId !== undefined && !a.out[viewerId];
-    const proxyOn = auctionHasProxy(viewerId);
-    const proxyCeiling = auctionProxyFor(viewerId);
-    const proxyControl = viewerIn ? `
-        <div class="mt-1 border-t border-slate-700 pt-2">
-            <div class="flex items-center justify-between text-[10px] font-bold mb-1 gap-2">
-                <span class="text-slate-400">Max bid (auto)</span>
-                <span class="${proxyOn ? 'text-cyan-300' : 'text-slate-500'}">${proxyOn ? (proxyCeiling ? `AUTO to €${proxyCeiling}M` : 'AUTO on') : 'off'}</span>
-            </div>
-            <div class="flex gap-1.5">
-                <input id="proxy-entry" type="text" inputmode="numeric" autocomplete="off"
-                    placeholder="Max €${Math.max(floor, MIN_BID)}M"
-                    class="flex-1 min-w-0 bg-slate-950 border border-cyan-700 rounded-lg px-2 py-1.5 text-xs text-white tracking-widest focus:border-cyan-400 outline-none">
-                <button type="button" onclick="auctionSetProxyFromInput(${viewerId})"
-                    class="px-2.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-900 text-xs font-black">SET</button>
-                ${proxyOn ? `<button type="button" onclick="auctionClearProxy(${viewerId})"
-                    class="px-2 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-black">OFF</button>` : ''}
-            </div>
-            <p class="text-[9px] text-slate-500 mt-1">The host bids one credit above the high bid for you, never above this ceiling.</p>
-        </div>` : '';
-
     if (!mine) {
         return `
             ${header}
             <div class="flex-1 flex flex-col justify-center gap-2 text-center py-3">
                 <span class="text-sm font-black text-white">${escapeHTML(bidder ? bidder.name : 'Next bidder')} is up</span>
                 <span class="text-xs text-slate-400">${holdsHighBid ? `Decides whether to raise or buy at €${a.highBid}M.` : `Must reach €${floor}M to stay in.`}</span>
-                ${proxyControl}
             </div>`;
     }
 
@@ -667,7 +641,6 @@ function renderAuctionPanel() {
                    class="w-full py-3 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-base shadow">BUY AT €${a.highBid}M</button>
                 <button type="button" onclick="auctionControl('pass')"
                    class="w-full py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-bold text-sm">PASS</button>
-                ${proxyControl}
             </div>`;
     }
 
@@ -690,6 +663,5 @@ function renderAuctionPanel() {
             <button type="button" onclick="auctionControl('pass')"
                    class="w-full py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-bold text-sm">PASS</button>
             ${!canRaise ? '<p class="text-[10px] font-bold text-red-400">You cannot cover the current bid.</p>' : ''}
-            ${proxyControl}
         </div>`;
 }
