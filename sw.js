@@ -6,7 +6,7 @@
 // room state is worse than an honest offline error.
 // ============================================================
 
-const CACHE = 'dbf-shell-v1';
+const CACHE = 'dbf-shell-v3';
 const SHELL = [
     './',
     './index.html',
@@ -45,6 +45,8 @@ self.addEventListener('activate', event => {
     })());
 });
 
+// Network first: every player must load the same build as the room's host, so a
+// fresh copy always wins and the cache is only the offline fallback.
 self.addEventListener('fetch', event => {
     const request = event.request;
     if (request.method !== 'GET') return;
@@ -52,14 +54,6 @@ self.addEventListener('fetch', event => {
     if (url.origin !== self.location.origin) return;
 
     event.respondWith((async () => {
-        const cached = await caches.match(request);
-        if (cached) {
-            // Refresh in the background so the next load gets the new build.
-            event.waitUntil(fetch(request).then(response => {
-                if (response && response.ok) return caches.open(CACHE).then(cache => cache.put(request, response.clone()));
-            }).catch(() => {}));
-            return cached;
-        }
         try {
             const response = await fetch(request);
             if (response && response.ok) {
@@ -68,6 +62,8 @@ self.addEventListener('fetch', event => {
             }
             return response;
         } catch (err) {
+            const cached = await caches.match(request);
+            if (cached) return cached;
             if (request.mode === 'navigate') {
                 const fallback = await caches.match('./index.html');
                 if (fallback) return fallback;

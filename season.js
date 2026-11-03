@@ -1835,7 +1835,7 @@ function renderBracket() {
     if (q.length === 0) {
         // A guest device follows the host's screen; only the host ends the run.
         if (guest) return;
-        return showScreen('screen-main');
+        return leaveGameToMenu();
     }
 
     const isH2H = gameState.mode === 'H2H';

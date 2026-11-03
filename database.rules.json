@@ -2,26 +2,66 @@
   "rules": {
     "rooms": {
       "$code": {
-        ".read": true,
-        ".write": true,
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || (!newData.exists() && data.child('meta/hostId').val() === auth.uid))",
 
         "meta": {
-            ".validate": "newData().hasChild('code') && newData().hasChild('hostId') && newData().hasChild('status')"
+          ".write": "auth != null && data.exists() && newData.exists() && data.child('hostId').val() === auth.uid && newData.child('hostId').val() === auth.uid && data.child('code').val() === newData.child('code').val()",
+          ".validate": "newData.hasChild('code') && newData.hasChild('hostId') && newData.hasChild('status')"
         },
 
         "lobby": {
-            "playerCount": { ".validate": "newData().isNumber() && newData().val() >= 1 && newData().val() <= 8" },
-            "difficulty": { ".validate": "newData().val() === 'easy' || newData().val() === 'normal' || newData().val() === 'hard' || newData().val() === 'legend'" }
+          ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid",
+          "playerCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 4" },
+          "difficulty": { ".validate": "newData.val() === 'easy' || newData.val() === 'normal' || newData.val() === 'hard' || newData.val() === 'legend'" }
         },
 
         "roster": {
-            "$clientId": {
-                ".validate": "newData().hasChild('name') && newData().child('slot').isNumber() && newData().child('slot').val() >= 1 && newData().child('slot').val() <= 8"
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.parent().parent().hasChild('meta') && newData.hasChild('name') && newData.child('slot').isNumber() && newData.child('slot').val() >= 1 && newData.child('slot').val() <= 4"
+          }
+        },
+
+        "game": {
+          "draft": {
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+          },
+          "auction": {
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+          },
+          "info": {
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+          },
+          "screen": {
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+          },
+          "season": {
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+          },
+          "europe": {
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+          },
+          "match": {
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+          },
+          "managers": {
+            "$slot": {
+              "host": {
+                ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+              },
+              "own": {
+                ".write": "auth != null && root.child('rooms').child($code).child('roster').child(auth.uid).child('slot').val() == $slot"
+              }
             }
+          }
         },
 
         "cmd": {
-            "$key": { ".validate": "newData().hasChild('type') && newData().hasChild('from')" }
+          "$key": {
+            ".write": "auth != null && (!data.exists() || !newData.exists()) && (!newData.exists() || newData.child('from').val() === auth.uid)",
+            ".validate": "!newData.exists() || (newData.parent().parent().hasChild('meta') && newData.hasChild('type') && newData.hasChild('from'))"
+          }
         }
       }
     }

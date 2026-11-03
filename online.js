@@ -16,7 +16,10 @@ const Online = {
     pendingManagers: null,
 
     install() {
-        Net._handlers.onRoster = roster => this.renderLobby(roster, Net._lobby);
+        Net._handlers.onRoster = roster => {
+            this.renderLobby(roster, Net._lobby);
+            this.onPresenceChange(roster);
+        };
         Net._handlers.onLobby = lobby => this.renderLobby(Net._roster, lobby);
         Net._handlers.onAction = (slot, type, payload) => this.onAction(slot, type, payload);
         Net._handlers.onState = (key, value) => this.onState(key, value);
@@ -24,13 +27,38 @@ const Online = {
         Net._handlers.onEnd = reason => this.onRoomClosed(reason);
     },
 
+    // Roster connected flags changed: refresh manager cards and, if the current
+    // bidder just dropped offline, auto-advance the auction so the room does not
+    // sit on a full shot clock for a phone that is gone.
+    onPresenceChange(roster) {
+        if (!this.gameLive || !gameState.managers || !gameState.managers.length) return;
+        gameState.managers.forEach(m => {
+            if (typeof updateDashboard === 'function') updateDashboard(m.id);
+            if (typeof updateConnectionBadge === 'function') updateConnectionBadge(m.id);
+        });
+        if (!Net.isHost) return;
+        const a = typeof getOpenAuction === 'function' ? getOpenAuction() : null;
+        if (!a) return;
+        const bidderId = a.order[a.turnIdx];
+        if (bidderId == null) return;
+        if (Net.isManagerConnected(bidderId)) return;
+        if (typeof openAuctionTurn === 'function') openAuctionTurn();
+    },
+
+    // The Leave controls carry .leave-ctl; a body class hides them for a guest of a live game.
+    applyGuestLock() {
+        document.body.classList.toggle('guest-locked', Net.guestLocked());
+    },
+
     reset() {
         this.gameLive = false;
+        this.restoreOwnPending = false;
         this.mirror = null;
         this.mirrorSeen = 0;
         this.mirrorKey = null;
         this.pendingManagers = null;
         this.note('');
+        this.applyGuestLock();
     },
 
     // --- Lobby ---
@@ -116,7 +144,8 @@ const Online = {
     // --- Start of play ---
     beginGame() {
         this.gameLive = true;
-        this.pendingManagers = null;
+        // A guest keeps anything that arrived while its game was still being set up.
+        if (!Net.online || Net.isHost) this.pendingManagers = null;
         if (!Net.online) return;
         if (!Net.isHost) return;
         Net.roomRef.child('meta').update({ status: 'live', startedAt: Net.serverNow(), playerCount: gameState.managers.length });
@@ -154,11 +183,36 @@ const Online = {
         gameState.playerCount = meta?.playerCount || (gameState.mode === 'H2H' ? 2 : (Net._lobby?.playerCount || 4));
         gameState.difficulty = meta?.difficulty || Net._lobby?.difficulty || 'normal';
         initGame();
+        this.applyGuestLock();
+        if (this.pendingManagers) {
+            const pending = this.pendingManagers;
+            this.pendingManagers = null;
+            this.onManagersNode(pending);
+        }
+    },
+
+    // A refreshed guest: rebuild the game screen from the room, then replay the
+    // host's published state in dependency order. The guest's own XI, bench and
+    // tactics come back from the copy this device wrote before the refresh.
+    resumeGuest(room) {
+        const meta = room.meta || {};
+        if (meta.status !== 'live') { this.enterLobby(Net.roomCode); return; }
+        Net._started = true;
+        this.onHostStart(meta);
+        const game = room.game || {};
+        this.restoreOwnPending = true;
+        ['info', 'managers', 'draft', 'auction', 'match', 'season', 'europe', 'screen'].forEach(key => {
+            if (game[key] !== undefined && game[key] !== null) this.onState(key, game[key]);
+        });
+        this.restoreOwnPending = false;
     },
 
     onRoomClosed() {
+        clearAuctionTimer();
+        gameState.matchSim = null;
         this.reset();
         showScreen('screen-main');
+        if (typeof SaveGame !== 'undefined') SaveGame.updateResumeButton();
     },
 
     onState(key, value) {
@@ -205,7 +259,7 @@ const Online = {
             if (Array.isArray(host.squad)) m.squad = host.squad.filter(Boolean);
             if (typeof host.balance === 'number') m.balance = host.balance;
             if (host.name) m.name = host.name;
-            if (!Net.canControl(id)) {
+            if (!Net.canControl(id) || (this.restoreOwnPending && Array.isArray(own.formation))) {
                 if (Array.isArray(own.formation)) m.formation = own.formation.map(fillNode);
                 if (Array.isArray(own.bench)) m.bench = own.bench.map(fillBenchNode);
                 if (own.tactics) m.tactics = { mentality: own.tactics.mentality || 'balanced', press: own.tactics.press || 'mid' };
@@ -217,9 +271,9 @@ const Online = {
                 updateTeamOVR(id);
             }
         });
-        if (document.getElementById('screen-game')?.classList.contains('active')) {
+        if (document.getElementById('screen-game')?.classList.contains('active') || this.restoreOwnPending) {
             gameState.managers.forEach(m => {
-                if (Net.canControl(m.id)) return;
+                if (Net.canControl(m.id) && !this.restoreOwnPending) return;
                 renderPitchNodes(m.id);
                 renderBenchNodes(m.id);
                 const btn = document.getElementById(`lock-btn-${m.id}`);
@@ -437,3 +491,10 @@ function showScreenLocal(screenId) {
 }
 
 Online.install();
+
+// Page load: a guest who refreshed (or reopened the tab) is put back in their room.
+window.addEventListener('load', () => {
+    Net.resumeSession().catch(err => {
+        showToast((err && err.message) || 'Could not rejoin your online room. Reload to try again.', 6000);
+    });
+});

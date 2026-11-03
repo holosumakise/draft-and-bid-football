@@ -23,6 +23,8 @@ const Net = {
     _conn: { connected: false, ever: false },
     _handlers: {},
 
+    SESSION_KEY: 'dbf.session',
+
     // --- role helpers ---
     canControl(managerId) {
         if (!this.online) return true;
@@ -31,10 +33,35 @@ const Net = {
     // Only one device may end a turn on a shot-clock expiry, or bids would double-fire.
     ownsAuctionClock() { return !this.online || this.isHost; },
     ownsGame() { return !this.online || this.isHost; },
+    // Once an online game is live a guest has no way out: only the host can end it.
+    guestLocked() {
+        return this.online && !this.isHost && (this._started === true || (!!this._meta && this._meta.status === 'live'));
+    },
+
+    // --- guest session: lets a refreshed page drop back into the same room and seat ---
+    saveSession(name) {
+        if (!this.online || this.isHost) return;
+        try {
+            localStorage.setItem(this.SESSION_KEY, JSON.stringify({
+                code: this.roomCode, selfId: this.selfId, name, slot: this.myManagerId, mode: this.mode, at: Date.now()
+            }));
+        } catch (e) {}
+    },
+    loadSession() {
+        try {
+            const s = JSON.parse(localStorage.getItem(this.SESSION_KEY) || 'null');
+            if (!s || !s.code || !s.selfId || !Number.isFinite(s.slot)) return null;
+            if (!Number.isFinite(s.at) || Date.now() - s.at > ROOM_TTL_MS) { this.clearSession(); return null; }
+            return s;
+        } catch (e) { return null; }
+    },
+    clearSession() {
+        try { localStorage.removeItem(this.SESSION_KEY); } catch (e) {}
+    },
 
     // --- firebase bootstrap (loaded on demand so local play stays offline-safe) ---
     loadSdk() {
-        if (typeof firebase !== 'undefined' && firebase.initializeApp) return Promise.resolve();
+        if (typeof firebase !== 'undefined' && firebase.initializeApp && firebase.auth) return Promise.resolve();
         if (window.__netSdkPromise) return window.__netSdkPromise;
         const load = src => new Promise((resolve, reject) => {
             const s = document.createElement('script');
@@ -42,7 +69,11 @@ const Net = {
             document.head.appendChild(s);
         });
         const base = 'https://www.gstatic.com/firebasejs/10.12.5/';
-        window.__netSdkPromise = load(`${base}firebase-app-compat.js`).then(() => load(`${base}firebase-database-compat.js`));
+        // App → Auth → Database. Anonymous auth is what lets the security rules
+        // pin every write to a real uid instead of an open project URL.
+        window.__netSdkPromise = load(`${base}firebase-app-compat.js`)
+            .then(() => load(`${base}firebase-auth-compat.js`))
+            .then(() => load(`${base}firebase-database-compat.js`));
         return window.__netSdkPromise;
     },
 
@@ -56,14 +87,26 @@ const Net = {
     },
 
     async connect() {
-        if (this.fb) return true;
+        if (this.fb && this._authUser) return true;
         const cfg = this.config();
         if (!cfg) throw new Error('No Firebase project configured. Paste your web config into firebase-config.js — it needs a databaseURL — then reload.');
         await this.loadSdk();
         if (!this.fb) {
-            const app = typeof firebase.apps === 'function' && firebase.apps.length ? firebase.app() : firebase.initializeApp(cfg);
+            const app = (typeof firebase.apps !== 'undefined' && firebase.apps.length) ? firebase.app() : firebase.initializeApp(cfg);
             this.fb = firebase;
             this.root = app.database().ref();
+        }
+        // Anonymous sign-in gives every device a stable uid that the RTDB rules
+        // can enforce. Persistence is on by default, so a refresh keeps the same id.
+        if (!this._authUser) {
+            const auth = this.fb.auth();
+            let user = auth.currentUser;
+            if (!user) {
+                const cred = await auth.signInAnonymously();
+                user = cred.user;
+            }
+            this._authUser = user;
+            this.selfId = user.uid;
         }
         return true;
     },
@@ -78,21 +121,27 @@ const Net = {
 
     async createRoom(name, mode) {
         await this.connect();
-        this.selfId = this.newSelfId();
-        const code = this.makeCode();
-        this.roomRef = this.root.child('rooms').child(code);
-        await this.roomRef.transaction(current => {
-            if (current) return; // extremely unlikely collision; abort and let the caller retry
-            return {
-                meta: { code, hostId: this.selfId, status: 'lobby', mode, createdAt: this.serverNow() },
-                lobby: { playerCount: mode === 'H2H' ? 2 : 4, difficulty: 'normal' },
-                roster: { [this.selfId]: { name, slot: 1, isHost: true, joinedAt: this.serverNow(), connected: true } },
-                game: null,
-                cmd: null
-            };
-        });
-        const snapshot = await this.roomRef.once('value');
-        if (!snapshot.exists()) throw new Error('Could not create the room. Try again.');
+        // selfId is the anonymous auth uid set in connect().
+        // A code that is already taken aborts the transaction, so draw another one
+        // instead of mistaking someone else's room for ours.
+        let code = null;
+        for (let attempt = 0; attempt < 6 && !code; attempt++) {
+            const candidate = this.makeCode();
+            const ref = this.root.child('rooms').child(candidate);
+            const result = await ref.transaction(current => {
+                if (current) return; // taken: abort
+                return {
+                    meta: { code: candidate, hostId: this.selfId, status: 'lobby', mode, build: BUILD_ID, createdAt: this.serverNow() },
+                    lobby: { playerCount: mode === 'H2H' ? 2 : 4, difficulty: 'normal' },
+                    roster: { [this.selfId]: { name, slot: 1, isHost: true, joinedAt: this.serverNow(), connected: true } }
+                };
+            });
+            if (result && result.committed && result.snapshot.exists()) {
+                code = candidate;
+                this.roomRef = ref;
+            }
+        }
+        if (!code) throw new Error('Could not create the room. Try again.');
         this.online = true;
         this.isHost = true;
         this.roomCode = code;
@@ -104,11 +153,19 @@ const Net = {
 
     async joinRoom(name, code, mode) {
         await this.connect();
-        this.selfId = this.newSelfId();
+        // selfId is the anonymous auth uid set in connect().
         const roomRef = this.root.child('rooms').child(code.toUpperCase());
         const snapshot = await roomRef.once('value');
         const room = snapshot.val();
-        if (!snapshot.exists()) throw new Error(`No room with code ${code.toUpperCase()} found.`);
+        // A room without meta is a leftover stub, not a real room.
+        if (!snapshot.exists() || !room || !room.meta) throw new Error(`No room with code ${code.toUpperCase()} found.`);
+        if (this.isExpired(room.meta)) {
+            roomRef.remove().catch(() => {});
+            throw new Error('That room has expired.');
+        }
+        if (room.meta.build && room.meta.build !== BUILD_ID) {
+            throw new Error('That room runs a different version of the game. Reload this page to update, then try again.');
+        }
         if (room.meta && room.meta.status !== 'lobby') throw new Error('That game has already started.');
         if (room.meta && room.meta.mode !== mode) throw new Error(`That room is a ${room.meta.mode} room.`);
 
@@ -127,8 +184,68 @@ const Net = {
         this.roomCode = code.toUpperCase();
         this.mode = mode;
         this.myManagerId = slot;
+        this.saveSession(name);
         this.attach();
         return this.roomCode;
+    },
+
+    // Called once on page load. A guest who refreshes (or reopens the tab) is put
+    // straight back into the room and seat they had; a guest of a live game has
+    // nowhere else to go.
+    async resumeSession() {
+        const s = this.loadSession();
+        if (!s || this.online) return false;
+        await this.connect();
+        // After anonymous auth, selfId is the persisted uid. Prefer it over the
+        // session copy so a device that signed in again still owns its seat.
+        const uid = this.selfId || s.selfId;
+        const roomRef = this.root.child('rooms').child(s.code);
+        const room = (await roomRef.once('value')).val();
+        if (!room || !room.meta || this.isExpired(room.meta)) {
+            this.clearSession();
+            if (room && room.meta) roomRef.remove().catch(() => {});
+            showToast('The room you were in no longer exists.', 6000);
+            return false;
+        }
+        const roster = room.roster || {};
+        if (!roster[uid]) {
+            // Fall back to the session selfId key if the auth uid changed (rare).
+            const legacy = roster[s.selfId];
+            if (legacy && legacy.slot === s.slot) {
+                await roomRef.child('roster').child(uid).set({
+                    name: s.name, slot: s.slot, isHost: false, joinedAt: this.serverNow(), connected: true
+                });
+                roomRef.child('roster').child(s.selfId).remove().catch(() => {});
+                roster[uid] = { name: s.name, slot: s.slot, isHost: false, connected: true };
+            } else {
+                const seatTaken = Object.values(roster).some(r => r && r.slot === s.slot);
+                if (seatTaken) { this.clearSession(); return false; }
+                await roomRef.child('roster').child(uid).set({
+                    name: s.name, slot: s.slot, isHost: false, joinedAt: this.serverNow(), connected: true
+                });
+                roster[uid] = { name: s.name, slot: s.slot, isHost: false, connected: true };
+            }
+        }
+        this.selfId = uid;
+        this.roomRef = roomRef;
+        this.online = true;
+        this.isHost = false;
+        this.roomCode = s.code;
+        this.mode = room.meta.mode || s.mode || 'H2H';
+        this.myManagerId = s.slot;
+        // Prime what the listeners would deliver, so the start-up below does not
+        // depend on which snapshot happens to arrive first.
+        this._roster = roster;
+        this._lobby = room.lobby || null;
+        this._meta = room.meta;
+        Online.resumeGuest(room);
+        this.attach();
+        return true;
+    },
+
+    // Rooms older than ROOM_TTL_MS are dead weight; whoever finds one removes it.
+    isExpired(meta) {
+        return !!meta && Number.isFinite(meta.createdAt) && Date.now() - meta.createdAt > ROOM_TTL_MS;
     },
 
     newSelfId() {
@@ -139,9 +256,18 @@ const Net = {
 
     leaveRoom() {
         this.detach();
+        this.clearSession();
         if (this.roomRef) {
-            this.roomRef.child('roster').child(this.selfId).remove().catch(() => {});
-            if (this.isHost) this.roomRef.remove().catch(() => {});
+            // Without this a stale disconnect handler would write into the room (or
+            // recreate it as a stub) the next time this tab goes offline.
+            try { this.roomRef.onDisconnect().cancel(); } catch (e) {}
+            try { this.roomRef.child('roster').child(this.selfId).onDisconnect().cancel(); } catch (e) {}
+            if (this.isHost) {
+                // The host leaving deletes the whole room; every guest sees meta vanish.
+                this.roomRef.remove().catch(() => {});
+            } else {
+                this.roomRef.child('roster').child(this.selfId).remove().catch(() => {});
+            }
         }
         this.online = false;
         this.isHost = false;
@@ -190,6 +316,12 @@ const Net = {
 
     armPresence() {
         if (!this.roomRef || !this._conn.connected) return;
+        if (this.isHost) {
+            // The host owns the simulation, so a host that goes away (closed tab,
+            // refresh, lost connection) takes the room with it.
+            this.roomRef.onDisconnect().remove();
+            return;
+        }
         const me = this.roomRef.child('roster').child(this.selfId);
         me.onDisconnect().update({ connected: false });
         me.update({ connected: true });
@@ -233,6 +365,23 @@ const Net = {
     slotOfClient(clientId) {
         const r = this._roster && this._roster[clientId];
         return r ? r.slot : null;
+    },
+
+    // Online only: is the device that owns this manager still connected?
+    // Local play always returns true. Missing roster entry is treated as online
+    // so a brief RTDB blip does not auto-pass a turn.
+    isManagerConnected(managerId) {
+        if (!this.online || !this._roster) return true;
+        const entry = Object.values(this._roster).find(r => r && r.slot === managerId);
+        if (!entry) return true;
+        return entry.connected !== false;
+    },
+
+    // Client id (auth uid) for a manager slot, or null.
+    clientIdForSlot(managerId) {
+        if (!this._roster) return null;
+        const pair = Object.entries(this._roster).find(([, r]) => r && r.slot === managerId);
+        return pair ? pair[0] : null;
     },
 
     auctionAction(managerId, action) {
@@ -306,17 +455,33 @@ const Net = {
         if (this._handlers.onLobby) this._handlers.onLobby(this._lobby);
     },
 
+    // The room is gone (host left, host dropped, or the room was closed). Everyone
+    // still inside is sent back to the menu with a notice.
+    disband(message) {
+        if (!this.online) return;
+        this.leaveRoom();
+        showToast(message, 8000);
+        if (this._handlers.onEnd) this._handlers.onEnd(message);
+    },
+
     onMeta(meta) {
+        const hadMeta = !!this._meta;
         this._meta = meta || null;
+        if (!meta) {
+            if (this.online && hadMeta) {
+                this.disband(this.isHost
+                    ? 'Connection lost — the room was closed.'
+                    : 'The host left the room, so the game has been disbanded.');
+            }
+            return;
+        }
         if (this._handlers.onMeta) this._handlers.onMeta(this._meta);
         if (meta && meta.status === 'live' && !this.isHost && !this._started) {
             this._started = true;
             if (this._handlers.onStart) this._handlers.onStart(meta);
         }
         if (meta && meta.status === 'closed' && this.online) {
-            showToast('The host closed the room.');
-            this.leaveRoom();
-            if (this._handlers.onEnd) this._handlers.onEnd('Host closed the room.');
+            this.disband('The host left the room, so the game has been disbanded.');
         }
     },
 
@@ -502,3 +667,12 @@ function serializeMatchView(sim) {
             : null
     };
 }
+
+// Closing or reloading the host's tab ends the game for everyone. onDisconnect
+// does this on the server; this is the immediate best-effort version.
+window.addEventListener('pagehide', event => {
+    if (event.persisted) return;
+    if (Net.online && Net.isHost && Net.roomRef) {
+        try { Net.roomRef.remove(); } catch (e) {}
+    }
+});

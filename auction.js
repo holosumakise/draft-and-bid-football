@@ -62,14 +62,6 @@ function auctionProxyFor(managerId) {
     return Number.isFinite(ceiling) && ceiling >= MIN_BID ? Math.floor(ceiling) : 0;
 }
 
-function clearAuctionProxy(managerId) {
-    const proxies = auctionProxies();
-    if (proxies[managerId] === undefined) return;
-    delete proxies[managerId];
-    Net.publishAuctionNow();
-    renderDraftBoard();
-}
-
 // After the leader passes or times out, the best remaining bid takes over. A
 // passed club's earlier bid is not a debt owed by anybody else.
 function recomputeAuctionHighBid(a) {
@@ -210,6 +202,20 @@ function openAuctionTurn() {
                 continue;
             }
             // The ceiling cannot cover the next bid, so the proxy sits out.
+            a.out[bidderId] = true;
+            delete auctionProxies()[bidderId];
+            recomputeAuctionHighBid(a);
+            a.turnIdx = (a.turnIdx + 1) % a.order.length;
+            continue;
+        }
+
+        // Offline guest: do not park the room on a shot clock nobody can answer.
+        // Auto-pass (or hammer if they already hold the high bid) and keep moving.
+        if (typeof Net !== 'undefined' && Net.online && Net.ownsAuctionClock() && !Net.isManagerConnected(bidderId)) {
+            if (holdsHighBid) {
+                finishAuctionSold();
+                return;
+            }
             a.out[bidderId] = true;
             delete auctionProxies()[bidderId];
             recomputeAuctionHighBid(a);
@@ -574,11 +580,14 @@ function auctionStatusChip(managerId) {
     const color = colors[Math.max(0, gameState.managers.findIndex(x => x.id === managerId)) % colors.length];
     const isTurn = !!a && a.status === 'open' && auctionCurrentBidderId() === managerId;
     const auto = !!a && auctionHasProxy(managerId);
+    const offline = typeof Net !== 'undefined' && Net.online && typeof Net.isManagerConnected === 'function' && !Net.isManagerConnected(managerId);
     const label = !a ? '—'
         : a.out[managerId] ? 'OUT'
+        : offline ? 'OFFLINE'
         : a.highBidderId === managerId ? `HIGH €${a.highBid}M${auto ? ' · AUTO' : ''}`
         : isTurn ? (auto ? 'AUTO…' : 'BIDDING') : (auto ? 'AUTO' : 'WAITING');
     const tone = a && a.out[managerId] ? 'text-slate-500 bg-slate-800 border-slate-700'
+        : offline ? 'text-amber-300 bg-amber-950 border-amber-700'
         : a && a.highBidderId === managerId ? 'text-emerald-300 bg-emerald-950 border-emerald-700'
         : isTurn ? `text-${color}-300 bg-slate-800 border-${color}-500 animate-pulse`
         : auto ? 'text-cyan-300 bg-cyan-950 border-cyan-700'

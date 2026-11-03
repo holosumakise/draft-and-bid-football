@@ -942,7 +942,7 @@ function finishMatch() {
     } else if (gameState.mode === 'H2H' && gameState.matchSim) {
         showH2HResult(gameState.matchSim);
     } else {
-        showScreen('screen-main');
+        leaveGameToMenu();
     }
 }
 

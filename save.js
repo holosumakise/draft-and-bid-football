@@ -13,14 +13,34 @@ const SaveGame = {
     _timer: null,
     _warned: false,
 
+    // Online rooms are never saved: the host owns the simulation and a guest's
+    // state lives in the room, so a local snapshot of one would be meaningless.
+    _blocked() {
+        return typeof Net !== 'undefined' && !!Net.online;
+    },
+
+    // A save only counts if it is readable, current-version and inside MAX_AGE_MS,
+    // so the Resume button never offers something load() would reject.
     has() {
-        try { return !!localStorage.getItem(this.KEY); } catch (e) { return false; }
+        let raw = null;
+        try { raw = localStorage.getItem(this.KEY); } catch (e) { return false; }
+        if (!raw) return false;
+        try {
+            const data = JSON.parse(raw);
+            if (data && data.version === 2 && data.state && Number.isFinite(data.savedAt)
+                && Date.now() - data.savedAt <= this.MAX_AGE_MS) return true;
+        } catch (e) {}
+        this.clear();
+        return false;
+    },
+
+    setResumeVisible(visible) {
+        const btn = document.getElementById('btn-resume-save');
+        if (btn) btn.classList.toggle('hidden', !visible);
     },
 
     updateResumeButton() {
-        const btn = document.getElementById('btn-resume-save');
-        if (!btn) return;
-        btn.classList.toggle('hidden', !this.has());
+        this.setResumeVisible(this.has());
     },
 
     snapshot() {
@@ -46,21 +66,23 @@ const SaveGame = {
     },
 
     save() {
+        if (this._blocked()) return;
         if (typeof gameState === 'undefined' || !Array.isArray(gameState.managers) || !gameState.managers.length) return;
         try {
             localStorage.setItem(this.KEY, JSON.stringify(this.snapshot()));
             this._warned = false;
+            this.setResumeVisible(true);
         } catch (e) {
             if (!this._warned) {
                 this._warned = true;
                 if (typeof showToast === 'function') showToast('Could not save locally (storage full?).');
             }
         }
-        this.updateResumeButton();
     },
 
     // Draft animations fire several updates in a row; debounce so we write once.
     schedule(delay = 700) {
+        if (this._blocked()) return;
         clearTimeout(this._timer);
         this._timer = setTimeout(() => { this._timer = null; this.save(); }, delay);
     },
@@ -81,7 +103,7 @@ const SaveGame = {
 
     clear() {
         try { localStorage.removeItem(this.KEY); } catch (e) {}
-        this.updateResumeButton();
+        this.setResumeVisible(false);
     }
 };
 

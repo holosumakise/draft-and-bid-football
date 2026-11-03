@@ -7,12 +7,12 @@ function showScreen(screenId) {
 }
 
 let toastTimer = null;
-function showToast(msg) {
+function showToast(msg, ms = 3500) {
     const toast = document.getElementById('toast');
     document.getElementById('toast-msg').innerText = msg;
     toast.classList.remove('opacity-0'); toast.classList.add('opacity-100');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); }, 3500);
+    toastTimer = setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); }, ms);
 }
 
 // A backgrounded tab never paints, so rAF callbacks are never reached. An online
@@ -396,7 +396,10 @@ function renderDOMForManagers() {
         infoContainer.innerHTML += `
             <div id="manager-card-${m.id}" class="bg-slate-800 rounded-xl p-4 border-l-4 border-${c}-500 flex flex-col">
                 <div class="flex justify-between items-center mb-1">
-                    <h3 class="text-xl font-bold text-white">${escapeHTML(m.name)}</h3>
+                    <h3 class="text-xl font-bold text-white flex items-center gap-2 min-w-0">
+                        <span class="truncate">${escapeHTML(m.name)}</span>
+                        <span id="m${m.id}-conn" class="hidden text-[9px] font-black uppercase tracking-wider text-amber-300 bg-amber-950 border border-amber-700 rounded px-1.5 py-0.5 shrink-0">Reconnecting</span>
+                    </h3>
                     <div class="text-right">
                         <div class="text-sm font-bold text-yellow-400">Team OVR: <span id="m${m.id}-ovr-live">0</span></div>
                         <div class="text-xs font-bold text-slate-400"><span id="m${m.id}-count">0</span>/${MAX_SQUAD_SIZE} Squad</div>
@@ -453,6 +456,14 @@ function renderDOMForManagers() {
     }
 }
 
+function updateConnectionBadge(id) {
+    const el = document.getElementById(`m${id}-conn`);
+    if (!el) return;
+    const online = typeof Net !== 'undefined' && Net.online;
+    const connected = !online || (typeof Net.isManagerConnected === 'function' && Net.isManagerConnected(id));
+    el.classList.toggle('hidden', connected);
+}
+
 function updateDashboard(id) {
     const m = gameState.managers.find(x => x.id === id);
     if(!m) return;
@@ -468,6 +479,8 @@ function updateDashboard(id) {
             balEl.classList.remove('hidden');
         }
     }
+
+    updateConnectionBadge(id);
     
     document.getElementById(`m${id}-count`).innerText = m.squad.length;
     const list = document.getElementById(`m${id}-squad`);

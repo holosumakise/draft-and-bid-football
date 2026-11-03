@@ -79,6 +79,7 @@ function chooseOnline() {
 }
 
 function backToMenu() {
+    if (Net.guestLocked()) return showToast('You cannot leave while the game is running.');
     if (Net.online) Net.leaveRoom();
     Online.reset();
     showScreen('screen-main');
@@ -142,6 +143,7 @@ function copyRoomCode() {
 }
 
 function leaveRoomFromLobby() {
+    if (Net.guestLocked()) return showToast('You cannot leave while the game is running.');
     Net.leaveRoom();
     Online.reset();
     showScreen('screen-main');
@@ -241,16 +243,16 @@ function initGame() {
     if (typeof SaveGame !== 'undefined') SaveGame.save();
 }
 
-// A guest (or the host) can bail out from the game screen without hunting for
-// the lobby's Leave button. The room is closed for a host; a guest just frees
-// their slot.
+// Local play and the online host can leave from the game screen. Leaving as the
+// host deletes the room, and every guest is sent back to the menu with a notice.
+// Online guests have no exit once the game is live (see Net.guestLocked).
 function leaveGameToMenu() {
+    if (Net.guestLocked()) return showToast('Only the host can end an online game.');
     if (Net.online) {
-        const wasHost = Net.isHost;
         Net.leaveRoom();
         Online.reset();
         showScreen('screen-main');
-        if (wasHost) showToast('Room closed.');
+        showToast('Room closed — all managers were sent back to the menu.');
     } else {
         clearAuctionTimer();
         gameState.matchSim = null;

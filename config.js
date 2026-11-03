@@ -50,9 +50,10 @@ const AVAILABILITY = Object.freeze({
 });
 
 // Online room housekeeping.
-const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // abandoned rooms expire after 6h
-const ROOM_LOBBY_GRACE_MS = 90 * 1000;       // empty lobby rooms linger 90s for a rejoin
-const PRESENCE_STALE_MS = 45 * 1000;         // a heartbeat older than this is offline
+const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // a room older than this is treated as expired and deleted when someone touches it
+// Bump on every deploy. A room records the build that created it and refuses guests
+// running a different one, so host and guests never simulate with different rules.
+const BUILD_ID = '2026-11-03.2';
 
 // Once the room's skips are gone, an unwanted player is handed to one club picked at
 // random. The wheel spins this long, then pauses before the sale is announced.
@@ -154,7 +155,7 @@ const LEAGUE_GHOST_NERF = 11;
 // usually wins. Displayed stats stay real; only the ranking is handicapped.
 const GHOST_AWARD_FACTOR = 0.8;       // goals / assists / clean sheets are worth 80% for ghosts
 const GHOST_RATING_PENALTY = 0.25;    // average-rating handicap for ghosts (Player of the Season)
-const EURO_GHOST_NERF = 17; // was 8 originally; raised so European ghosts sit clearly below a well-drafted squad
+const EURO_GHOST_NERF = 17; // keeps European ghosts clearly below a well-drafted squad
 const GHOST_CLUB_NAMES = [
     "Northgate FC", "Riverbank United", "Crown Athletic", "Harbor City",
     "Ironworks Rovers", "Lakeside Town", "Castleford", "Milltown",
