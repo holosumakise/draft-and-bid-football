@@ -249,6 +249,15 @@ const Online = {
             return;
         }
         gameState.auction = { ...auction, out: auction.out || {}, topBidOf: auction.topBidOf || {}, order: auction.order || [] };
+        // Only the presence of a proxy travels. Store truthy placeholders so the
+        // AUTO badge still renders on a guest; the amount stays on the host.
+        if (Array.isArray(auction.proxyIds)) {
+            const seen = {};
+            auction.proxyIds.forEach(id => { seen[Number(id)] = true; });
+            gameState.auctionProxies = seen;
+        } else {
+            gameState.auctionProxies = {};
+        }
         // A guest's clock is its own; rebasing the deadline from the remaining
         // time keeps its countdown honest even when the two devices disagree.
         if (auction.status === 'open' && Number.isFinite(auction.turnRemaining)) {
@@ -292,7 +301,10 @@ const Online = {
     },
 
     applyMatch(view) {
-        if (!view) { this.mirror = null; this.mirrorSeen = 0; this.mirrorKey = null; return; }
+        if (!view) {
+            if (gameState.matchSim === this.mirror) gameState.matchSim = null;
+            this.mirror = null; this.mirrorSeen = 0; this.mirrorKey = null; return;
+        }
         const key = `${view.matchId || ''}|${view.name1}|${view.name2}`;
         if (key !== this.mirrorKey) {
             this.mirrorKey = key;
@@ -300,8 +312,11 @@ const Online = {
             prepareMatchScreen(view.label || 'MATCH', view.name1 || 'Team 1', view.name2 || 'Team 2');
             this.mirror = {
                 t1: { name: view.name1 || 'Team 1', id: null }, t2: { name: view.name2 || 'Team 2', id: null },
-                s1: 0, s2: 0, view: { s1: 0, s2: 0 }, ratings: {}, finished: false
+                s1: 0, s2: 0, view: { s1: 0, s2: 0 }, ratings: {}, finished: false, remoteRatings: null
             };
+            // The ratings modal reads gameState.matchSim, and on a guest the only
+            // simulation is this mirror. Point it there so the button works.
+            gameState.matchSim = this.mirror;
             const a1 = document.getElementById('match-m1-avatar');
             const a2 = document.getElementById('match-m2-avatar');
             if (a1) a1.innerText = view.avatar1 || shortName(view.name1 || '');
@@ -318,6 +333,7 @@ const Online = {
         if (view.finished) {
             sim.finished = true;
             sim.penRes = view.penRes || null;
+            sim.remoteRatings = Array.isArray(view.ratings) ? view.ratings : null;
             // The host's "Continue" button is theirs alone; the client just watches.
             document.getElementById('match-actions')?.classList.add('hidden');
             this.note('Waiting for host...');

@@ -424,6 +424,9 @@ function serializeAuction(a) {
         order: a.order.slice(), turnIdx: a.turnIdx, highBid: a.highBid,
         highBidderId: a.highBidderId, topBidOf: { ...a.topBidOf }, out: { ...a.out },
         status: a.status, turnEndsAt: a.turnEndsAt,
+        // Ceilings never leave the host. Publishing only the ids lets a guest
+        // show an AUTO badge without leaking what its rival is willing to pay.
+        proxyIds: Object.keys(gameState.auctionProxies || {}).map(Number),
         // Remote devices rebase their countdown from this instead of comparing
         // turnEndsAt to their own wall clock, which is not the host's wall clock.
         turnRemaining: a.turnEndsAt ? Math.max(0, a.turnEndsAt - Date.now()) : 0
@@ -441,7 +444,10 @@ function serializeSeason(season) {
         awards: season.awards || null,
         ceremony: season.ceremony || null,
         playerStatsByManager: season.playerStatsByManager || null,
-        ghostStatsById: season.ghostStatsById || null
+        ghostStatsById: season.ghostStatsById || null,
+        // Rotations travel too: a guest should be able to see who was rested,
+        // injured or suspended without asking the host.
+        availabilityLog: season.availabilityLog || null
     };
 }
 
@@ -479,6 +485,20 @@ function serializeMatchView(sim) {
         penRes: sim.penRes || null,
         penLine: sim.penLine || null,
         stats: sim.stats || null,
-        log: (sim.broadcastLog || []).slice(-160)
+        log: (sim.broadcastLog || []).slice(-160),
+        // Guests have no ratings metrics of their own; send the finished display
+        // rows so the Player Ratings button works on every device.
+        ratings: sim.finished
+            ? Object.values(sim.ratings || {}).map(entry => ({
+                name: entry.player?.name || '',
+                mainPos: entry.pos || entry.player?.mainPos || '',
+                team: entry.team,
+                goals: entry.goals || 0,
+                assists: entry.assists || 0,
+                yellow: entry.yellow || 0,
+                red: entry.red ? 1 : 0,
+                rating: Math.round(liveRatingFor(sim, entry) * 10) / 10
+            }))
+            : null
     };
 }

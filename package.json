@@ -1,0 +1,11 @@
+{
+  "name": "draft-and-bid-football",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Draft & Bid Football browser game plus a headless balance lab.",
+  "type": "commonjs",
+  "scripts": {
+    "lab": "node sim/lab.js",
+    "check": "node --check engine-core.js && node --check config.js && node --check game.js && node --check net.js && node --check online.js && node --check ui.js && node --check draft.js && node --check auction.js && node --check match-engine.js && node --check season.js && node --check save.js && node --check sim/lab.js"
+  }
+}

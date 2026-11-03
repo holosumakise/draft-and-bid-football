@@ -476,6 +476,7 @@ function updateDashboard(id) {
             <div class="flex items-center min-w-0 w-full overflow-hidden">
                 <span class="font-bold text-slate-400 text-[10px] min-w-[55px] max-w-[65px] shrink-0 border-r border-slate-600 mr-2 truncate text-left pr-1">${escapeHTML(formatPositions(p))}</span>
                 <span class="text-slate-100 font-semibold truncate flex-1">${escapeHTML(p.name)}</span>
+                ${typeof availabilityBadgeHTML === 'function' ? availabilityBadgeHTML(id, p) : ''}
             </div>
             ${!isSolo ? `<span class="text-green-400 font-bold ml-2 shrink-0">€${p.price}M</span>` : ''}
         </li>`).join('');
@@ -556,8 +557,12 @@ function buildFormationFromPreset(key) {
 function initPitch(id) {
     const m = gameState.managers.find(x => x.id === id);
     m.formationPreset = m.formationPreset || '4-4-2';
-    m.formation = buildFormationFromPreset(m.formationPreset);
-    renderPitchNodes(id); renderBenchNodes(id);
+    // A resumed save (or any re-render mid-draft) already carries a XI. Rebuilding
+    // it here would silently unassign every player, so only seed a fresh club.
+    if (!Array.isArray(m.formation) || !m.formation.length) {
+        m.formation = buildFormationFromPreset(m.formationPreset);
+    }
+    renderPitchNodes(id); renderBenchNodes(m.id);
 }
 
 // OVR shown for a player in a formation slot, including the chemistry bonus.
@@ -952,6 +957,7 @@ function assignPlayer(pId) {
     modalState.type === 'pitch' ? renderPitchNodes(m.id) : renderBenchNodes(m.id);
     updateTeamOVR(m.id); updateDashboard(m.id); closeModal();
     Net.publishOwn(m.id);
+    if (typeof SaveGame !== 'undefined') SaveGame.schedule();
 }
 function removePlayerFromNode(mId, nId, type) {
     const m = gameState.managers.find(x => x.id === mId);
@@ -961,6 +967,7 @@ function removePlayerFromNode(mId, nId, type) {
     type === 'pitch' ? renderPitchNodes(mId) : renderBenchNodes(mId);
     updateTeamOVR(mId); updateDashboard(mId);
     Net.publishOwn(mId);
+    if (typeof SaveGame !== 'undefined') SaveGame.schedule();
 }
 function optimalLineupAssignment(nodes, squad) {
     const slotCount = nodes.length;
@@ -1038,6 +1045,7 @@ function autoFillLineup(mId) {
 
     renderPitchNodes(mId); renderBenchNodes(mId); updateTeamOVR(mId); updateDashboard(mId);
     Net.publishOwn(mId);
+    if (typeof SaveGame !== 'undefined') SaveGame.schedule();
     const gkNode = m.formation.find(n => n.isGK);
     const noGkNote = filled > 0 && gkNode && !gkNode.assignedPlayerId ? ' No GK in squad — goalkeeper slot left open.' : '';
     showToast(`${filled}/${STARTERS} starters placed for ${m.name}.${noGkNote}`);

@@ -16,9 +16,43 @@ const CHEMISTRY = Object.freeze({
 });
 
 // --- Live auction: one bidder at a time, every bid public ---
-const SHOT_CLOCK_MS = 20000;
+// 9s is enough to think, short enough that four managers do not sit through a
+// minute of dead air per player. A max-bid proxy turns most of those turns into
+// instant resolutions anyway.
+const SHOT_CLOCK_MS = 9000;
 const AUCTION_TICK_MS = 200;
 const BID_RAISE_STEPS = [1, 5];
+
+// --- Auction proxy (eBay-style max bid) ---
+// The host keeps every ceiling in memory; only the fact that a manager has set
+// one is published, never the amount.
+const PROXY_MAX_STEPS = 2000;     // guard against a pathological proxy war
+
+// --- Shared balance model (engine-core.js) ---
+// One expected-goals baseline for the live match engine, the league simulator
+// and sim/lab.js, so tuning a number here changes every mode at once.
+const BASE_EXPECTED_GOALS_PER_TEAM = 1.32;
+const MATCH_STRENGTH_COEFFICIENT = 0.016;
+const LEAGUE_HOME_ADVANTAGE = 0.10;
+
+// Draft rolls weight stars a little more heavily than journeymen. The term is
+// deliberately modest: 1 + (ovr - 85) * 0.06 makes a 107 about 2.3x as likely as
+// an 85, and floors very low ratings instead of making them impossible.
+const DRAFT_OVR_BASELINE = 85;
+const DRAFT_OVR_WEIGHT = 0.06;
+const DRAFT_OVR_MIN_WEIGHT = 0.25;
+
+// Availability thresholds used by the squad/dashboard badges.
+const AVAILABILITY = Object.freeze({
+    TIRED: 65,     // auto-rest candidates
+    WORN: 45,      // shows a fatigue badge
+    INJURED_MATCHES: 3
+});
+
+// Online room housekeeping.
+const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // abandoned rooms expire after 6h
+const ROOM_LOBBY_GRACE_MS = 90 * 1000;       // empty lobby rooms linger 90s for a rejoin
+const PRESENCE_STALE_MS = 45 * 1000;         // a heartbeat older than this is offline
 
 // Once the room's skips are gone, an unwanted player is handed to one club picked at
 // random. The wheel spins this long, then pauses before the sale is announced.

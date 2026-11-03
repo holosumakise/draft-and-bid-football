@@ -103,6 +103,122 @@ function initGhostTeamStats(team) {
     return map;
 }
 
+// --- Availability badges -------------------------------------------------
+// The league sim already rests tired players and suspends carded ones. These
+// helpers turn that hidden state into a badge on the squad list and on the
+// match screen, so rotation is never a mystery.
+function availabilityRefMatchday() {
+    if (gameState.europe && Number.isFinite(gameState.europe.currentRoundIdx)) {
+        return SEASON_MATCHDAYS + gameState.europe.currentRoundIdx * 3;
+    }
+    return SEASON_MATCHDAYS;
+}
+
+function availabilityForState(stats, refMatchday = availabilityRefMatchday()) {
+    if (!stats) return null;
+    const injured = Number(stats.injuredUntil) || 0;
+    if (injured > refMatchday) {
+        const left = Math.max(1, injured - refMatchday);
+        return { kind: 'injured', label: `🩹 ${left}`, title: `Injured — out for ${left} more match${left === 1 ? '' : 'es'}`, tone: 'text-red-300 bg-red-950 border-red-700' };
+    }
+    const suspended = Number(stats.suspended) || 0;
+    if (suspended > 0) {
+        return { kind: 'suspended', label: `🟥 ${suspended}`, title: `Suspended — ${suspended} match${suspended === 1 ? '' : 'es'} remaining`, tone: 'text-red-300 bg-red-950 border-red-700' };
+    }
+    const fatigue = Number(stats.fatigue) || 0;
+    if (fatigue >= AVAILABILITY.TIRED) {
+        return { kind: 'tired', label: '😴', title: `Tired — fatigue ${Math.round(fatigue)}% (likely rested)`, tone: 'text-amber-300 bg-amber-950 border-amber-700' };
+    }
+    if (fatigue >= AVAILABILITY.WORN) {
+        return { kind: 'worn', label: '🥵', title: `Worn — fatigue ${Math.round(fatigue)}%`, tone: 'text-amber-200 bg-amber-950/60 border-amber-800' };
+    }
+    return null;
+}
+
+function availabilityForPlayer(managerId, player) {
+    const season = gameState.season;
+    if (!season || !player) return null;
+    const group = (season.playerStatsByManager || {})[managerId];
+    if (!group) return null;
+    return availabilityForState(group[player.id]);
+}
+
+function availabilityBadgeHTML(managerId, player) {
+    const availability = availabilityForPlayer(managerId, player);
+    if (!availability) return '';
+    return `<span title="${escapeHTML(availability.title)}" class="ml-1 text-[9px] font-black px-1 py-0.5 rounded border ${availability.tone} whitespace-nowrap shrink-0">${availability.label}</span>`;
+}
+
+function availabilityStatsForTeam(team) {
+    const season = gameState.season;
+    if (!season || !team) return null;
+    if (team.isGhost) {
+        const groups = Object.values(season.ghostStatsById || {});
+        for (const group of groups) {
+            const list = Object.values(group || {});
+            if (list.length && list[0].team === team.name) return group;
+        }
+        return null;
+    }
+    const managerId = team.managerId ?? (gameState.managers.find(m => m.name === team.name) || {}).id;
+    if (managerId == null) return null;
+    return (season.playerStatsByManager || {})[managerId] || null;
+}
+
+// Compact strip under the scoreboard: who cannot play, or is about to be rested.
+function renderMatchAvailability(t1, t2) {
+    const el = document.getElementById('match-availability');
+    if (!el) return;
+
+    const ref = availabilityRefMatchday();
+    const groups = [t1, t2].map(team => {
+        const stats = availabilityStatsForTeam(team);
+        if (!stats) return '';
+        const rows = Object.values(stats)
+            .map(st => {
+                const availability = availabilityForState(st, ref);
+                if (!availability) return null;
+                return `<span title="${escapeHTML(availability.title)}" class="text-[10px] font-bold px-1.5 py-0.5 rounded border ${availability.tone} whitespace-nowrap">${escapeHTML(st.name)} ${availability.label}</span>`;
+            })
+            .filter(Boolean);
+        if (!rows.length) return '';
+        return `<div class="flex flex-wrap items-center justify-center gap-1">
+            <span class="text-[9px] font-black uppercase tracking-wider text-slate-400 mr-1">${escapeHTML(team.name || '')}</span>
+            ${rows.slice(0, 8).join('')}
+        </div>`;
+    }).filter(Boolean);
+
+    if (!groups.length) {
+        el.innerHTML = '';
+        el.classList.add('hidden');
+        return;
+    }
+    el.innerHTML = `<div class="text-[9px] font-black uppercase tracking-wider text-slate-500 mb-1">Availability</div>${groups.join('')}`;
+    el.classList.remove('hidden');
+}
+
+// League rotation log: which players missed out and why, kept for the results screen.
+function logSeasonAvailability(manager, stats, matchday, activeLineup) {
+    if (!manager || !stats) return;
+    if (!gameState.season) gameState.season = {};
+    if (!gameState.season.availabilityLog) gameState.season.availabilityLog = {};
+    const key = manager.id;
+    if (!gameState.season.availabilityLog[key]) gameState.season.availabilityLog[key] = {};
+    const activeIds = new Set((activeLineup || []).map(slot => slot.player && slot.player.id));
+    Object.values(stats).forEach(st => {
+        const availability = availabilityForState(st, matchday);
+        if (!availability || activeIds.has(st.id)) return;
+        const entry = gameState.season.availabilityLog[key][st.id] || {
+            id: st.id, name: st.name, mainPos: st.mainPos, injured: 0, suspended: 0, rested: 0
+        };
+        if (availability.kind === 'injured') entry.injured++;
+        else if (availability.kind === 'suspended') entry.suspended++;
+        else entry.rested++;
+        gameState.season.availabilityLog[key][st.id] = entry;
+    });
+}
+
+
 function ratingRole(pos) {
     if (pos === 'GK') return 'GK';
     if (['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(pos)) return 'DEF';
@@ -301,17 +417,33 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB, matchday) {
     teamA.lineup = selectActiveLineup(teamA, statsA, matchday);
     teamB.lineup = selectActiveLineup(teamB, statsB, matchday);
 
+    // Why a starter is missing: injury, suspension or an automatic rest.
+    if (!teamA.isGhost && teamA.managerId != null) {
+        logSeasonAvailability(gameState.managers.find(m => m.id === teamA.managerId), statsA, matchday, teamA.lineup);
+    }
+    if (!teamB.isGhost && teamB.managerId != null) {
+        logSeasonAvailability(gameState.managers.find(m => m.id === teamB.managerId), statsB, matchday, teamB.lineup);
+    }
+
     try {
-        const strengthDifference = getStrength(teamA) - getStrength(teamB);
-        const poisson = lambda => samplePoisson(Math.max(0.05, lambda));
+        // ATT/MID/DEF edge + home advantage, then the same tactics multipliers the
+        // live engine uses. Home advantage is a small nudge, not a different model.
+        const breakdownA = getStrengthBreakdown(teamA);
+        const breakdownB = getStrengthBreakdown(teamB);
+        const edge = EngineCore.matchupEdge(breakdownA, breakdownB);
+        const expected = EngineCore.expectedGoals({
+            edge,
+            base: BASE_EXPECTED_GOALS_PER_TEAM,
+            coefficient: MATCH_STRENGTH_COEFFICIENT,
+            homeAdvantage: LEAGUE_HOME_ADVANTAGE
+        });
+        const mulA = getTacticsMultipliersFor(teamA.tactics);
+        const mulB = getTacticsMultipliersFor(teamB.tactics);
+        const lambdaA = clamp(expected.lambdaA * mulA.attack * mulB.concede, 0.2, 4.0);
+        const lambdaB = clamp(expected.lambdaB * mulB.attack * mulA.concede, 0.2, 4.0);
 
-        const baseExpectedGoals = 1.32; // ~2.6 total goals/game; supports natural ~24–26% draws
-        const strengthCoefficient = 0.028;
-        const lambdaA = clamp(baseExpectedGoals + strengthDifference * strengthCoefficient, 0.35, 2.55);
-        const lambdaB = clamp(baseExpectedGoals - strengthDifference * strengthCoefficient, 0.35, 2.55);
-
-        let goalsForA = poisson(lambdaA);
-        let goalsForB = poisson(lambdaB);
+        let goalsForA = EngineCore.samplePoisson(lambdaA);
+        let goalsForB = EngineCore.samplePoisson(lambdaB);
         // Natural Poisson results — no forced late winners (real pro draw rate ≈ 23–26%)
         const resultA = goalsForA > goalsForB ? 'W' : goalsForA === goalsForB ? 'D' : 'L';
         const resultB = goalsForB > goalsForA ? 'W' : goalsForA === goalsForB ? 'D' : 'L';
@@ -469,11 +601,13 @@ function startGhostSeason() {
         playerStatsByManager,
         ghostStatsById,
         humanSeries: seriesList,
-        leagueSize: table.length
+        leagueSize: table.length,
+        availabilityLog: (gameState.season && gameState.season.availabilityLog) || {}
     };
 
     showScreen('screen-season');
     Net.publishSeason();
+    if (typeof SaveGame !== 'undefined') SaveGame.schedule(200);
     const nextWrap = document.getElementById('season-next-wrap');
     if (nextWrap) { nextWrap.classList.add('hidden'); nextWrap.classList.remove('flex'); }
     const matchdayLabel = document.getElementById('season-md-label');
@@ -802,24 +936,39 @@ function buildEuroGhost(comp, roundIdx, uniqueSeed, club) {
     return buildGhostTeam(club.name, avgByPos, 500 + uniqueSeed * 13 + roundIdx * 7, competitionOffset, -5);
 }
 
-// Ghost-vs-ghost ties are settled instantly. Bias heavily toward decisive results
-// (~15-18% go to pens) so the bracket doesn't fill with draws.
+// Ghost-vs-ghost ties used to be a coin flip. Use the same expected-goals model
+// as every other match, fed by the club's tier (and by real strength whenever a
+// team state is available), so a tier-1 giant usually beats a tier-5 minnow.
+function ghostTiePower(team) {
+    if (!team) return 80;
+    if (Array.isArray(team.lineup) && team.lineup.some(slot => slot && slot.player)) {
+        return getStrength(team);
+    }
+    const tier = Number(team.tier) || 3;
+    const tierBonus = (EURO_TIER_DELTA[tier] ?? 0) * 2.5;
+    return 84 + tierBonus + (team.isHuman ? 2.5 : 0);
+}
+
 function simulateGhostTie(m) {
-    if (Math.random() < 0.17) {
-        m.s1 = Math.floor(Math.random() * 3);
-        m.s2 = m.s1;
-        const t1Wins = Math.random() < 0.5;
+    const edge = ghostTiePower(m.t1) - ghostTiePower(m.t2);
+    const expected = EngineCore.expectedGoals({
+        edge,
+        base: BASE_EXPECTED_GOALS_PER_TEAM,
+        coefficient: 0.05
+    });
+    m.s1 = EngineCore.samplePoisson(expected.lambdaA);
+    m.s2 = EngineCore.samplePoisson(expected.lambdaB);
+
+    if (m.s1 === m.s2) {
+        // Weighted shootout: the stronger side still has to earn it from 12 yards.
+        const p1Wins = clamp(0.5 + edge * 0.025, 0.25, 0.75);
+        const firstWins = Math.random() < p1Wins;
         const win = 3 + Math.floor(Math.random() * 3);
         const lose = Math.max(0, win - 1 - Math.floor(Math.random() * 2));
-        m.pen1 = t1Wins ? win : lose;
-        m.pen2 = t1Wins ? lose : win;
-        m.winner = t1Wins ? m.t1 : m.t2;
+        m.pen1 = firstWins ? win : lose;
+        m.pen2 = firstWins ? lose : win;
+        m.winner = firstWins ? m.t1 : m.t2;
     } else {
-        const margin = 1 + Math.floor(Math.random() * 3);
-        const low = Math.floor(Math.random() * 2);
-        const high = low + margin;
-        if (Math.random() < 0.5) { m.s1 = high; m.s2 = low; }
-        else { m.s1 = low; m.s2 = high; }
         m.winner = m.s1 > m.s2 ? m.t1 : m.t2;
     }
     m.played = true;

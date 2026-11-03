@@ -99,15 +99,35 @@ function createTeamState(m) {
     return { id: m.id, name: m.name, lineup, bench, reserves, subs: 0, tactics: m.tactics || { mentality: 'balanced', press: 'mid' } };
 }
 
-function getStrength(team) {
-    const valid = (team.lineup || []).filter(slot => slot && slot.player);
-    if (!valid.length) return 0;
+// Split strength into attack / midfield / defence (engine-core.js) so a
+// lopsided XI is not treated as identical to a balanced one with the same OVR.
+// Missing starters lose ground on every line, not just the average.
+function getStrengthBreakdown(team) {
+    const valid = (team && team.lineup ? team.lineup : []).filter(slot => slot && slot.player);
+    if (!valid.length) return { overall: 0, att: 0, mid: 0, def: 0, count: 0 };
+
     const chemistry = team.isGhost === true ? new Map() : getLineupChemistry(valid);
-    const chemistryBonus = valid.reduce((sum, slot) => sum + (chemistry.get(slot.player.id) || 0), 0);
-    const averageOVR = (valid.reduce((sum, slot) => sum + getDynamicOVR(slot.player, slot.pos), 0) + chemistryBonus) / valid.length;
+    const entries = valid.map(slot => ({
+        pos: slot.pos,
+        ovr: getDynamicOVR(slot.player, slot.pos) + (chemistry.get(slot.player.id) || 0)
+    }));
+    const breakdown = EngineCore.strengthBreakdown(entries);
     const missingPlayersPenalty = Math.max(0, STARTERS - valid.length) * 3.5;
-    return averageOVR - missingPlayersPenalty;
+    if (!missingPlayersPenalty) return breakdown;
+
+    return {
+        overall: breakdown.overall - missingPlayersPenalty,
+        att: breakdown.att - missingPlayersPenalty,
+        mid: breakdown.mid - missingPlayersPenalty,
+        def: breakdown.def - missingPlayersPenalty,
+        count: breakdown.count
+    };
 }
+
+function getStrength(team) {
+    return getStrengthBreakdown(team).overall;
+}
+
 
 function weightedPick(entries) {
     const total = entries.reduce((s, e) => s + Math.max(0, e.weight), 0);
@@ -235,6 +255,7 @@ function confirmTactics() {
         updateRollButton(); renderDraftBoard(); checkMatchReady();
         Net.publishOwn(mId);
         Net.publishInfo();
+        if (typeof SaveGame !== 'undefined') SaveGame.schedule();
     }
 }
 
@@ -302,6 +323,11 @@ function liveRatingFor(sim, entry) {
 function renderMatchRatings(sim) {
     const body = document.getElementById('ratings-body');
     if (!body) return;
+    // A guest has no simulation metrics, only the host's finished numbers.
+    if (Array.isArray(sim.remoteRatings)) {
+        body.innerHTML = renderRemoteRatings(sim.remoteRatings, sim);
+        return;
+    }
     const groups = [1, 2].map(teamNo => {
         const team = teamNo === 1 ? sim.t1 : sim.t2;
         const rows = Object.values(sim.ratings)
@@ -329,6 +355,37 @@ function renderMatchRatings(sim) {
         </div>`;
     }).join('');
     body.innerHTML = `<div class="grid md:grid-cols-2 gap-4">${groups}</div>`;
+}
+
+// Ratings arrive from the host as a flat list of display rows.
+function renderRemoteRatings(rows, sim) {
+    const teams = [sim.t1?.name || 'Team 1', sim.t2?.name || 'Team 2'];
+    const groups = [1, 2].map(teamNo => {
+        const list = rows
+            .filter(row => row.team === teamNo)
+            .sort((a, b) => b.rating - a.rating);
+        const html = list.map(row => {
+            const rating = Number(row.rating) || 6;
+            const cls = rating >= 8 ? 'bg-emerald-500 text-slate-900' : rating >= 7 ? 'bg-blue-500 text-white' : rating >= 6 ? 'bg-slate-600 text-white' : 'bg-red-500 text-white';
+            const marks = [];
+            if (row.goals) marks.push(`<span class="text-emerald-400 font-black">${row.goals}G</span>`);
+            if (row.assists) marks.push(`<span class="text-blue-400 font-black">${row.assists}A</span>`);
+            if (row.red) marks.push('<span class="inline-block w-2 h-3 bg-red-500 rounded-sm"></span>');
+            else if (row.yellow) marks.push('<span class="inline-block w-2 h-3 bg-yellow-400 rounded-sm"></span>');
+            return `<div class="flex items-center justify-between gap-2 bg-slate-900/70 border border-slate-700 rounded px-2 py-1.5">
+                <div class="min-w-0">
+                    <div class="text-xs font-bold text-white truncate">${escapeHTML(row.name)} <span class="text-[9px] text-slate-500 font-bold">${escapeHTML(row.mainPos || '')}</span></div>
+                    <div class="text-[9px] text-slate-400 flex items-center gap-1 mt-0.5">${marks.join(' ') || '&nbsp;'}</div>
+                </div>
+                <div class="text-sm font-black px-1.5 py-0.5 rounded ${cls}">${rating.toFixed(1)}</div>
+            </div>`;
+        }).join('');
+        return `<div>
+            <div class="text-[11px] font-bold uppercase tracking-wider ${teamNo === 1 ? 'text-blue-400' : 'text-red-400'} mb-2">${escapeHTML(teams[teamNo - 1])}</div>
+            <div class="space-y-1">${html || '<div class="text-xs text-slate-500 italic">No ratings yet.</div>'}</div>
+        </div>`;
+    }).join('');
+    return `<div class="grid md:grid-cols-2 gap-4">${groups}</div>`;
 }
 
 function toggleMatchRatings() {
@@ -380,6 +437,8 @@ function simulateMatchSequence(t1, t2) {
     };
     sim.ratings = createMatchRatings(sim);
     gameState.matchSim = sim;
+    // Pre-match availability: injuries, suspensions and tired legs for both sides.
+    if (typeof renderMatchAvailability === 'function') renderMatchAvailability(t1, t2);
 
     // Live first half → second half → (ET/pens if needed). Half time is a beat in
     // the timeline, not a substitution window — the bench is used by the sim.
@@ -435,9 +494,19 @@ function simulateMinute(sim, displayTime, isOT) {
     // Minutes actually spent on the pitch, which added time and substitutions both extend.
     [t1, t2].forEach(tm => (tm.lineup || []).forEach(slot => { slot.min = (slot.min || 0) + 1; }));
     const events = [];
-    const strengthDifference = getStrength(t1) - getStrength(t2);
-    const goalChancePerMinute = 0.042;
-    const shareForTeam1 = clamp(0.5 + strengthDifference * 0.012, 0.22, 0.78);
+    // The same ATT/MID/DEF edge that decides a league match decides this one.
+    // engine-core.js converts it to expected goals for each side; tactics then
+    // scale those expectations without changing the underlying model.
+    const breakdown1 = getStrengthBreakdown(t1);
+    const breakdown2 = getStrengthBreakdown(t2);
+    const edge = EngineCore.matchupEdge(breakdown1, breakdown2);
+    const expected = EngineCore.expectedGoals({
+        edge,
+        base: BASE_EXPECTED_GOALS_PER_TEAM,
+        coefficient: MATCH_STRENGTH_COEFFICIENT
+    });
+    const perMinute1 = EngineCore.goalChancePerMinute(expected.lambdaA);
+    const perMinute2 = EngineCore.goalChancePerMinute(expected.lambdaB);
 
     const mul1 = getTacticsMultipliersFor(t1.tactics);
     const mul2 = getTacticsMultipliersFor(t2.tactics);
@@ -452,8 +521,8 @@ function simulateMinute(sim, displayTime, isOT) {
     if (mul2.pressKey === 'high' && sim.minuteCount > 70) attackMult2 *= 0.86;
     if (mul2.pressKey === 'low' && sim.minuteCount > 70) concedeMult2 *= 0.94;
 
-    let chance1 = Math.max(0.005, goalChancePerMinute * shareForTeam1 * attackMult1 * concedeMult2);
-    let chance2 = Math.max(0.005, goalChancePerMinute * (1 - shareForTeam1) * attackMult2 * concedeMult1);
+    let chance1 = Math.max(0.005, perMinute1 * attackMult1 * concedeMult2);
+    let chance2 = Math.max(0.005, perMinute2 * attackMult2 * concedeMult1);
 
     if (isOT) { chance1 *= 0.5; chance2 *= 0.5; }
     // Teams feel each other out: goals are rarer in the opening minutes, easing back to normal by minute 7
@@ -838,7 +907,9 @@ function finishVisuals(sim) {
 
     const actualS1 = penRes ? s1 + penRes.p1 : s1;
     const actualS2 = penRes ? s2 + penRes.p2 : s2;
-    if (actualS1 > actualS2) triggerConfetti();
+    // Either winner gets the confetti: this is not a home-team broadcast.
+    if (actualS1 !== actualS2 || penRes) triggerConfetti();
+
 
     sim.stats = { poss1, t1S, t2S, onTarget1, onTarget2 };
     broadcastMatch(sim);

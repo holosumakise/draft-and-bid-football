@@ -9,6 +9,7 @@ let gameState = {
     activeDraft: null,
     auction: null,
     auctionAnchor: 0,
+    auctionProxies: {},
     draftAnimating: false,
     matchQueue: [],
     currentMatchData: null,
@@ -59,7 +60,7 @@ function chooseLocal() {
     } else {
         container.classList.remove('hidden');
         difficulty.classList.remove('hidden');
-        gameState.playerCount = parseInt(select.value) || 4;
+        gameState.playerCount = Math.min(4, Math.max(2, parseInt(select.value, 10) || 4));
     }
     generateNameInputs();
     selectDifficulty(gameState.difficulty);
@@ -169,7 +170,9 @@ function startRoom() {
 }
 
 function generateNameInputs() {
-    const count = gameState.mode === 'H2H' ? 2 : (parseInt(document.getElementById('player-count').value, 10) || 4);
+    const count = gameState.mode === 'H2H'
+        ? 2
+        : Math.min(4, Math.max(2, parseInt(document.getElementById('player-count').value, 10) || 4));
     gameState.playerCount = count;
     const container = document.getElementById('names-container');
     container.innerHTML = '';
@@ -205,6 +208,7 @@ function initGame() {
     gameState.matchSim = null;
     gameState.auction = null;
     gameState.auctionAnchor = 0;
+    gameState.auctionProxies = {};
     const takenNames = new Set();
     const names = managerNamesForGame(gameState.playerCount);
     for (let i = 1; i <= gameState.playerCount; i++) {
@@ -234,4 +238,64 @@ function initGame() {
     Online.beginGame();
 
     showScreen('screen-game');
+    if (typeof SaveGame !== 'undefined') SaveGame.save();
 }
+
+// A guest (or the host) can bail out from the game screen without hunting for
+// the lobby's Leave button. The room is closed for a host; a guest just frees
+// their slot.
+function leaveGameToMenu() {
+    if (Net.online) {
+        const wasHost = Net.isHost;
+        Net.leaveRoom();
+        Online.reset();
+        showScreen('screen-main');
+        if (wasHost) showToast('Room closed.');
+    } else {
+        clearAuctionTimer();
+        gameState.matchSim = null;
+        showScreen('screen-main');
+    }
+    if (typeof SaveGame !== 'undefined') SaveGame.updateResumeButton();
+}
+
+function resumeSavedGame() {
+    if (typeof SaveGame === 'undefined') return;
+    if (Net.online) return showToast('Leave the online room before resuming a local save.');
+    const snapshot = SaveGame.load();
+    if (!snapshot) return showToast('No saved game found.');
+
+    clearAuctionTimer();
+    availablePlayers = snapshot.availablePlayers || [];
+    nextPlayerId = snapshot.nextPlayerId || 1;
+    const saved = snapshot.state || {};
+    gameState = {
+        ...gameState,
+        ...saved,
+        // Anything mid-tick is deliberately dropped: resumes start from a safe screen.
+        activeDraft: null,
+        auction: null,
+        auctionProxies: saved.auctionProxies || {},
+        draftAnimating: false,
+        matchSim: null,
+        matchQueue: [],
+        currentMatchData: null
+    };
+    if (!Array.isArray(gameState.managers) || !gameState.managers.length) {
+        return showToast('That save is empty.');
+    }
+
+    renderDOMForManagers();
+    renderDraftBoard();
+    updateRollButton();
+    checkMatchReady();
+
+    if (gameState.season && Array.isArray(gameState.season.finalTable) && gameState.season.finalTable.length) {
+        showScreen('screen-season-results');
+        showSeasonResults();
+    } else {
+        showScreen('screen-game');
+    }
+    showToast('Saved game restored.');
+}
+

@@ -338,13 +338,19 @@ function rollPlayers() {
 
     let pickIdx = 0;
 
-    if (pool === availablePlayers && goalkeepersSecured) {
-        const weights = pool.map(player => {
-            const positionalWeight = getPositionalDraftWeight(player);
-            return player.mainPos === 'GK' ? positionalWeight * 0.05 : positionalWeight;
-        });
-        const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    const weights = pool.map(player => {
+        const positionalWeight = getPositionalDraftWeight(player);
+        // Ratchets the pool toward stars without making journeymen impossible.
+        // The floor keeps a low-rated player selectable at roughly a quarter of
+        // an average one instead of letting the term go negative.
+        const ovr = typeof player.rating === 'number' ? player.rating : DRAFT_OVR_BASELINE;
+        const ovrWeight = Math.max(DRAFT_OVR_MIN_WEIGHT, 1 + (ovr - DRAFT_OVR_BASELINE) * DRAFT_OVR_WEIGHT);
+        const base = player.mainPos === 'GK' ? positionalWeight * 0.05 : positionalWeight;
+        return base * ovrWeight;
+    });
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
 
+    if (totalWeight > 0) {
         let roll = Math.random() * totalWeight;
         for (let index = 0; index < pool.length; index++) {
             roll -= weights[index];
@@ -651,6 +657,7 @@ function soloTakePlayer() {
         gameState.activeDraft = null; // destination known via animation — skip SOLD result panel
         renderDraftBoard();
         updateRollButton();
+        if (typeof SaveGame !== 'undefined') SaveGame.schedule();
     });
 }
 
@@ -666,6 +673,7 @@ function soloSkipPlayer() {
         gameState.activeDraft = null;
         renderDraftBoard();
         updateRollButton();
+        if (typeof SaveGame !== 'undefined') SaveGame.schedule();
     });
 }
 

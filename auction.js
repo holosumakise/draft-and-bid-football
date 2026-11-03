@@ -46,6 +46,43 @@ function auctionBidFloor() {
     return a.highBid > 0 ? a.highBid + 1 : MIN_BID;
 }
 
+// --- Max-bid proxies -----------------------------------------------------
+// A manager can leave a ceiling and the host will bid for them turn by turn,
+// always only one credit above the current high bid. The ceiling itself is
+// host-only state: guests are told who has a proxy, never how much it is.
+function auctionProxies() {
+    if (!gameState.auctionProxies || typeof gameState.auctionProxies !== 'object') {
+        gameState.auctionProxies = {};
+    }
+    return gameState.auctionProxies;
+}
+
+function auctionProxyFor(managerId) {
+    const ceiling = Number(auctionProxies()[managerId]);
+    return Number.isFinite(ceiling) && ceiling >= MIN_BID ? Math.floor(ceiling) : 0;
+}
+
+function clearAuctionProxy(managerId) {
+    const proxies = auctionProxies();
+    if (proxies[managerId] === undefined) return;
+    delete proxies[managerId];
+    Net.publishAuctionNow();
+    renderDraftBoard();
+}
+
+// After the leader passes or times out, the best remaining bid takes over. A
+// passed club's earlier bid is not a debt owed by anybody else.
+function recomputeAuctionHighBid(a) {
+    if (!a) return;
+    let bestId = null, best = 0;
+    auctionActiveIds().forEach(id => {
+        const bid = a.topBidOf[id] || 0;
+        if (bid > best) { best = bid; bestId = id; }
+    });
+    a.highBid = best;
+    a.highBidderId = best > 0 ? bestId : null;
+}
+
 function auctionActiveIds() {
     const a = gameState.auction;
     if (!a) return [];
@@ -68,6 +105,9 @@ function startAuction() {
     if (!draft) return false;
     const eligible = rotateOpeningOrder(auctionEligibleIds());
     bidEntry = '';
+    // A max bid belongs to the player being auctioned, not to the manager for
+    // the rest of the draft. Wipe last auction's ceilings.
+    gameState.auctionProxies = {};
 
     if (!eligible.length) {
         // Nobody can cover the reserve, so this costs no skip.
@@ -92,37 +132,48 @@ function startAuction() {
 }
 
 // Hand the gavel to the next manager still in, or settle the player.
+// Proxies resolve inside this loop, so a manager who set a ceiling is never
+// asked to answer their own shot clock. Each auto-bid only matches the current
+// floor, so two proxy wars still climb one credit at a time instead of jumping
+// straight to both ceilings.
 function openAuctionTurn() {
     const a = gameState.auction;
     if (!a || a.status !== 'open') return;
 
-    for (let guard = 0; guard <= a.order.length + 1; guard++) {
+    for (let guard = 0; guard <= PROXY_MAX_STEPS; guard++) {
         const active = auctionActiveIds();
         if (!active.length) { finishAuctionUnsold(currentAuctionPlayer(), false); return; }
 
-        // One bidder left and they hold the bid: if they cannot top it there is
-        // nothing to decide, so the hammer falls. Otherwise they get the usual
-        // "will you go higher?" turn that a real auctioneer offers.
-        if (active.length === 1 && a.highBidderId === active[0]) {
-            const lastMan = active[0];
-            if (!auctionCanAffordToRaise(lastMan)) { finishAuctionSold(); return; }
-            a.turnIdx = a.order.indexOf(lastMan);
-            a.turnEndsAt = Date.now() + SHOT_CLOCK_MS;
-            bidEntry = '';
-            Net.publishAuctionNow();
-            renderDraftBoard();
-            return;
-        }
-
-        // The last club still in is only ever handed a price they set themselves.
+        // One club left: only their own bid can be the price. If nobody ever bid,
+        // the high bid stays 0 and their pass discards the player instead of
+        // inventing a sale.
         if (active.length === 1) {
             const lastMan = active[0];
-            // A bid this club actually made stands against them. If nobody ever bid,
-            // the high bid is not invented for the last club: their pass or timeout
-            // discards the player instead of forcing a sale.
             const own = a.topBidOf[lastMan] || 0;
             a.highBidderId = own ? lastMan : null;
             a.highBid = own;
+            const proxy = auctionProxyFor(lastMan);
+
+            if (proxy) {
+                // A leading club has already said the price is acceptable. A club
+                // that never bid starts the player at the minimum instead of being
+                // asked to outbid itself once the clock starts.
+                const price = own || MIN_BID;
+                if (own || auctionCanAffordToRaise(lastMan)) {
+                    a.highBid = price;
+                    a.highBidderId = lastMan;
+                    a.topBidOf[lastMan] = price;
+                    finishAuctionSold();
+                    return;
+                }
+            }
+            // Nobody left to raise against and no reason to ask a club to bid
+            // itself up: if they cannot afford the next credit, sell now.
+            if (a.highBidderId === lastMan && !auctionCanAffordToRaise(lastMan)) {
+                finishAuctionSold();
+                return;
+            }
+
             a.turnIdx = a.order.indexOf(lastMan);
             a.turnEndsAt = Date.now() + SHOT_CLOCK_MS;
             bidEntry = '';
@@ -132,19 +183,51 @@ function openAuctionTurn() {
         }
 
         const bidderId = a.order[a.turnIdx];
-        if (!a.out[bidderId] && auctionCanAffordToRaise(bidderId)) {
-            a.turnEndsAt = Date.now() + SHOT_CLOCK_MS;
-            bidEntry = '';
-            Net.publishAuctionNow();
-            renderDraftBoard();
-            return;
+        // A leader who can no longer add a credit is not "out": they can still buy
+        // at the price they already set, so they must reach the buy/pass panel.
+        const holdsHighBid = a.highBidderId === bidderId && a.highBid > 0;
+        if (a.out[bidderId] || (!holdsHighBid && !auctionCanAffordToRaise(bidderId))) {
+            a.out[bidderId] = true;
+            delete auctionProxies()[bidderId];
+            recomputeAuctionHighBid(a);
+            a.turnIdx = (a.turnIdx + 1) % a.order.length;
+            continue;
         }
 
-        a.out[bidderId] = true;
-        a.turnIdx = (a.turnIdx + 1) % a.order.length;
+        const ceiling = auctionProxyFor(bidderId);
+        if (ceiling) {
+            // Already leading: the proxy's answer to "raise or buy?" is buy.
+            if (a.highBidderId === bidderId) {
+                finishAuctionSold();
+                return;
+            }
+            const floor = auctionBidFloor();
+            if (ceiling >= floor) {
+                a.highBid = floor;
+                a.highBidderId = bidderId;
+                a.topBidOf[bidderId] = floor;
+                a.turnIdx = (a.turnIdx + 1) % a.order.length;
+                continue;
+            }
+            // The ceiling cannot cover the next bid, so the proxy sits out.
+            a.out[bidderId] = true;
+            delete auctionProxies()[bidderId];
+            recomputeAuctionHighBid(a);
+            a.turnIdx = (a.turnIdx + 1) % a.order.length;
+            continue;
+        }
+
+        a.turnEndsAt = Date.now() + SHOT_CLOCK_MS;
+        bidEntry = '';
+        Net.publishAuctionNow();
+        renderDraftBoard();
+        return;
     }
 
-    finishAuctionUnsold(currentAuctionPlayer(), false);
+    // Safety valve: never spin forever on a pathological proxy war. If a live
+    // high bid exists, honour it rather than discarding a player somebody won.
+    if (a.highBidderId && a.highBid > 0) finishAuctionSold();
+    else finishAuctionUnsold(currentAuctionPlayer(), false);
 }
 
 function advanceAuctionTurn() {
@@ -169,7 +252,8 @@ function tickAuctionClock() {
     expireAuctionTurn();
 }
 
-// Silence on the shot clock: the high bidder takes the player, everyone else is out.
+// Silence on the shot clock: a leading club's bid already stands, so time
+// running out buys the player. Everyone else is simply out.
 function expireAuctionTurn() {
     const a = gameState.auction;
     const bidderId = auctionCurrentBidderId();
@@ -181,6 +265,8 @@ function expireAuctionTurn() {
     // Silence never bids a club up against itself. Even with the room out of skips
     // the clock just puts this bidder out and hands the next club the turn.
     a.out[bidderId] = true;
+    delete auctionProxies()[bidderId];
+    recomputeAuctionHighBid(a);
     bidEntry = '';
     advanceAuctionTurn();
 }
@@ -188,19 +274,49 @@ function expireAuctionTurn() {
 // The single place auction state changes. Host-only when online.
 function applyAuctionAction(managerId, action) {
     const a = gameState.auction;
-    if (!a || a.status !== 'open') return;
-    if (managerId !== a.order[a.turnIdx]) return;
-
+    if (!a || a.status !== 'open' || !action || typeof action !== 'object') return;
     const m = auctionManagerById(managerId);
     if (!m) return;
+
+    // A max bid can be left at any moment while the club is still in, including
+    // long before their turn. It is host-only state; a guest sends this as a
+    // command and the host stores it.
+    if (action.type === 'proxy') {
+        if (a.out[managerId]) return;
+        const requested = Math.floor(Number(action.ceiling));
+        if (!Number.isFinite(requested) || requested < MIN_BID) {
+            delete auctionProxies()[managerId];
+        } else {
+            auctionProxies()[managerId] = Math.min(requested, getManagerMaxBid(m));
+        }
+        Net.publishAuctionNow();
+        // Setting a ceiling on your own turn should act immediately rather than
+        // waiting out a clock you no longer need.
+        if (a.order[a.turnIdx] === managerId && auctionProxyFor(managerId)) {
+            openAuctionTurn();
+        } else {
+            renderDraftBoard();
+        }
+        return;
+    }
+
+    if (managerId !== a.order[a.turnIdx]) return;
     const holdsHighBid = a.highBidderId === managerId && a.highBid > 0;
 
     if (action.type === 'raise') {
+        // You cannot outbid yourself. The only decisions while leading are buy
+        // and pass; this is what keeps the auction moving under a 9s clock.
+        if (holdsHighBid) return showToast('You already hold the high bid — buy or pass.');
         const amount = Math.floor(Number(action.amount));
         if (!Number.isFinite(amount)) return;
         if (amount < auctionBidFloor()) return showToast(`Bid must reach at least €${auctionBidFloor()}M.`);
         if (amount > getManagerMaxBid(m)) {
             return showToast(`${m.name} can bid at most €${getManagerMaxBid(m)}M (keeps €${getManagerReserve(m)}M for the XI).`);
+        }
+        // A manual raise is a declaration that this price is acceptable, so a
+        // ceiling set earlier should never be lower than a bid already placed.
+        if (auctionProxyFor(managerId) && amount > auctionProxyFor(managerId)) {
+            auctionProxies()[managerId] = amount;
         }
         a.highBid = amount;
         a.highBidderId = managerId;
@@ -211,15 +327,11 @@ function applyAuctionAction(managerId, action) {
     }
 
     if (action.type === 'pass') {
-        // Being the last club still in makes you the nominal high bidder, but there
-        // is nobody left to raise against, so passing is how you let the player go.
-        const inTheRoom = auctionActiveIds();
-        const sole = inTheRoom.length === 1 && inTheRoom[0] === managerId;
-        if (holdsHighBid && !sole) return showToast('You hold the high bid — raise or buy.');
-        // Passing means "I am out of this auction", which is exactly what the shot
-        // clock does in silence. The last club's pass is the one that discards the
-        // player, and it is allowed even when the room has no skips left.
+        // A leading club may pass: their bid is withdrawn and the next best live
+        // bid takes over, or the player is discarded if nobody else bid.
         a.out[managerId] = true;
+        delete auctionProxies()[managerId];
+        recomputeAuctionHighBid(a);
         bidEntry = '';
         advanceAuctionTurn();
         return;
@@ -250,6 +362,35 @@ function auctionControl(type, amount, step) {
     bidEntry = '';
 }
 
+// Which manager's proxy controls this screen may edit. Online each device owns
+// exactly one club; locally the panel already belongs to the current bidder.
+function auctionViewerManagerId() {
+    if (Net.online) return Net.myManagerId;
+    return auctionCurrentBidderId();
+}
+
+function auctionSetProxy(managerId, value) {
+    const a = getOpenAuction();
+    if (!a || managerId === null || managerId === undefined) return;
+    if (!Net.canControl(managerId)) return showToast('That is not your club.');
+    const digits = String(value === undefined || value === null ? '' : value).replace(/\D/g, '').slice(0, 6);
+    if (!digits) return showToast('Enter a maximum bid first.');
+    Net.auctionAction(managerId, { type: 'proxy', ceiling: parseInt(digits, 10) });
+    const field = document.getElementById('proxy-entry');
+    if (field) field.value = '';
+}
+
+function auctionSetProxyFromInput(managerId) {
+    const field = document.getElementById('proxy-entry');
+    auctionSetProxy(managerId, field ? field.value : '');
+}
+
+function auctionClearProxy(managerId) {
+    if (managerId === null || managerId === undefined) return;
+    if (!Net.canControl(managerId)) return;
+    Net.auctionAction(managerId, { type: 'proxy', ceiling: 0 });
+}
+
 function setBidEntry(value) {
     bidEntry = String(value).replace(/\D/g, '').slice(0, 6);
     const raiseBtn = document.getElementById('btn-bid-raise');
@@ -275,8 +416,10 @@ function finishAuctionSold() {
     winner.squad.push({ ...draft.player, price });
     draft.player.sold = true;
     draft.result = { winnerName: winner.name };
+    if (typeof SaveGame !== 'undefined') SaveGame.schedule();
 
     gameState.auction = null;
+    gameState.auctionProxies = {};
     bidEntry = '';
     // Publish the settled card now, not when the local fly animation ends: the
     // host's tab is often backgrounded while it waits on a guest, and guests use
@@ -342,6 +485,7 @@ function settleRandomPickup() {
 
     Net.publishDraftNow();
     Net.publishManagers(winner.id);
+    if (typeof SaveGame !== 'undefined') SaveGame.schedule();
     playDraftAcquisitionAnimation(draft.player, winner.id, () => {
         updateDashboard(winner.id);
         gameState.activeDraft = null;
@@ -356,6 +500,7 @@ function finishAuctionUnsold(player, free) {
     const a = gameState.auction;
     if (a) a.status = 'unsold';
     clearAuctionTimer();
+    gameState.auctionProxies = {};
     if (!player) return;
 
     // Skips are gone and still nobody wanted this player, so the wheel decides who
@@ -383,6 +528,7 @@ function finishAuctionUnsold(player, free) {
         Net.publishDraftNow();
         renderDraftBoard();
         updateRollButton();
+        if (typeof SaveGame !== 'undefined') SaveGame.schedule();
     };
 
     if (free) {
@@ -416,19 +562,26 @@ function renderAuctionClock() {
     if (bar) bar.style.width = `${clamp((left / SHOT_CLOCK_MS) * 100, 0, 100)}%`;
 }
 
+function auctionHasProxy(managerId) {
+    // A guest only receives the ids, so any truthy value means "has a ceiling".
+    return auctionProxyFor(managerId) > 0 || !!auctionProxies()[managerId];
+}
+
 function auctionStatusChip(managerId) {
     const a = gameState.auction;
     const m = auctionManagerById(managerId);
     const colors = ['blue', 'red', 'purple', 'orange'];
     const color = colors[Math.max(0, gameState.managers.findIndex(x => x.id === managerId)) % colors.length];
     const isTurn = !!a && a.status === 'open' && auctionCurrentBidderId() === managerId;
+    const auto = !!a && auctionHasProxy(managerId);
     const label = !a ? '—'
         : a.out[managerId] ? 'OUT'
-        : a.highBidderId === managerId ? `HIGH €${a.highBid}M`
-        : isTurn ? 'BIDDING' : 'WAITING';
+        : a.highBidderId === managerId ? `HIGH €${a.highBid}M${auto ? ' · AUTO' : ''}`
+        : isTurn ? (auto ? 'AUTO…' : 'BIDDING') : (auto ? 'AUTO' : 'WAITING');
     const tone = a && a.out[managerId] ? 'text-slate-500 bg-slate-800 border-slate-700'
         : a && a.highBidderId === managerId ? 'text-emerald-300 bg-emerald-950 border-emerald-700'
         : isTurn ? `text-${color}-300 bg-slate-800 border-${color}-500 animate-pulse`
+        : auto ? 'text-cyan-300 bg-cyan-950 border-cyan-700'
         : 'text-slate-400 bg-slate-800 border-slate-700';
     return `<span class="text-[10px] font-bold px-2 py-1 rounded-md border ${tone} whitespace-nowrap">${escapeHTML(m ? m.name : '?')}: ${label}</span>`;
 }
@@ -445,6 +598,7 @@ function renderAuctionPanel() {
     const maxBid = bidder ? getManagerMaxBid(bidder) : 0;
     const canRaise = maxBid >= floor;
     const highBidderName = a.highBidderId ? (auctionManagerById(a.highBidderId)?.name || '') : '';
+    const standing = auctionActiveIds();
 
     const header = `
         <div class="w-full mb-2 shrink-0">
@@ -458,28 +612,53 @@ function renderAuctionPanel() {
             <div class="flex flex-wrap gap-1 mt-2">${a.order.map(id => auctionStatusChip(id)).join('')}</div>
         </div>`;
 
+    // Proxy controls belong to the device's own club, so a guest can leave a
+    // ceiling even while somebody else is on the clock.
+    const viewerId = auctionViewerManagerId();
+    const viewer = auctionManagerById(viewerId);
+    const viewerIn = viewerId !== null && viewerId !== undefined && !a.out[viewerId];
+    const proxyOn = auctionHasProxy(viewerId);
+    const proxyCeiling = auctionProxyFor(viewerId);
+    const proxyControl = viewerIn ? `
+        <div class="mt-1 border-t border-slate-700 pt-2">
+            <div class="flex items-center justify-between text-[10px] font-bold mb-1 gap-2">
+                <span class="text-slate-400">Max bid (auto)</span>
+                <span class="${proxyOn ? 'text-cyan-300' : 'text-slate-500'}">${proxyOn ? (proxyCeiling ? `AUTO to €${proxyCeiling}M` : 'AUTO on') : 'off'}</span>
+            </div>
+            <div class="flex gap-1.5">
+                <input id="proxy-entry" type="text" inputmode="numeric" autocomplete="off"
+                    placeholder="Max €${Math.max(floor, MIN_BID)}M"
+                    class="flex-1 min-w-0 bg-slate-950 border border-cyan-700 rounded-lg px-2 py-1.5 text-xs text-white tracking-widest focus:border-cyan-400 outline-none">
+                <button type="button" onclick="auctionSetProxyFromInput(${viewerId})"
+                    class="px-2.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-900 text-xs font-black">SET</button>
+                ${proxyOn ? `<button type="button" onclick="auctionClearProxy(${viewerId})"
+                    class="px-2 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-black">OFF</button>` : ''}
+            </div>
+            <p class="text-[9px] text-slate-500 mt-1">The host bids one credit above the high bid for you, never above this ceiling.</p>
+        </div>` : '';
+
     if (!mine) {
         return `
             ${header}
-            <div class="flex-1 flex flex-col items-center justify-center gap-2 text-center py-4">
+            <div class="flex-1 flex flex-col justify-center gap-2 text-center py-3">
                 <span class="text-sm font-black text-white">${escapeHTML(bidder ? bidder.name : 'Next bidder')} is up</span>
                 <span class="text-xs text-slate-400">${holdsHighBid ? `Decides whether to raise or buy at €${a.highBid}M.` : `Must reach €${floor}M to stay in.`}</span>
+                ${proxyControl}
             </div>`;
     }
 
-    // Everyone else has passed, so there is nothing left to bid against. The club
-    // still standing chooses: take the player at the price on the table, or pass and
-    // send them to the discard — once skips are gone, to the pickup wheel.
-    const standing = auctionActiveIds();
-    if (standing.length === 1 && a.highBid > 0 && standing[0] === bidderId) {
+    // Leading clubs have only two decisions now: take the player, or walk away.
+    // Raising your own bid is blocked so a 9s clock is never spent on nothing.
+    if (holdsHighBid) {
         return `
             ${header}
             <div class="flex-1 flex flex-col justify-center gap-2">
-                <div class="text-[11px] font-bold text-slate-300">Only club left · €${a.highBid}M is the price</div>
+                <div class="text-[11px] font-bold text-slate-300">${standing.length === 1 ? 'Only club left · ' : ''}€${a.highBid}M is the price</div>
                 <button type="button" onclick="auctionControl('hammer')"
                    class="w-full py-3 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-base shadow">BUY AT €${a.highBid}M</button>
                 <button type="button" onclick="auctionControl('pass')"
-                   class="w-full py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm">PASS</button>
+                   class="w-full py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-bold text-sm">PASS</button>
+                ${proxyControl}
             </div>`;
     }
 
@@ -497,13 +676,11 @@ function renderAuctionPanel() {
                     class="flex-1 min-w-0 bg-slate-950 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white tracking-widest focus:border-emerald-400 outline-none">
             </div>
             <div class="flex gap-1.5">${raiseSteps}</div>
-            ${holdsHighBid
-                ? `<button type="button" onclick="auctionControl('hammer')"
-                       class="w-full py-2.5 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-sm shadow">BUY AT €${a.highBid}M</button>`
-                : `<button type="button" id="btn-bid-raise" onclick="auctionControl('raise', bidEntryValue())" ${canRaise && bidEntry ? '' : 'disabled'}
-                       class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-900 rounded-lg font-black text-sm shadow">RAISE</button>
-                   <button type="button" onclick="auctionControl('pass')"
-                       class="w-full py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm">PASS</button>`}
+            <button type="button" id="btn-bid-raise" onclick="auctionControl('raise', bidEntryValue())" ${canRaise && bidEntry ? '' : 'disabled'}
+                   class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-900 rounded-lg font-black text-sm shadow">RAISE</button>
+            <button type="button" onclick="auctionControl('pass')"
+                   class="w-full py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-bold text-sm">PASS</button>
             ${!canRaise ? '<p class="text-[10px] font-bold text-red-400">You cannot cover the current bid.</p>' : ''}
+            ${proxyControl}
         </div>`;
 }

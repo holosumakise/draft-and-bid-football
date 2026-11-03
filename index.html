@@ -12,7 +12,12 @@
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icon.svg">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="vendor/tailwind.js"></script>
+    <script>
+        // Local copy keeps the app usable offline; fall back to the CDN if it
+        // was not vendored (for example, a stripped-down deployment).
+        if (!window.tailwind) document.write('<script src="https://cdn.tailwindcss.com"><\/script>');
+    </script>
     <style>
         /* Base & Pitch Styles */
         body {
@@ -530,6 +535,9 @@
             <button onclick="openHowTo()" class="w-full py-3 px-6 bg-slate-700 hover:bg-slate-600 border border-slate-500 rounded-xl font-bold text-base shadow-lg transition-colors text-slate-100">
                 How it works
             </button>
+            <button onclick="resumeSavedGame()" id="btn-resume-save" class="hidden w-full py-3 px-6 bg-emerald-600 hover:bg-emerald-500 border border-emerald-400 rounded-xl font-bold text-base shadow-lg transition-colors text-white">
+                Resume Saved Game
+            </button>
         </div>
     </div>
 
@@ -669,6 +677,12 @@
 
     <!-- Screen 3: Game View -->
     <div id="screen-game" class="screen p-4 md:p-6 bg-slate-950">
+
+        <div class="w-full max-w-5xl mx-auto mb-2 flex justify-end">
+            <button onclick="leaveGameToMenu()" class="py-1.5 px-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-xs font-bold text-slate-300 transition-colors">
+                Leave Game
+            </button>
+        </div>
         
         <!-- Top Panel with Side Notes -->
         <div class="w-full max-w-5xl mx-auto mb-6 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-4">
@@ -901,6 +915,7 @@
                         <h2 class="text-xl md:text-2xl font-bold text-slate-800 truncate px-2" id="match-m2-name">Manager 2</h2>
                     </div>
                 </div>
+                <div id="match-availability" class="hidden w-full max-w-2xl mx-auto mt-3 px-4 text-center"></div>
             </div>
             
             <div id="match-content" class="flex-1 overflow-y-auto bg-white p-4 md:p-6 custom-scrollbar relative pb-12">
@@ -997,7 +1012,7 @@
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-amber-400 mb-1">2 · Bid</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">A <strong>live auction</strong> with rotating turn order and a <strong>20-second shot clock</strong>. On your turn: raise (+1, +5 or a typed amount), or pass. Only the current bidder gets controls, so no bid is ever read before it is public. A player is only discarded when <strong>every</strong> club passes, and that spends one of the room's shared skips; once skips run out, a <strong>pickup wheel</strong> assigns unwanted players to a random club at the minimum bid.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">A <strong>live auction</strong> with rotating turn order and a <strong>9-second shot clock</strong>. On your turn: raise (+1, +5 or a typed amount), or pass. A leading club can only <strong>buy</strong> or <strong>pass</strong> — never outbid itself. Leave a <strong>max bid</strong> and the host will bid one credit above the high bid for you, never above your ceiling. A player is only discarded when <strong>every</strong> club passes, and that spends one of the room's shared skips; once skips run out, a <strong>pickup wheel</strong> assigns unwanted players to a random club at the minimum bid.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-orange-400 mb-1">3 · Reserve</div>
@@ -1035,6 +1050,7 @@
     <!-- Load the split modules -->
     <script src="players.js"></script>
     <script src="config.js"></script>
+    <script src="engine-core.js"></script>
     <script src="firebase-config.js"></script>
     <script src="game.js"></script>
     <script src="net.js"></script>
@@ -1044,5 +1060,16 @@
     <script src="auction.js"></script>
     <script src="match-engine.js"></script>
     <script src="season.js"></script>
+    <script src="save.js"></script>
+    <script>
+        // The app works fully offline from cache; a new deploy is picked up on the
+        // next visit. Service workers need https or localhost, so ignore failures
+        // when the game is opened straight from disk.
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => {});
+            });
+        }
+    </script>
 </body>
 </html>
