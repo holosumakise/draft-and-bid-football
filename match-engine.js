@@ -226,42 +226,44 @@ function tacticsOptionButton(kind, key, opt, active, extraClass = '') {
 }
 
 function renderTacticsOptions() {
-    const attackKeys = Object.keys(TACTICS_ATTACK);
-    document.getElementById('attack-options').innerHTML = attackKeys.map((key, index) => {
-        const opt = TACTICS_ATTACK[key];
-        const span = attackKeys.length % 2 === 1 && index === attackKeys.length - 1 ? 'col-span-2' : '';
-        return tacticsOptionButton('attackStyle', key, opt, matchTactics.attackStyle === key, span);
+    const possKeys = Object.keys(TACTICS_POSSESSION);
+    document.getElementById('attack-options').innerHTML = possKeys.map((key, index) => {
+        const opt = TACTICS_POSSESSION[key];
+        const span = possKeys.length % 2 === 1 && index === possKeys.length - 1 ? 'col-span-2' : '';
+        return tacticsOptionButton('possession', key, opt, matchTactics.possession === key, span);
     }).join('');
-    document.getElementById('block-options').innerHTML = Object.entries(TACTICS_BLOCK).map(([key, opt]) =>
-        tacticsOptionButton('block', key, opt, matchTactics.block === key)
+    document.getElementById('block-options').innerHTML = Object.entries(TACTICS_DEFENSE).map(([key, opt]) =>
+        tacticsOptionButton('defense', key, opt, matchTactics.defense === key)
     ).join('');
-    document.getElementById('marking-options').innerHTML = Object.entries(TACTICS_MARKING).map(([key, opt]) =>
-        tacticsOptionButton('marking', key, opt, matchTactics.marking === key)
+    document.getElementById('marking-options').innerHTML = Object.entries(TACTICS_TRANSITION).map(([key, opt]) =>
+        tacticsOptionButton('transition', key, opt, matchTactics.transition === key)
     ).join('');
     updateTacticsSummary();
 }
 
 function setTacticsOption(kind, key) {
-    if (kind === 'attackStyle' && TACTICS_ATTACK[key]) matchTactics.attackStyle = key;
-    else if (kind === 'block' && TACTICS_BLOCK[key]) matchTactics.block = key;
-    else if (kind === 'marking' && TACTICS_MARKING[key]) matchTactics.marking = key;
+    if (kind === 'possession' && TACTICS_POSSESSION[key]) matchTactics.possession = key;
+    else if (kind === 'defense' && TACTICS_DEFENSE[key]) matchTactics.defense = key;
+    else if (kind === 'transition' && TACTICS_TRANSITION[key]) matchTactics.transition = key;
     renderTacticsOptions();
 }
 
 function updateTacticsSummary() {
     const plan = normalizeTactics(matchTactics);
     const profile = getTacticsProfileFor(plan);
-    const planLabel = `${TACTICS_ATTACK[plan.attackStyle].label} · ${TACTICS_BLOCK[plan.block].label} · ${TACTICS_MARKING[plan.marking].label}`;
+    const planLabel = `${TACTICS_POSSESSION[plan.possession].label} · ${TACTICS_DEFENSE[plan.defense].label} · ${TACTICS_TRANSITION[plan.transition].label}`;
     const row = (label, value, good) => {
         const tone = Math.abs(value - 1) < 0.005 ? 'text-slate-300' : good ? 'text-green-400' : 'text-red-400';
         return `<div class="flex justify-between gap-3"><span>${label}</span><span class="font-bold ${tone}">${pctLabel(value)}</span></div>`;
     };
     const tips = [];
-    if (plan.block === 'high') tips.push('High press fades after 70′.');
-    if (plan.block === 'low') tips.push('Low block gets harder to break late.');
-    if (plan.attackStyle === 'tiki') tips.push('Tiki-Taka is exposed to counters.');
-    if (plan.attackStyle === 'direct') tips.push('Direct ball punishes high presses.');
-    if (plan.marking === 'man') tips.push('Man-to-man costs cards and stamina.');
+    if (plan.defense === 'high' || plan.defense === 'man') tips.push('High engagement fades after 70′.');
+    if (plan.defense === 'low') tips.push('Low block gets harder to break late.');
+    if (plan.possession === 'positional' || plan.possession === 'central') tips.push('Possession play is exposed if transition is soft.');
+    if (plan.possession === 'direct') tips.push('Route One punishes high presses.');
+    if (plan.transition === 'gegenpress') tips.push('Gegenpressing costs stamina and cards.');
+    if (plan.transition === 'tacticalFoul') tips.push('Tactical fouling racks up cards and set pieces.');
+    if (plan.transition === 'counter' || plan.transition === 'restAttack') tips.push('Counter setups punish expansive opponents.');
     document.getElementById('tactics-summary').innerHTML = `
         <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">${planLabel}</div>
         ${row('Chance creation', profile.attack, profile.attack >= 1)}
@@ -521,25 +523,26 @@ function finishOrExtraTime(sim) {
 
 function getTacticsProfileFor(tactics) {
     const plan = normalizeTactics(tactics);
-    const attack = TACTICS_ATTACK[plan.attackStyle];
-    const block = TACTICS_BLOCK[plan.block];
-    const marking = TACTICS_MARKING[plan.marking];
+    const poss = TACTICS_POSSESSION[plan.possession];
+    const defense = TACTICS_DEFENSE[plan.defense];
+    const trans = TACTICS_TRANSITION[plan.transition];
     return {
         plan,
-        attackKey: plan.attackStyle,
-        blockKey: plan.block,
-        markingKey: plan.marking,
-        attack: attack.attack * block.attack * marking.attack,
-        concede: block.concede * marking.concede,
-        control: attack.control + block.control + marking.control,
-        transition: attack.transition * block.transition * marking.transition,
-        card: attack.card * block.card * marking.card,
-        stamina: attack.stamina * block.stamina * marking.stamina,
-        setPiece: attack.setPiece * block.setPiece * marking.setPiece,
-        fouls: block.fouls * marking.fouls,
-        counter: attack.counter,
-        vsBlock: attack.vsBlock,
-        markVsAttack: marking.vsAttack
+        possessionKey: plan.possession,
+        defenseKey: plan.defense,
+        transitionKey: plan.transition,
+        attackKey: plan.possession,
+        blockKey: plan.defense,
+        attack: poss.attack * defense.attack * trans.attack,
+        concede: defense.concede * trans.concede,
+        control: poss.control + defense.control + trans.control,
+        transition: poss.transition * defense.transition * trans.transition,
+        card: poss.card * defense.card * trans.card,
+        stamina: poss.stamina * defense.stamina * trans.stamina,
+        setPiece: poss.setPiece * defense.setPiece * trans.setPiece,
+        fouls: defense.fouls * trans.fouls,
+        counter: poss.counter * (trans.counter || 1),
+        vsDefense: poss.vsDefense
     };
 }
 
@@ -555,10 +558,8 @@ function getTacticsMatchupFor(tacticsA, tacticsB) {
     const a = getTacticsProfileFor(tacticsA);
     const b = getTacticsProfileFor(tacticsB);
     const controlEdge = clamp(a.control - b.control, -0.45, 0.45);
-    const aStyle = (a.vsBlock && a.vsBlock[b.blockKey]) || 1;
-    const bStyle = (b.vsBlock && b.vsBlock[a.blockKey]) || 1;
-    const aMarking = (a.markVsAttack && a.markVsAttack[b.attackKey]) || 1;
-    const bMarking = (b.markVsAttack && b.markVsAttack[a.attackKey]) || 1;
+    const aStyle = (a.vsDefense && a.vsDefense[b.defenseKey]) || 1;
+    const bStyle = (b.vsDefense && b.vsDefense[a.defenseKey]) || 1;
     const aSetPiece = 1 + ((a.setPiece * b.fouls) - 1) * TACTICS_SET_PIECE_ATTACK_WEIGHT;
     const bSetPiece = 1 + ((b.setPiece * a.fouls) - 1) * TACTICS_SET_PIECE_ATTACK_WEIGHT;
     const aCounterBoost = Math.min(0.40, Math.max(0, b.transition - 1) * a.counter * TACTICS_COUNTER_SCALE);
@@ -569,7 +570,7 @@ function getTacticsMatchupFor(tacticsA, tacticsB) {
         a: {
             ...a,
             attack: aAttack,
-            concede: a.concede * aMarking,
+            concede: a.concede,
             counterBoost: aCounterBoost,
             controlEdge,
             setPieceShare: clamp(TACTICS_SET_PIECE_GOAL_SHARE * a.setPiece * b.fouls, 0.04, 0.38)
@@ -577,7 +578,7 @@ function getTacticsMatchupFor(tacticsA, tacticsB) {
         b: {
             ...b,
             attack: bAttack,
-            concede: b.concede * bMarking,
+            concede: b.concede,
             counterBoost: bCounterBoost,
             controlEdge: -controlEdge,
             setPieceShare: clamp(TACTICS_SET_PIECE_GOAL_SHARE * b.setPiece * a.fouls, 0.04, 0.38)
@@ -593,13 +594,15 @@ function getTacticsSituationalFor(sim, side, mul) {
     const minute = sim.minuteCount;
     const margin = side === 1 ? sim.s1 - sim.s2 : sim.s2 - sim.s1;
     if (minute > 70) {
-        if (mul.blockKey === 'high') { attack *= 0.86; concede *= 1.06; }
-        if (mul.blockKey === 'low') concede *= 0.92;
-        if (mul.attackKey === 'direct' && margin < 0) { attack *= 1.10; concede *= 1.04; }
-        if (mul.attackKey === 'tiki' && margin > 0) concede *= 0.94;
-        if (mul.attackKey === 'positional' && margin > 0) concede *= 0.96;
-        if (mul.attackKey === 'overload' && margin < 0) { attack *= 1.08; concede *= 1.04; }
-        if (mul.attackKey === 'inverted' && margin < 0) { attack *= 1.06; concede *= 1.05; }
+        if (mul.defenseKey === 'high' || mul.defenseKey === 'man') { attack *= 0.86; concede *= 1.06; }
+        if (mul.transitionKey === 'gegenpress') { attack *= 0.92; concede *= 1.05; }
+        if (mul.defenseKey === 'low' || mul.transitionKey === 'restDefense') concede *= 0.92;
+        if ((mul.possessionKey === 'direct' || mul.transitionKey === 'counter' || mul.transitionKey === 'restAttack') && margin < 0) {
+            attack *= 1.10; concede *= 1.04;
+        }
+        if ((mul.possessionKey === 'positional' || mul.possessionKey === 'central') && margin > 0) concede *= 0.95;
+        if (mul.possessionKey === 'overload' && margin < 0) { attack *= 1.08; concede *= 1.04; }
+        if (mul.possessionKey === 'spatial' && margin < 0) { attack *= 1.06; concede *= 1.03; }
     }
     return { attack, concede };
 }
@@ -1021,8 +1024,6 @@ function finishVisuals(sim) {
     const onTarget2 = Math.max(s2, Math.min(t2S, Math.round(t2S * (0.34 + Math.random() * 0.16))));
     sim.gkSaves = { 1: Math.max(0, onTarget2 - s2), 2: Math.max(0, onTarget1 - s1) };
 
-    // Corners track pressure more than pure possession; offsides rise with high lines
-    // and vertical attacks; fouls lean on the foul profile of each plan.
     const foulBias1 = tactics.a.fouls || 1;
     const foulBias2 = tactics.b.fouls || 1;
     const highLine1 = (tactics.a.defenseKey === 'high' || tactics.a.defenseKey === 'man' || tactics.a.transitionKey === 'gegenpress') ? 1.25 : 1;
