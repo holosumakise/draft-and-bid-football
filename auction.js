@@ -563,7 +563,7 @@ function renderAuctionClock() {
     const seconds = Math.ceil(left / 1000);
     if (clock) {
         clock.innerText = a.status === 'open' ? `${seconds}s` : 'Closed';
-        clock.className = `font-mono font-black ${seconds <= 5 && a.status === 'open' ? 'text-red-400 animate-pulse' : 'text-amber-300'}`;
+        clock.className = `font-mono font-black text-base shrink-0 ${seconds <= 5 && a.status === 'open' ? 'text-red-400 animate-pulse' : 'text-amber-300'}`;
     }
     if (bar) bar.style.width = `${clamp((left / SHOT_CLOCK_MS) * 100, 0, 100)}%`;
 }
@@ -576,8 +576,14 @@ function auctionHasProxy(managerId) {
 function auctionStatusChip(managerId) {
     const a = gameState.auction;
     const m = auctionManagerById(managerId);
-    const colors = ['blue', 'red', 'purple', 'orange'];
-    const color = colors[Math.max(0, gameState.managers.findIndex(x => x.id === managerId)) % colors.length];
+    // Static accent classes so Tailwind can see them; one colour per seat.
+    const palettes = [
+        { ring: 'border-blue-400', dot: 'bg-blue-400' },
+        { ring: 'border-red-400', dot: 'bg-red-400' },
+        { ring: 'border-purple-400', dot: 'bg-purple-400' },
+        { ring: 'border-orange-400', dot: 'bg-orange-400' }
+    ];
+    const palette = palettes[Math.max(0, gameState.managers.findIndex(x => x.id === managerId)) % palettes.length];
     const isTurn = !!a && a.status === 'open' && auctionCurrentBidderId() === managerId;
     const auto = !!a && auctionHasProxy(managerId);
     const offline = typeof Net !== 'undefined' && Net.online && typeof Net.isManagerConnected === 'function' && !Net.isManagerConnected(managerId);
@@ -585,20 +591,28 @@ function auctionStatusChip(managerId) {
     const label = !a ? '—'
         : a.out[managerId] ? 'OUT'
         : offline ? 'OFFLINE'
-        : leading ? (auto ? 'AUTO' : '')
-        : isTurn ? (auto ? 'AUTO…' : 'BIDDING') : (auto ? 'AUTO' : 'WAITING');
-    const tone = a && a.out[managerId] ? 'text-slate-500 bg-slate-800 border-slate-700'
-        : offline ? 'text-amber-300 bg-amber-950 border-amber-700'
-        : leading ? 'text-emerald-200 bg-emerald-900 border-emerald-500'
-        : isTurn ? `text-${color}-300 bg-slate-800 border-${color}-500 animate-pulse`
-        : auto ? 'text-cyan-300 bg-cyan-950 border-cyan-700'
-        : 'text-slate-400 bg-slate-800 border-slate-700';
-    // The leader's chip leads with the phrase instead of the name so it
-    // reads like a scoreboard line: "Current Bid: Alice - €8M".
-    const text = leading
-        ? `Current Bid: ${m ? m.name : '?'} - €${a.highBid}M${auto ? ' · AUTO' : ''}`
-        : `${m ? m.name : '?'}: ${label}`;
-    return `<span class="text-[10px] font-bold px-2 py-1 rounded-md border ${tone} whitespace-nowrap">${escapeHTML(text)}</span>`;
+        : leading ? `LEADING €${a.highBid}M`
+        : isTurn ? (auto ? 'AUTO-BIDDING' : 'BIDDING NOW') : (auto ? 'AUTO-BID' : 'WAITING');
+    const tone = a && a.out[managerId] ? 'border-slate-700 bg-slate-800/60 text-slate-500'
+        : offline ? 'border-amber-600 bg-amber-950/70 text-amber-200'
+        : leading ? 'border-emerald-400 bg-emerald-900/70 text-emerald-100'
+        : isTurn ? `${palette.ring} bg-slate-800 text-white shadow-lg`
+        : auto ? 'border-cyan-600 bg-cyan-950/70 text-cyan-100'
+        : 'border-slate-600 bg-slate-800/70 text-slate-300';
+    const dot = a && a.out[managerId] ? 'bg-slate-600'
+        : offline ? 'bg-amber-400'
+        : leading ? 'bg-emerald-400'
+        : isTurn ? `${palette.dot} animate-pulse`
+        : auto ? 'bg-cyan-400'
+        : 'bg-slate-500';
+    return `
+        <div class="flex items-center gap-2 rounded-lg border-2 px-2 py-2 ${tone}">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0 ${dot}"></span>
+            <div class="min-w-0 flex-1 leading-tight">
+                <div class="text-[13px] font-black truncate">${escapeHTML(m ? m.name : '?')}</div>
+                <div class="text-[11px] font-black uppercase tracking-widest truncate">${escapeHTML(label)}</div>
+            </div>
+        </div>`;
 }
 
 function renderAuctionPanel() {
@@ -617,22 +631,34 @@ function renderAuctionPanel() {
 
     const header = `
         <div class="w-full mb-2 shrink-0">
-            <div class="flex items-center justify-between text-[10px] font-bold text-slate-400 mb-1 gap-2">
-                <span class="truncate">Live auction · ${a.highBid > 0 ? `Current Bid: ${escapeHTML(highBidderName)} - €${a.highBid}M` : `opens at €${MIN_BID}M`}</span>
-                <span id="auction-clock" class="font-mono font-black text-amber-300 shrink-0">${Math.ceil(SHOT_CLOCK_MS / 1000)}s</span>
+            <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 gap-2">
+                <span class="truncate">Live Auction</span>
+                <span id="auction-clock" class="font-mono font-black text-base text-amber-300 shrink-0">${Math.ceil(SHOT_CLOCK_MS / 1000)}s</span>
             </div>
             <div class="w-full h-1.5 rounded-full overflow-hidden bg-slate-700">
                 <div id="auction-clock-bar" class="h-full bg-amber-400 transition-all duration-200" style="width:100%"></div>
             </div>
-            <div class="flex flex-wrap gap-1 mt-2">${a.order.map(id => auctionStatusChip(id)).join('')}</div>
+            <div class="mt-2 rounded-xl border-2 px-3 py-2 text-center ${a.highBid > 0 ? 'border-amber-500/60 bg-amber-500/10' : 'border-slate-600 bg-slate-900/60'}">
+                ${a.highBid > 0 ? `
+                    <div class="text-[10px] font-black uppercase tracking-[0.22em] text-amber-400">Current Bid</div>
+                    <div class="mt-0.5 flex items-baseline justify-center gap-1.5 flex-wrap leading-none">
+                        <span class="text-2xl font-black text-white break-words">${escapeHTML(highBidderName)}</span>
+                        <span class="text-xl font-black text-slate-500">-</span>
+                        <span class="text-2xl font-black text-amber-300">€${a.highBid}M</span>
+                    </div>` : `
+                    <div class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Opening Bid</div>
+                    <div class="mt-0.5 text-2xl font-black leading-none text-amber-300">€${MIN_BID}M</div>`}
+            </div>
+            <div class="grid grid-cols-2 gap-1.5 mt-2">${a.order.map(id => auctionStatusChip(id)).join('')}</div>
         </div>`;
 
     if (!mine) {
         return `
             ${header}
-            <div class="flex-1 flex flex-col justify-center gap-2 text-center py-3">
-                <span class="text-sm font-black text-white">${escapeHTML(bidder ? bidder.name : 'Next bidder')} is up</span>
-                <span class="text-xs text-slate-400">${holdsHighBid ? `Decides whether to raise or buy at €${a.highBid}M.` : `Must reach €${floor}M to stay in.`}</span>
+            <div class="flex-1 flex flex-col justify-center gap-1.5 text-center py-3">
+                <span class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">On The Clock</span>
+                <span class="text-2xl font-black text-white leading-tight break-words">${escapeHTML(bidder ? bidder.name : 'Next bidder')}</span>
+                <span class="text-sm font-bold text-slate-300">${holdsHighBid ? `Decides whether to raise or buy at €${a.highBid}M.` : `Must reach €${floor}M to stay in.`}</span>
             </div>`;
     }
 
@@ -642,7 +668,9 @@ function renderAuctionPanel() {
         return `
             ${header}
             <div class="flex-1 flex flex-col justify-center gap-2">
-                <div class="text-[11px] font-bold text-slate-300">${standing.length === 1 ? 'Only club left · ' : ''}€${a.highBid}M is the price</div>
+                <div class="text-center text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">${standing.length === 1 ? 'Only club left' : 'You hold the high bid'}</div>
+                <div class="text-center text-2xl font-black leading-none text-amber-300">€${a.highBid}M</div>
+                <div class="text-center text-xs font-bold text-slate-400">is the price</div>
                 <button type="button" onclick="auctionControl('hammer')"
                    class="w-full py-3 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-base shadow">BUY AT €${a.highBid}M</button>
                 <button type="button" onclick="auctionControl('pass')"
@@ -657,7 +685,11 @@ function renderAuctionPanel() {
     return `
         ${header}
         <div class="flex-1 flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-1">
-            <div class="text-[11px] font-bold text-slate-300">Your turn, ${escapeHTML(bidder ? bidder.name : '')} · max €${maxBid}M</div>
+            <div class="text-center rounded-lg border border-emerald-600/60 bg-emerald-900/30 px-2 py-1.5">
+                <div class="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Your Turn</div>
+                <div class="text-lg font-black text-white leading-tight truncate">${escapeHTML(bidder ? bidder.name : '')}</div>
+                <div class="text-[11px] font-bold text-emerald-200/80">Max bid €${maxBid}M</div>
+            </div>
             <div class="flex items-center gap-1.5">
                 <input type="text" inputmode="numeric" autocomplete="off" id="bid-entry-field" value="${bidEntry}"
                     placeholder="Bid €${floor}M+" oninput="setBidEntry(this.value)"
