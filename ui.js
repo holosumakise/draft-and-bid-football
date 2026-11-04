@@ -448,11 +448,12 @@ function renderDOMForManagers() {
             <div class="pitch-wrap" data-accent="${c}">
                 <div class="pitch-team">
                     <h3>${escapeHTML(m.name)} <span>XI</span></h3>
-                    <span class="pitch-team__ovr">${locked ? 'Locked' : 'Drafting'}</span>
+                    <span class="pitch-team__ovr" id="pitch-ovr-${m.id}">${locked ? 'Locked' : 'Drafting'}</span>
                 </div>
                 <div class="formation-bar">
                     <label for="formation-${m.id}">Formation</label>
-                    <select id="formation-${m.id}" class="formation-select" disabled>
+                    <select id="formation-${m.id}" class="formation-select" ${canEdit && !locked ? '' : 'disabled'}
+                        onchange="changeFormation(${m.id}, this.value)">
                         ${presetOptions}
                     </select>
                 </div>
@@ -596,7 +597,9 @@ function buildFormationFromPreset(key) {
 
 function initPitch(id) {
     const m = gameState.managers.find(x => x.id === id);
-    m.formationPreset = m.formationPreset || '4-4-2';
+    // A preset key from an older save that no longer exists would leave the club built
+    // as 4-4-2 while still claiming the dead shape, and the select could not be re-picked.
+    m.formationPreset = FORMATION_PRESETS[m.formationPreset] ? m.formationPreset : '4-4-2';
     // A resumed save (or any re-render mid-draft) already carries a XI. Rebuilding
     // it here would silently unassign every player, so only seed a fresh club.
     if (!Array.isArray(m.formation) || !m.formation.length) {
@@ -1079,8 +1082,14 @@ function closeModal() {
 function assignPlayer(pId) {
     const m = gameState.managers.find(x => x.id === modalState.managerId);
     if (!m || !Net.canControl(m.id)) return;
+    if (!m.squad.some(player => player.id === pId)) return;
     const node = modalState.type === 'pitch' ? m.formation.find(n => n.id === modalState.nodeId) : m.bench.find(n => n.id === modalState.nodeId);
     if (!node) return;
+    // The list was built when the modal opened, so a remote update can have seated this
+    // man elsewhere meanwhile. Unseat him first: one player, one spot.
+    [...m.formation, ...m.bench].forEach(other => {
+        if (other !== node && other.assignedPlayerId === pId) other.assignedPlayerId = null;
+    });
     node.assignedPlayerId = pId;
     modalState.type === 'pitch' ? renderPitchNodes(m.id) : renderBenchNodes(m.id);
     updateTeamOVR(m.id); updateDashboard(m.id); closeModal();
@@ -1091,22 +1100,24 @@ function removePlayerFromNode(mId, nId, type) {
     const m = gameState.managers.find(x => x.id === mId);
     if (!m || !Net.canControl(mId)) return;
     const node = type === 'pitch' ? m.formation.find(n => n.id === nId) : m.bench.find(n => n.id === nId);
+    if (!node) return;
     node.assignedPlayerId = null;
     type === 'pitch' ? renderPitchNodes(mId) : renderBenchNodes(mId);
     updateTeamOVR(mId); updateDashboard(mId);
     Net.publishOwn(mId);
     if (typeof SaveGame !== 'undefined') SaveGame.schedule();
 }
-function optimalLineupAssignment(nodes, squad) {
+function optimalLineupAssignment(nodes, squad, keepBonus) {
     const slotCount = nodes.length;
     const assignment = new Array(slotCount).fill(null);
     if (!slotCount || !squad.length) return assignment;
 
     const isGK = p => p.mainPos === 'GK' || (Array.isArray(p.subPos) && p.subPos.includes('GK'));
     const canFill = (p, node) => node.isGK ? isGK(p) : p.mainPos !== 'GK';
+    const stay = typeof keepBonus === 'function' ? keepBonus : () => 0;
     const values = squad.map(p => nodes.map(node => {
         if (!canFill(p, node)) return -Infinity;
-        return getDynamicOVR(p, node.pos) + (p.mainPos === node.pos ? 0.01 : 0);
+        return getDynamicOVR(p, node.pos) + (p.mainPos === node.pos ? 0.01 : 0) + stay(p);
     }));
 
     const full = 1 << slotCount;
@@ -1161,6 +1172,18 @@ function autoFillLineup(mId) {
         if (player) { used.add(player.id); filled++; }
     });
 
+    fillBenchFromSquad(m, used);
+
+    renderPitchNodes(mId); renderBenchNodes(mId); updateTeamOVR(mId); updateDashboard(mId);
+    Net.publishOwn(mId);
+    if (typeof SaveGame !== 'undefined') SaveGame.schedule();
+    const gkNode = m.formation.find(n => n.isGK);
+    const noGkNote = filled > 0 && gkNode && !gkNode.assignedPlayerId ? ' No GK in squad — goalkeeper slot left open.' : '';
+    showToast(`${filled}/${STARTERS} starters placed for ${m.name}.${noGkNote}`);
+}
+
+// The bench takes whoever the XI has no room for, best-rated first.
+function fillBenchFromSquad(m, used) {
     m.bench.forEach(slot => {
         let best = null, bestRating = -Infinity;
         m.squad.forEach(p => {
@@ -1170,13 +1193,41 @@ function autoFillLineup(mId) {
         slot.assignedPlayerId = best ? best.id : null;
         if (best) used.add(best.id);
     });
+}
+
+// A new shape seats the club's best XI for that shape, with a nudge toward the men
+// already on the pitch: 4-4-2 to 4-3-3 should move a line, not drop half a squad.
+function changeFormation(mId, key) {
+    const m = gameState.managers.find(x => x.id === mId);
+    if (!m) return;
+    const keep = () => {
+        const select = document.getElementById(`formation-${m.id}`);
+        if (select) select.value = m.formationPreset || '4-4-2';
+    };
+    if (m.formationLocked) { keep(); return showToast('Formation is locked.'); }
+    if (!Net.canControl(mId)) { keep(); return showToast('Only that manager can set their own XI.'); }
+    if (!FORMATION_PRESETS[key]) { keep(); return; }
+    const draft = gameState.activeDraft;
+    if (draft && (draft.state === 'spinning' || draft.state === 'picked' || (draft.state === 'revealed' && !draft.player.sold))) {
+        keep();
+        return showToast('Resolve the current player before changing formation.');
+    }
+
+    const onPitch = new Set(m.formation.map(node => node.assignedPlayerId).filter(Boolean));
+    m.formationPreset = key;
+    m.formation = buildFormationFromPreset(key);
+    const used = new Set();
+    let filled = 0;
+    optimalLineupAssignment(m.formation, m.squad, p => onPitch.has(p.id) ? 0.5 : 0).forEach((player, index) => {
+        m.formation[index].assignedPlayerId = player ? player.id : null;
+        if (player) { used.add(player.id); filled++; }
+    });
+    fillBenchFromSquad(m, used);
 
     renderPitchNodes(mId); renderBenchNodes(mId); updateTeamOVR(mId); updateDashboard(mId);
     Net.publishOwn(mId);
     if (typeof SaveGame !== 'undefined') SaveGame.schedule();
-    const gkNode = m.formation.find(n => n.isGK);
-    const noGkNote = filled > 0 && gkNode && !gkNode.assignedPlayerId ? ' No GK in squad — goalkeeper slot left open.' : '';
-    showToast(`${filled}/${STARTERS} starters placed for ${m.name}.${noGkNote}`);
+    showToast(`${FORMATION_PRESETS[key].label}: ${filled}/${STARTERS} starters placed.`);
 }
 
 let pendingTacticsManagerId = null;

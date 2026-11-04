@@ -248,14 +248,17 @@ function initGame() {
 // Online guests have no exit once the game is live (see Net.guestLocked).
 function leaveGameToMenu() {
     if (Net.guestLocked()) return showToast('Only the host can end an online game.');
+    // Before the room is torn down: closing it makes this device the clock owner
+    // again (ownsAuctionClock is `!online || isHost`), so a still-ticking shot clock
+    // would go on expiring turns and selling players into a squad nobody is playing.
+    clearAuctionTimer();
+    gameState.matchSim = null;
     if (Net.online) {
         Net.leaveRoom();
         Online.reset();
         showScreen('screen-main');
         showToast('Room closed — all managers were sent back to the menu.');
     } else {
-        clearAuctionTimer();
-        gameState.matchSim = null;
         showScreen('screen-main');
     }
     if (typeof SaveGame !== 'undefined') SaveGame.updateResumeButton();

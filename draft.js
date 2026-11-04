@@ -109,6 +109,8 @@ function enrichPlayer(p, rankIndex = 99) {
 function initializePlayerDB() {
     availablePlayers = [];
     nextPlayerId = 1;
+    // A fresh board means the ghost-tag weighting measured off the old one is wrong.
+    specialityBoardWeights = null;
     const usedNames = new Set();
     const norm = name => name.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 

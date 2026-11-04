@@ -295,6 +295,12 @@ const Online = {
                     btn.innerText = 'Formation & Tactics Confirmed';
                     btn.disabled = true;
                 }
+                // The nodes move but the chrome is built once, so a rival who changes
+                // shape or locks would otherwise still show the old label to everyone else.
+                const select = document.getElementById(`formation-${m.id}`);
+                if (select) select.value = m.formationPreset || '4-4-2';
+                const ovr = document.getElementById(`pitch-ovr-${m.id}`);
+                if (ovr) ovr.innerText = m.formationLocked ? 'Locked' : 'Drafting';
             });
             checkMatchReady();
         }

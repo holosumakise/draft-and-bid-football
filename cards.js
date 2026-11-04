@@ -506,12 +506,6 @@ function renderSquadRow(player, opts = {}) {
         </li>`;
 }
 
-function countEmptyFormationSlots(manager, player) {
-    if (!manager || !player) return 0;
-    const positions = new Set([player.mainPos, ...(Array.isArray(player.subPos) ? player.subPos : [])].filter(Boolean));
-    return (manager.formation || []).filter(node => !node.assignedPlayerId && positions.has(node.pos)).length;
-}
-
 // The strongest link this player would hold in the XI, nation and club alike.
 // Falls back to the raw fields so the card renders even without draft.js loaded.
 function chemistryLinkInfo(manager, player) {
@@ -552,37 +546,17 @@ function playstyleName(player) {
     return key && typeof PLAYSTYLES !== 'undefined' && PLAYSTYLES[key] ? PLAYSTYLES[key].name : '';
 }
 
-function shortManagerName(name) {
-    return String(name || '?').trim().split(/\s+/)[0].slice(0, 9);
-}
-
 function renderScoutStrip(player, managerId) {
     if (!player || typeof gameState === 'undefined') return '';
     const managers = managerId != null
         ? gameState.managers.filter(manager => manager.id === managerId)
         : gameState.managers;
     if (!managers.length) return '';
-    const fit = managers.map(manager => `
-        <span class="scout-team">
-            <b>${cardEscape(shortManagerName(manager.name))}</b>
-            <em>${countEmptyFormationSlots(manager, player)} ${cardEscape(player.mainPos || '')}</em>
-        </span>`).join('');
-    const focus = managers[0];
-    const link = chemistryLinkInfo(focus, player);
     const tier = cardTierOf(player);
     const style = playstyleName(player);
     const habit = typeof specialityName === 'function' ? specialityName(player) : '';
     return `
         <div class="scout-strip">
-            <div class="scout-chip scout-chip--fit">
-                <span>Fits XI</span>
-                <div class="scout-teams">${fit}</div>
-            </div>
-            ${link && link.bonus ? `
-                <div class="scout-chip">
-                    <span>Link</span>
-                    <b>${cardEscape(link.label)} ×${link.next} <em>+${link.bonus}</em></b>
-                </div>` : ''}
             ${style ? `
                 <div class="scout-chip">
                     <span>Playstyle</span>

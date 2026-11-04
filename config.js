@@ -52,7 +52,7 @@ const DRAFT_OVR_MIN_WEIGHT = 0.25;
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // a room older than this is treated as expired and deleted when someone touches it
 // Bump on every deploy. A room records the build that created it and refuses guests
 // running a different one, so host and guests never simulate with different rules.
-const BUILD_ID = '2026-11-04.14';
+const BUILD_ID = '2026-11-05.3';
 
 // Once the room's skips are gone, an unwanted player is handed to one club picked at
 // random. The wheel spins this long, then pauses before the sale is announced.
@@ -104,6 +104,84 @@ const FORMATION_PRESETS = Object.freeze({
             { x: 15, y: 70, pos: 'LB' }, { x: 38, y: 72, pos: 'CB' }, { x: 62, y: 72, pos: 'CB' }, { x: 85, y: 70, pos: 'RB' },
             { x: 15, y: 48, pos: 'LM' }, { x: 38, y: 49, pos: 'CM' }, { x: 62, y: 49, pos: 'CM' }, { x: 85, y: 48, pos: 'RM' },
             { x: 38, y: 24, pos: 'ST' }, { x: 62, y: 24, pos: 'ST' }
+        ]
+    },
+    '4-3-3': {
+        label: '4-3-3',
+        slots: [
+            { x: 50, y: 86, isGK: true, pos: 'GK' },
+            { x: 15, y: 70, pos: 'LB' }, { x: 38, y: 72, pos: 'CB' }, { x: 62, y: 72, pos: 'CB' }, { x: 85, y: 70, pos: 'RB' },
+            { x: 50, y: 55, pos: 'CDM' }, { x: 30, y: 43, pos: 'CM' }, { x: 70, y: 43, pos: 'CM' },
+            { x: 18, y: 25, pos: 'LW' }, { x: 50, y: 20, pos: 'ST' }, { x: 82, y: 25, pos: 'RW' }
+        ]
+    },
+    '4-2-3-1': {
+        label: '4-2-3-1',
+        slots: [
+            { x: 50, y: 86, isGK: true, pos: 'GK' },
+            { x: 15, y: 70, pos: 'LB' }, { x: 38, y: 72, pos: 'CB' }, { x: 62, y: 72, pos: 'CB' }, { x: 85, y: 70, pos: 'RB' },
+            { x: 36, y: 56, pos: 'CDM' }, { x: 64, y: 56, pos: 'CDM' },
+            { x: 16, y: 40, pos: 'LM' }, { x: 50, y: 38, pos: 'CAM' }, { x: 84, y: 40, pos: 'RM' },
+            { x: 50, y: 19, pos: 'ST' }
+        ]
+    },
+    '4-1-4-1': {
+        label: '4-1-4-1',
+        slots: [
+            { x: 50, y: 86, isGK: true, pos: 'GK' },
+            { x: 15, y: 70, pos: 'LB' }, { x: 38, y: 72, pos: 'CB' }, { x: 62, y: 72, pos: 'CB' }, { x: 85, y: 70, pos: 'RB' },
+            { x: 50, y: 57, pos: 'CDM' },
+            { x: 14, y: 43, pos: 'LM' }, { x: 38, y: 44, pos: 'CM' }, { x: 62, y: 44, pos: 'CM' }, { x: 86, y: 43, pos: 'RM' },
+            { x: 50, y: 20, pos: 'ST' }
+        ]
+    },
+    '4-3-2-1': {
+        label: '4-3-2-1',
+        slots: [
+            { x: 50, y: 86, isGK: true, pos: 'GK' },
+            { x: 15, y: 70, pos: 'LB' }, { x: 38, y: 72, pos: 'CB' }, { x: 62, y: 72, pos: 'CB' }, { x: 85, y: 70, pos: 'RB' },
+            { x: 50, y: 56, pos: 'CDM' }, { x: 30, y: 46, pos: 'CM' }, { x: 70, y: 46, pos: 'CM' },
+            { x: 32, y: 32, pos: 'CAM' }, { x: 68, y: 32, pos: 'CAM' },
+            { x: 50, y: 18, pos: 'ST' }
+        ]
+    },
+    '4-1-2-1-2': {
+        label: '4-1-2-1-2 (diamond)',
+        slots: [
+            { x: 50, y: 86, isGK: true, pos: 'GK' },
+            { x: 15, y: 70, pos: 'LB' }, { x: 38, y: 72, pos: 'CB' }, { x: 62, y: 72, pos: 'CB' }, { x: 85, y: 70, pos: 'RB' },
+            { x: 50, y: 57, pos: 'CDM' },
+            { x: 16, y: 44, pos: 'LM' }, { x: 84, y: 44, pos: 'RM' },
+            { x: 50, y: 32, pos: 'CAM' },
+            { x: 38, y: 19, pos: 'ST' }, { x: 62, y: 19, pos: 'ST' }
+        ]
+    },
+    '3-5-2': {
+        label: '3-5-2',
+        slots: [
+            { x: 50, y: 86, isGK: true, pos: 'GK' },
+            { x: 28, y: 73, pos: 'CB' }, { x: 50, y: 74, pos: 'CB' }, { x: 72, y: 73, pos: 'CB' },
+            { x: 11, y: 50, pos: 'LWB' }, { x: 32, y: 48, pos: 'CM' }, { x: 50, y: 57, pos: 'CDM' }, { x: 68, y: 48, pos: 'CM' }, { x: 89, y: 50, pos: 'RWB' },
+            { x: 40, y: 23, pos: 'ST' }, { x: 60, y: 23, pos: 'ST' }
+        ]
+    },
+    '3-4-2-1': {
+        label: '3-4-2-1',
+        slots: [
+            { x: 50, y: 86, isGK: true, pos: 'GK' },
+            { x: 28, y: 73, pos: 'CB' }, { x: 50, y: 74, pos: 'CB' }, { x: 72, y: 73, pos: 'CB' },
+            { x: 13, y: 50, pos: 'LM' }, { x: 38, y: 51, pos: 'CM' }, { x: 62, y: 51, pos: 'CM' }, { x: 87, y: 50, pos: 'RM' },
+            { x: 30, y: 32, pos: 'CAM' }, { x: 70, y: 32, pos: 'CAM' },
+            { x: 50, y: 17, pos: 'ST' }
+        ]
+    },
+    '5-3-2': {
+        label: '5-3-2',
+        slots: [
+            { x: 50, y: 86, isGK: true, pos: 'GK' },
+            { x: 8, y: 62, pos: 'LWB' }, { x: 30, y: 73, pos: 'CB' }, { x: 50, y: 75, pos: 'CB' }, { x: 70, y: 73, pos: 'CB' }, { x: 92, y: 62, pos: 'RWB' },
+            { x: 28, y: 48, pos: 'CM' }, { x: 50, y: 50, pos: 'CDM' }, { x: 72, y: 48, pos: 'CM' },
+            { x: 40, y: 23, pos: 'ST' }, { x: 60, y: 23, pos: 'ST' }
         ]
     }
 });
@@ -705,7 +783,7 @@ const SPECIALITIES = Object.freeze({
     distance_shooter: {
         name: 'Distance Shooter', group: 'Technical & Behavioural Tendency',
         positions: ['CM', 'CAM', 'CDM', 'LM', 'RM'].concat(SP_WING, SP_STRIKER),
-        longShot: 1.6, score: 1.05,
+        longShot: 1.6,
         fit: { own: { possession: { central: 0.6, spatial: 0.4, positional: -1.0 } } }
     },
     trickster: {
@@ -935,7 +1013,10 @@ function specialityBoardWeightsByPos() {
 function specialityTagWeight(pos, key) {
     const byPos = specialityBoardWeightsByPos();
     const bucket = byPos && byPos[pos];
-    if (bucket) return bucket[key] || 0;
+    // The bucket counts the men still on the board, so a habit the humans already
+    // drafted away is not impossible for a ghost club — fall back to the league-wide
+    // rate instead of zero, or an exhausted position collapses onto one identical tag.
+    if (bucket) return bucket[key] || SPECIALITY_FREQUENCY[key] || 10;
     return SPECIALITY_FREQUENCY[key] || 10;
 }
 
