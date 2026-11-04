@@ -462,10 +462,12 @@ const Online = {
     },
 
     // Clients get the finished table, so they replay the chart at their own pace.
+    // A halfway table stops at matchday 19; the transfer window follows.
     playSeasonChart() {
         if (!gameState.season?.humanSeries) return;
         buildSeasonChartChrome();
-        animateSeasonChart(0);
+        const limit = gameState.season.midSeason ? Math.floor(SEASON_MATCHDAYS / 2) : SEASON_MATCHDAYS;
+        animateSeasonChart(0, limit);
     },
 
     applyEurope(europe) {

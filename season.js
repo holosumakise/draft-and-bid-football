@@ -510,10 +510,40 @@ function startGhostSeason() {
         return finishGhostSeason();
     }
     playSeasonMatchdays(1, midSeason);
-    openTransferWindow(_seasonRun, () => {
-        playSeasonMatchdays(midSeason + 1, SEASON_MATCHDAYS);
-        finishGhostSeason();
+    // Let the first half play out on the season screen before the market opens,
+    // otherwise the window appears before the league has been shown at all.
+    showMidSeasonBreak(midSeason, () => {
+        if (!_seasonRun) return;
+        openTransferWindow(_seasonRun, () => {
+            playSeasonMatchdays(midSeason + 1, SEASON_MATCHDAYS);
+            finishGhostSeason();
+        });
     });
+}
+
+// A display-only season object for the halfway table. finishGhostSeason() builds
+// the real one once the second half is played.
+function buildSeasonView(run, midSeason) {
+    const colors = ['#34d399', '#60a5fa', '#f472b6', '#fbbf24'];
+    return {
+        finalTable: (run.lastSnapshot || []).slice(),
+        playerStatsByManager: run.playerStatsByManager,
+        ghostStatsById: run.ghostStatsById,
+        humanSeries: Object.values(run.humanSeries || {}).map((series, index) => ({ ...series, color: colors[index % colors.length] })),
+        leagueSize: run.table.length,
+        midSeason: !!midSeason
+    };
+}
+
+function showMidSeasonBreak(midSeason, onContinue) {
+    if (!_seasonRun) { onContinue(); return; }
+    gameState.season = buildSeasonView(_seasonRun, true);
+    showScreen('screen-season');
+    Net.publishSeason();
+    const wrap = document.getElementById('season-next-wrap');
+    if (wrap) { wrap.classList.add('hidden'); wrap.classList.remove('flex'); }
+    buildSeasonChartChrome();
+    animateSeasonChart(0, midSeason, () => setTimeout(onContinue, 900));
 }
 
 let _seasonRun = null; // kept out of gameState on purpose (it holds the whole fixture list)
@@ -741,13 +771,20 @@ function updateWdlStrips(upToMd) {
     });
 }
 
-function animateSeasonChart(mdIndex) {
+function animateSeasonChart(mdIndex, limit = SEASON_MATCHDAYS, onDone) {
     const total = SEASON_MATCHDAYS;
-    if (mdIndex > total) {
-        document.getElementById('season-md-label').classList.remove('md-pulse');
-        document.getElementById('season-md-label').innerText = 'Season complete';
+    if (mdIndex > limit) {
+        const label = document.getElementById('season-md-label');
+        label.classList.remove('md-pulse');
+        const complete = limit >= total;
+        label.innerText = complete ? 'Season complete' : `Halfway · Matchday ${limit}`;
         const wrap = document.getElementById('season-next-wrap');
-        if (wrap) { wrap.classList.remove('hidden'); wrap.classList.add('flex'); }
+        if (wrap) {
+            const show = complete && !(gameState.season && gameState.season.midSeason);
+            wrap.classList.toggle('hidden', !show);
+            wrap.classList.toggle('flex', show);
+        }
+        if (typeof onDone === 'function') onDone();
         return;
     }
     document.getElementById('season-md-label').innerText = `Matchday ${mdIndex} / ${total}`;
@@ -758,7 +795,7 @@ function animateSeasonChart(mdIndex) {
     let delay = 85;
     if (mdIndex < 3 || mdIndex > 34) delay = 140;
     if (mdIndex % 5 === 0) delay = 180;
-    setTimeout(() => animateSeasonChart(mdIndex + 1), delay);
+    setTimeout(() => animateSeasonChart(mdIndex + 1, limit, onDone), delay);
 }
 
 function collectAllPlayerStats() {

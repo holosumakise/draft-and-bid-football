@@ -40,7 +40,7 @@ const DRAFT_OVR_MIN_WEIGHT = 0.25;
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // a room older than this is treated as expired and deleted when someone touches it
 // Bump on every deploy. A room records the build that created it and refuses guests
 // running a different one, so host and guests never simulate with different rules.
-const BUILD_ID = '2026-11-04.4';
+const BUILD_ID = '2026-11-04.5';
 
 // Once the room's skips are gone, an unwanted player is handed to one club picked at
 // random. The wheel spins this long, then pauses before the sale is announced.

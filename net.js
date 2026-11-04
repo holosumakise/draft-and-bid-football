@@ -686,6 +686,7 @@ function serializeSeason(season) {
         finalTable: (season.finalTable || []).map(r => ({ ...r })),
         humanSeries: (season.humanSeries || []).map(s => ({ id: s.id, name: s.name, managerId: s.managerId, color: s.color, positions: s.positions.slice(), results: s.results.slice() })),
         leagueSize: season.leagueSize,
+        midSeason: !!season.midSeason,
         awards: season.awards || null,
         ceremony: season.ceremony || null,
         playerStatsByManager: season.playerStatsByManager || null,
