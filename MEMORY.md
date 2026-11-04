@@ -71,3 +71,18 @@
 - Expression choice is stable per player name, independent of hair style. It does not follow match state or affect stats/gameplay. Edited only cards.js and cache metadata (dbf-shell-v14).
 - Verified npm test (35 passed), npm run check and browser rendering of all six expressions plus xl/md/sm card sizes; no page errors or external images. Preview outputs/socce-card-expressions.png, script work/preview-card-expressions.cjs in the Codex chat workspace.
 - In progress: none; scope remains UI only.
+
+## 2026-11-04 — Rarity-specific card characters
+
+- User requested recognizable character details from Elite upward, Invincible stars and cooler GOAT poses. Added visual rarity layers without changing rating thresholds, stats or any gameplay files.
+- Gold retains the existing illustrated portrait. Elite adds a cyan headband, captain band, blue aura and diamond insignia. Invincible adds three stars on the card, violet headband/star, captain band, geometric aura and a raised-fist pose. GOAT adds a gold portrait crown, laurel/aura, gold armband/wrist trim, confident/determined expression and stable per-player crossed-arms or raised-finger pose. Removed a duplicated GOAT corner crown after visual review to avoid overlap.
+- Inline SVG remains offline and supports xl/md/sm. Artwork tier follows the rendered card tier; SVG IDs remain unique. Changes limited to cards.js, index.html and cache metadata dbf-shell-v15.
+- Verified npm test (35 passed), npm run check, browser checks of tier features, exact three Invincible stars, distinct pose metadata, small cards and widths 320/390/768px; no page errors. Gameplay hashes still match the UI-only baseline.
+- Preview outputs/socce-rarity-characters.png; browser script work/preview-rarity-art.cjs; backups work/before-rarity-art in the Codex chat workspace. In progress: none.
+
+## 2026-11-04 — Pose-specific torso/arm proportions
+
+- User found the added hands awkward and requested matching the body to the arms. Rebuilt posed jerseys with a narrower athletic torso and separate shoulder/sleeve silhouettes for raised fist, crossed arms and raised finger, replacing the original down-sleeve shapes for those poses.
+- Redrew continuous upper-arm/elbow/forearm contours, smaller wrists and hands, resting arms, sleeve cuffs and wristbands. Normal Gold/Elite portraits retain their existing body outline. This is artwork only; edited cards.js and cache metadata dbf-shell-v16.
+- Verified npm test (35 passed), npm run check, browser rarity/small-card/mobile rendering with no page errors, and visually inspected all three posed variants. Preview outputs/socce-poses-body-adjusted.png; script work/preview-adjusted-poses.cjs in the Codex chat workspace.
+- In progress: none; gameplay remains unchanged.

@@ -1029,6 +1029,12 @@
         .pcard__bust-initials { font-family: var(--font-display); paint-order: stroke; stroke: rgba(3, 7, 18, 0.48); stroke-width: 1.6px; }
         .pcard__shirt-number, .pcard__kit-mark { font-family: var(--font-display); }
         .pcard__shirt-crest { filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
+        .pcard__rarity-mark { position: absolute; top: 6%; right: 6%; width: 28%; height: 12%; z-index: 7; overflow: visible; filter: drop-shadow(0 0 5px rgba(165,218,255,.4)); }
+        .pcard--invincible .pcard__rarity-mark { filter: drop-shadow(0 0 5px rgba(241,140,255,.7)); }
+        .pcard--elite .pcard__bust { filter: drop-shadow(0 0 3px rgba(125,211,252,.4)) drop-shadow(0 8px 12px rgba(0,0,0,.35)); }
+        .pcard--invincible .pcard__bust { filter: drop-shadow(0 0 4px rgba(237,160,255,.5)) drop-shadow(0 8px 12px rgba(0,0,0,.35)); }
+        .pcard--goat .pcard__bust { filter: drop-shadow(0 0 4px rgba(255,216,117,.6)) drop-shadow(0 8px 12px rgba(0,0,0,.4)); }
+        .pcard--sm .pcard__rarity-mark { right: 5%; width: 27%; }
         .pcard__num { position: absolute; right: 6%; bottom: 0; font-family: var(--font-display); font-size: calc(var(--u) * 4); font-weight: 900; color: rgba(255, 255, 255, 0.75); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
         .pcard__name { position: absolute; top: 57%; left: 7%; right: 7%; z-index: 6; text-align: center; padding: calc(var(--u) * 1.8) 0; border-top: 1px solid var(--tier-line); border-bottom: 1px solid var(--tier-line); font-family: var(--font-display); font-size: calc(var(--u) * 5); font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tier-ink); text-shadow: 0 1px 0 rgba(255, 255, 255, 0.12); }
         .pcard__name--long { font-size: calc(var(--u) * 4.2); }

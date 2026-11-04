@@ -231,10 +231,13 @@ function playerHairSvg(name) {
         <path d="M80 37 Q99 25 119 36" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="2.5" stroke-linecap="round"/>`;
 }
 
-function playerJerseySvg(player, palette, initials) {
+function playerJerseySvg(player, palette, initials, pose = 'portrait') {
     const team = String(player.team || 'Free agent');
     const clip = `card-shirt-${++cardArtworkSequence}`;
-    const outline = 'M24 200 L30 145 Q40 119 72 106 L128 106 Q160 119 170 145 L176 200 Z';
+    const posed = pose !== 'portrait';
+    const outline = posed
+        ? 'M73 108 Q60 110 50 123 L57 153 L52 200 H148 L143 153 L150 123 Q140 110 127 108 Z'
+        : 'M24 200 L30 145 Q40 119 72 106 L128 106 Q160 119 170 145 L176 200 Z';
     const stripeTeams = ['Barcelona', 'Milan', 'Inter', 'Juventus', 'Atlético Madrid', 'Porto', 'Fenerbahçe'];
     const white = '#f8fafc';
     let pattern = '';
@@ -255,11 +258,11 @@ function playerJerseySvg(player, palette, initials) {
         <g class="pcard__jersey" clip-path="url(#${clip})">
             <path class="pcard__bust-body" d="${outline}" fill="${palette.c1}"/>
             ${pattern}
-            <path d="M25 135 L57 115 L68 131 L53 161 L23 151 Z M175 135 L143 115 L132 131 L147 161 L177 151 Z" fill="${whiteSleeves ? white : palette.c2}" opacity="${whiteSleeves ? '1' : '.48'}"/>
+            ${posed ? '' : `<path d="M25 135 L57 115 L68 131 L53 161 L23 151 Z M175 135 L143 115 L132 131 L147 161 L177 151 Z" fill="${whiteSleeves ? white : palette.c2}" opacity="${whiteSleeves ? '1' : '.48'}"/>
             <path d="M31 146 L51 156 M169 146 L149 156" stroke="${white}" stroke-opacity=".85" stroke-width="5"/>
-            <path d="M57 122 L47 138 M62 124 L52 140 M143 122 L153 138 M138 124 L148 140" stroke="${white}" stroke-width="2" stroke-opacity=".7"/>
+            <path d="M57 122 L47 138 M62 124 L52 140 M143 122 L153 138 M138 124 L148 140" stroke="${white}" stroke-width="2" stroke-opacity=".7"/>`}
             <path class="pcard__bust-shade" d="M100 106 H180 V202 H100 Z" fill="#081221" opacity=".15"/>
-            <path d="M65 149 L59 193 M135 149 L141 193" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="2"/>
+            <path d="${posed ? 'M68 144 L62 193 M132 144 L138 193' : 'M65 149 L59 193 M135 149 L141 193'}" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="2"/>
             <path d="M57 147 L64 157 M143 147 L136 157" stroke="#091324" stroke-opacity=".2" stroke-width="2"/>
         </g>
         <path class="pcard__bust-collar" d="M77 107 L87 119 L100 125 L113 119 L123 107" fill="none" stroke="${palette.c2}" stroke-width="9"/>
@@ -276,8 +279,9 @@ function playerJerseySvg(player, palette, initials) {
         <text class="pcard__bust-initials" x="100" y="194" text-anchor="middle" fill="${white}" font-size="9" font-weight="800" letter-spacing="2">${cardEscape(initials)}</text>`;
 }
 
-function playerExpressionSvg(name) {
-    const expression = hashText(`${name || ''}:expression`) % 6;
+function playerExpressionSvg(name, override) {
+    const expression = Number.isInteger(override) && override >= 0 && override < 6
+        ? override : hashText(`${name || ''}:expression`) % 6;
     const eyes = `<g fill="#faf1e6"><ellipse cx="87" cy="69" rx="6" ry="3.5"/><ellipse cx="113" cy="69" rx="6" ry="3.5"/></g>
         <g fill="#33272b"><circle cx="87" cy="69" r="2.6"/><circle cx="113" cy="69" r="2.6"/></g>
         <g fill="#fff"><circle cx="88" cy="68" r=".8"/><circle cx="114" cy="68" r=".8"/></g>`;
@@ -308,11 +312,97 @@ function playerExpressionSvg(name) {
     </g>`;
 }
 
-function playerBustSvg(player, palette, initials) {
+function cardRarityMarkSvg(tier) {
+    if (tier === 'gold') return '';
+    const star = 'M0 -9 L2.6 -3 L9 -2.8 L4 1.5 L5.5 8 L0 4.5 L-5.5 8 L-4 1.5 L-9 -2.8 L-2.6 -3 Z';
+    if (tier === 'invincible') return `<svg class="pcard__rarity-mark" viewBox="0 0 72 34" aria-label="Invincible, three stars">
+        <g class="pcard__rarity-stars" fill="#fff1ff" stroke="#ef9dff" stroke-width="1.2">${[14, 36, 58].map((x, i) => `<path transform="translate(${x} ${i === 1 ? 13 : 17})" d="${star}"/>`).join('')}</g></svg>`;
+    if (tier === 'goat') return '';
+    return `<svg class="pcard__rarity-mark" viewBox="0 0 72 34" aria-label="Elite, diamond insignia">
+        <path d="M36 3 L49 15 L36 28 L23 15 Z" fill="#bdefff" stroke="#fff" stroke-width="1.2"/>
+        <path d="M16 12 L23 19 M56 12 L49 19 M12 17 L21 26 M60 17 L51 26" stroke="#72d5ff" stroke-width="2" fill="none"/></svg>`;
+}
+
+function portraitAuraSvg(tier) {
+    if (tier === 'gold') return '';
+    const color = tier === 'goat' ? '#ffda75' : tier === 'invincible' ? '#f4a5ff' : '#8fddff';
+    const shape = tier === 'invincible'
+        ? '<path d="M100 4 L164 43 L164 114 L100 153 L36 114 L36 43 Z"/>'
+        : '<circle cx="100" cy="72" r="65"/><circle cx="100" cy="72" r="58" stroke-dasharray="2 8"/>';
+    return `<g class="pcard__portrait-aura" fill="none" stroke="${color}" stroke-width="1.4" opacity=".55">${shape}
+        <path d="M35 51 L35 63 M29 57 H41 M164 91 V105 M157 98 H171" stroke-width="2"/>
+        ${tier === 'goat' ? '<path d="M38 100 Q18 67 40 32 M162 100 Q182 67 160 32 M33 85 L22 75 M31 66 L21 55 M37 46 L29 35 M167 85 L178 75 M169 66 L179 55 M163 46 L171 35" stroke-width="3"/>' : ''}
+    </g>`;
+}
+
+function portraitHeadwearSvg(tier) {
+    if (tier === 'gold') return '';
+    if (tier === 'goat') return `<g class="pcard__portrait-crown">
+        <path d="M76 31 L71 14 L86 22 L99 6 L113 22 L128 14 L123 31 Z" fill="#edb947" stroke="#fff0b0" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M77 31 H122 V37 H77Z" fill="#a86c23" stroke="#ffd879" stroke-width="1.2"/>
+        <path d="M99 17 L103 23 L99 29 L95 23 Z" fill="#fff7db"/>
+        <circle cx="81" cy="28" r="2" fill="#fff7db"/><circle cx="117" cy="28" r="2" fill="#fff7db"/>
+    </g>`;
+    const color = tier === 'invincible' ? '#c55edc' : '#358abc';
+    return `<g class="pcard__headband">
+        <path d="M73 50 Q100 42 127 50 L126 57 Q100 49 74 57Z" fill="${color}" stroke="${tier === 'invincible' ? '#ffd2ff' : '#c4f4ff'}" stroke-width="1"/>
+        <path d="M126 53 L139 60 L131 64 L143 71 L132 69 L122 56Z" fill="${color}"/>
+        ${tier === 'invincible' ? '<path d="M100 47 L102 50 L106 50 L103 53 L104 57 L100 55 L96 57 L97 53 L94 50 L98 50Z" fill="#fff0ff"/>' : '<path d="M88 50 L92 53 L96 49" fill="none" stroke="#dbf8ff" stroke-width="1.3"/>'}
+    </g>`;
+}
+
+function portraitPoseSvg(tier, pose, palette, player) {
+    if (tier === 'gold') return '';
+    const accent = tier === 'goat' ? '#f4cf75' : tier === 'invincible' ? '#ecb2ff' : '#9bdeff';
+    const band = `<g class="pcard__captain-band"><path d="M31 145 L48 151 L45 163 L28 157Z" fill="${accent}"/>
+        <text x="37" y="156" text-anchor="middle" fill="#152035" font-size="8" font-weight="900" transform="rotate(18 37 156)">C</text></g>`;
+    if (tier === 'elite') return `${band}<path d="M76 108 L87 121 M124 108 L113 121" fill="none" stroke="${accent}" stroke-width="2.5"/>`;
+    const sleeve = player && player.team === 'Arsenal' ? '#f8fafc' : palette.c1;
+    const leftSleeve = pose === 'fist-up'
+        ? 'M70 108 Q54 108 44 120 L34 132 L50 147 L67 132Z'
+        : 'M72 108 Q53 109 44 126 L38 143 L55 151 L68 132Z';
+    const rightSleeve = pose === 'point-up'
+        ? 'M127 108 Q143 108 152 120 L169 134 L154 149 L137 135Z'
+        : 'M128 108 Q147 109 156 126 L162 143 L145 151 L132 132Z';
+    const sleeves = `<g class="pcard__pose-sleeves" stroke="#152035" stroke-opacity=".25" stroke-width="1">
+        <path d="${leftSleeve}" fill="${sleeve}"/><path d="${rightSleeve}" fill="${sleeve}"/>
+        <path d="${pose === 'fist-up' ? 'M37 132 L50 144' : 'M40 141 L55 148'}" stroke="${accent}" stroke-width="5"/>
+        <path d="${pose === 'point-up' ? 'M166 135 L155 146' : 'M160 141 L145 148'}" stroke="#f8fafc" stroke-width="3"/>
+        <path d="M61 116 L51 131 M65 118 L55 133 M139 116 L149 131" stroke="#f8fafc" stroke-opacity=".65" stroke-width="1.8"/>
+    </g>`;
+    if (pose === 'arms-crossed') return `<g class="pcard__pose-arms" stroke="#aa7253" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M43 142 Q36 159 42 172 Q47 186 60 182 L132 157 Q145 157 144 149 Q138 144 130 150 L58 167 L57 147Z" fill="#c9906c"/>
+        <path d="M157 142 Q164 159 158 172 Q153 186 139 181 L71 158 Q59 158 57 151 Q61 144 72 150 L142 167 L143 147Z" fill="#daa27d"/>
+        <path d="M117 160 L122 176 M80 160 L75 176" stroke="${accent}" stroke-width="5"/>
+        <path d="M65 150 L78 156 M63 154 L75 160 M135 150 L124 154" fill="none" stroke="#b27a59"/>
+        <path d="M49 169 Q52 175 58 173 M151 169 Q148 175 142 173" fill="none" stroke="#b27a59"/>
+    </g>${sleeves}`;
+    if (pose === 'point-up') return `<g class="pcard__pose-arms" stroke="#ab7355" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M42 143 L57 148 L48 200 H30Z" fill="#ce9671"/>
+        <path d="M158 134 Q170 138 177 146 L177 100 L191 99 L192 147 Q191 163 179 166 Q169 165 150 148Z" fill="#daa27d"/>
+        <path d="M177 111 L191 110" stroke="${accent}" stroke-width="6"/>
+        <path d="M178 102 L174 88 Q169 82 172 78 Q176 75 181 84 L181 59 Q181 53 185 53 Q189 53 189 59 V81 Q194 77 196 83 L196 95 Q195 101 190 104Z" fill="#daa27d"/>
+        <path d="M187 83 L187 92 M192 84 L192 93 M178 148 Q183 152 187 147" fill="none"/>
+    </g>${sleeves}`;
+    return `<g class="pcard__pose-arms" stroke="#ac7253" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M158 143 L143 148 L152 200 H170Z" fill="#ce9671"/>
+        <path d="M43 134 Q35 139 28 146 L23 111 L9 113 L13 150 Q15 164 27 166 Q37 165 54 147Z" fill="#daa27d"/>
+        <path d="M10 121 L25 118" stroke="${accent}" stroke-width="6"/>
+        <path d="M10 113 L7 101 L8 90 Q10 84 14 87 Q17 81 21 86 Q27 82 30 88 L33 95 L29 107 L23 113Z" fill="#daa27d"/>
+        <path d="M13 91 L14 99 M20 89 L21 98 M27 91 L26 100 M17 148 Q22 153 27 148" fill="none"/>
+    </g>${sleeves}`;
+}
+
+function playerBustSvg(player, palette, initials, tier = cardTierOf(player)) {
+    const pose = tier === 'goat' ? (hashText(`${player.name}:pose`) % 2 ? 'point-up' : 'arms-crossed')
+        : tier === 'invincible' ? 'fist-up' : 'portrait';
+    const expression = tier === 'goat' ? (pose === 'arms-crossed' ? 2 : 5) : undefined;
     return `
-        <svg class="pcard__bust" viewBox="0 0 200 200" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
+        <svg class="pcard__bust" data-portrait-tier="${tier}" data-pose="${pose}" viewBox="0 0 200 200" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
             <ellipse class="pcard__bust-shadow" cx="100" cy="194" rx="72" ry="8"></ellipse>
-            ${playerJerseySvg(player, palette, initials)}
+            ${portraitAuraSvg(tier)}
+            ${playerJerseySvg(player, palette, initials, pose)}
+            ${portraitPoseSvg(tier, pose, palette, player)}
             <path d="M89 87 H111 V108 L100 117 L89 108 Z" fill="#be825e"/>
             <path d="M89 88 H111 V98 Q99 107 89 99 Z" fill="#6b3d30" opacity=".3"/>
             <ellipse cx="70" cy="68" rx="5" ry="9" fill="#ce9671"/>
@@ -320,7 +410,8 @@ function playerBustSvg(player, palette, initials) {
             <path class="pcard__bust-head" d="M72 52 Q72 30 100 30 Q128 30 128 52 L125 80 Q120 96 100 101 Q80 96 75 80 Z" fill="#daa27d" stroke="#b77c59" stroke-width="1.5"/>
             <path d="M100 37 Q127 36 127 59 L124 80 Q117 94 100 99 Z" fill="#a96d50" opacity=".2"/>
             ${playerHairSvg(player.name)}
-            ${playerExpressionSvg(player.name)}
+            ${portraitHeadwearSvg(tier)}
+            ${playerExpressionSvg(player.name, expression)}
         </svg>`;
 }
 
@@ -368,6 +459,7 @@ function renderPlayerCard(player, opts = {}) {
                     <div class="pcard__pattern"></div>
                     <div class="pcard__holo"></div>
                     <div class="pcard__shine"></div>
+                    ${cardRarityMarkSvg(tier)}
                     <div class="pcard__top">
                         <div class="pcard__rating">
                             <span class="pcard__ovr">${rating}</span>
@@ -380,7 +472,7 @@ function renderPlayerCard(player, opts = {}) {
                     </div>
                     <div class="pcard__portrait">
                         <span class="pcard__halo"></span>
-                        ${playerBustSvg(player, palette, initials)}
+                        ${playerBustSvg(player, palette, initials, tier)}
                     </div>
                     <div class="pcard__name ${nameClass}"><span>${cardEscape(name)}</span></div>
                     ${statsHtml}
