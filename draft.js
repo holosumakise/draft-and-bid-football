@@ -84,10 +84,22 @@ function enrichPlayer(p, rankIndex = 99) {
 
     const rankInfo = getRankInfo(ovr);
 
+    // Curated role identity when the pool declares one; otherwise the style is
+    // drawn from the name so the same player always gets the same role.
+    const style = (typeof playerPlaystyles !== 'undefined' && playerPlaystyles[p.name])
+        || (typeof playstyleForName === 'function' ? playstyleForName(mainPos, p.name) : null);
+
+    // The habit is curated for the players whose reputation is the habit, and read
+    // off the shape of the body for everyone else — but that reading needs the whole
+    // position list, so it happens in assignSpecialities once the pool is built.
+    const habit = (typeof playerSpecialities !== 'undefined' && playerSpecialities[p.name]) || null;
+
     return {
         id: nextPlayerId++, name: p.name, rating: ovr, displayOVR: rankInfo.display,
         rank: rankInfo.rank, rankColor: rankInfo.color, rankBadge: rankInfo.badge, stats,
         mainPos,
+        playstyle: style || null,
+        speciality: habit || null,
         subPos: Array.isArray(p.subPos) ? p.subPos.filter(s => typeof s === 'string') : [],
         team: p.team || '',
         nationality: p.nationality || 'World'
@@ -144,37 +156,77 @@ function initializePlayerDB() {
         });
     });
 
+    // Every habit is read against the players who share the position, so the whole
+    // pool has to exist before a single card can be tagged.
+    if (typeof assignSpecialities === 'function') assignSpecialities(availablePlayers);
+
     for (let i = availablePlayers.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [availablePlayers[i], availablePlayers[j]] = [availablePlayers[j], availablePlayers[i]];
     }
-
     if (!availablePlayers.length) {
         console.error('[Draft] Loaded 0 players from playerPool. Keys:', poolGroups);
     }
 }
 
 // --- Chemistry ---
-// Nation links only count for the starting XI. Players must share the same nation.
-function chemistryKeyOf(player) {
-    if (!player) return '';
-    return String(player.nationality || 'World').trim().toLowerCase();
+// Links form inside the starting XI only. Nation and club links run on the same
+// tiers, and every helper below takes a `kind`, which is why a player maps to a
+// *list* of groups: a player who has played for several clubs is linked through
+// each of them.
+function chemistryKeysOf(player, kind) {
+    if (!player) return [];
+    const label = value => String(value || '').trim().toLowerCase();
+    if (kind === 'club') {
+        const clubs = Array.isArray(player.clubs) && player.clubs.length ? player.clubs : [player.team];
+        return [...new Set(clubs.map(label).filter(Boolean))];
+    }
+    return [label(player.nationality) || 'world'];
+}
+
+function chemistryLabelOf(player, kind, key) {
+    if (kind === 'club') {
+        const clubs = Array.isArray(player.clubs) && player.clubs.length ? player.clubs : [player.team];
+        return clubs.find(club => String(club || '').trim().toLowerCase() === key) || player.team || 'Club';
+    }
+    return player.nationality || 'World';
+}
+
+// How many linked players each group has, per kind of link.
+function countChemistryLinks(players) {
+    const counts = {};
+    CHEMISTRY_KINDS.forEach(kind => { counts[kind] = new Map(); });
+    (players || []).filter(Boolean).forEach(player => {
+        CHEMISTRY_KINDS.forEach(kind => {
+            chemistryKeysOf(player, kind).forEach(key => {
+                counts[kind].set(key, (counts[kind].get(key) || 0) + 1);
+            });
+        });
+    });
+    return counts;
+}
+
+// The best link one player can claim. A doubly-linked player takes the stronger
+// link instead of adding them up, so a bonus never out-grows the card.
+function bestChemistryLink(player, counts) {
+    let best = { bonus: 0, kind: null, key: null, label: null, count: 0 };
+    CHEMISTRY_KINDS.forEach(kind => {
+        chemistryKeysOf(player, kind).forEach(key => {
+            const count = (counts[kind] && counts[kind].get(key)) || 0;
+            const bonus = chemistryBonusFor(count);
+            if (bonus > best.bonus || (bonus > 0 && bonus === best.bonus && count > best.count)) {
+                best = { bonus, kind, key, label: chemistryLabelOf(player, kind, key), count };
+            }
+        });
+    });
+    return best;
 }
 
 function getChemistryBonuses(players) {
     const list = (players || []).filter(Boolean);
-    const counts = new Map();
-    list.forEach(player => {
-        const key = chemistryKeyOf(player);
-        counts.set(key, (counts.get(key) || 0) + 1);
-    });
+    const counts = countChemistryLinks(list);
     const bonuses = new Map();
-    list.forEach(player => {
-        const linked = counts.get(chemistryKeyOf(player)) || 0;
-        const bonus = linked >= CHEMISTRY.STRONG_MIN ? CHEMISTRY.STRONG_BONUS
-            : linked >= CHEMISTRY.WARM_MIN ? CHEMISTRY.WARM_BONUS : 0;
-        bonuses.set(player.id, bonus);
-    });
+    list.forEach(player => { bonuses.set(player.id, bestChemistryLink(player, counts).bonus); });
     return bonuses;
 }
 
@@ -197,25 +249,27 @@ function getLineupChemistry(lineup) {
     return getChemistryBonuses((lineup || []).map(slot => slot && slot.player).filter(Boolean));
 }
 
+// Every link group worth a bonus, so the pitch can draw the nation lines and the
+// club lines side by side.
 function getChemistryGroups(players) {
     const groups = new Map();
-    (players || []).filter(Boolean).forEach(player => {
-        const key = chemistryKeyOf(player);
-        if (!groups.has(key)) {
-            groups.set(key, {
-                nation: player.nationality || 'World',
-                count: 0,
-                bonus: 0
+    const list = (players || []).filter(Boolean);
+    const counts = countChemistryLinks(list);
+    list.forEach(player => {
+        CHEMISTRY_KINDS.forEach(kind => {
+            chemistryKeysOf(player, kind).forEach(key => {
+                const count = counts[kind].get(key) || 0;
+                const bonus = chemistryBonusFor(count);
+                if (bonus <= 0) return;
+                const id = `${kind}:${key}`;
+                if (!groups.has(id)) {
+                    groups.set(id, { id, kind, key, label: chemistryLabelOf(player, kind, key), count, bonus });
+                }
             });
-        }
-        groups.get(key).count++;
-    });
-    groups.forEach(group => {
-        group.bonus = group.count >= CHEMISTRY.STRONG_MIN ? CHEMISTRY.STRONG_BONUS
-            : group.count >= CHEMISTRY.WARM_MIN ? CHEMISTRY.WARM_BONUS : 0;
+        });
     });
     return [...groups.values()]
-        .filter(group => group.count >= CHEMISTRY.WARM_MIN)
+        .filter(group => group.count >= CHEMISTRY.LINK_MIN)
         .sort((a, b) => b.bonus - a.bonus || b.count - a.count);
 }
 
@@ -396,10 +450,14 @@ function rollPlayers() {
 // --- Draft reel ---
 // Decorative spin played on every device that renders a 'spinning' card. The host's
 // reel lands on the rolled player; a guest is not told who it is yet, so its reel
-// simply stops on a random pair and the revealed snapshot brings the real card.
-const REEL = { ITEM_H: 36, VISIBLE: 3, SPIN_ITEMS: 18, NAT_MS: 1400, POS_MS: 2200, GAP_AFTER: 280 };
+// simply stops on a random triple and the revealed snapshot brings the real card.
+const REEL = {
+    ITEM_H: 36, VISIBLE: 3, SPIN_ITEMS: 18,
+    NAT_MS: 1400, CLUB_MS: 1800, POS_MS: 2200, GAP_AFTER: 280
+};
 const REEL_POSITIONS = ['GK','CB','LB','RB','LWB','RWB','CDM','CM','CAM','LM','RM','LW','RW','CF','ST'];
 const REEL_NATIONS = ["England","Spain","Italy","Germany","France","Brazil","Argentina","Portugal","Netherlands","Belgium"];
+const REEL_CLUBS = ["Real Madrid","Barcelona","Milan","Juventus","Inter","Liverpool","Manchester United","Bayern Munich","Ajax","Boca Juniors"];
 
 // The scrolling strip is seeded from the roll itself, so every device shows the
 // same symbols in the same order instead of a different blur on each screen.
@@ -439,16 +497,22 @@ function spinReel(trackEl, durationMs) {
 function runDraftReel(player, spin, nonce) {
     const posTrack = document.getElementById('reel-pos');
     const natTrack = document.getElementById('reel-nat');
+    const clubTrack = document.getElementById('reel-club');
     const posCol = document.getElementById('col-pos');
     const natCol = document.getElementById('col-nat');
-    if (!posTrack || !natTrack || !posCol || !natCol) return;
+    const clubCol = document.getElementById('col-club');
+    if (!posTrack || !natTrack || !clubTrack || !posCol || !natCol || !clubCol) return;
 
     const nats = availablePlayers.length
         ? [...new Set(availablePlayers.map(p => p.nationality))].filter(Boolean)
         : REEL_NATIONS;
-    // The name and OVR stay hidden until the reveal, but the two symbols the reels
-    // land on travel with the spin, so every screen stops on the same pair.
+    const clubs = availablePlayers.length
+        ? [...new Set(availablePlayers.map(p => p.team))].filter(Boolean)
+        : REEL_CLUBS;
+    // The name and OVR stay hidden until the reveal, but the three symbols the reels
+    // land on travel with the spin, so every screen stops on the same triple.
     const finalNat = (player && player.nationality) || (spin && spin.nat) || pickRand(nats);
+    const finalClub = (player && player.team) || (spin && spin.club) || pickRand(clubs);
     const finalPos = (player && player.mainPos) || (spin && spin.pos) || pickRand(REEL_POSITIONS);
 
     // A device that picks the spin up late shortens it so its reels still stop when
@@ -457,21 +521,27 @@ function runDraftReel(player, spin, nonce) {
     const left = spin && Number.isFinite(spin.remaining) ? spin.remaining : full;
     const scale = clamp(left / full, 0.3, 1);
     const natMs = Math.round(REEL.NAT_MS * scale);
+    const clubMs = Math.round(REEL.CLUB_MS * scale);
     const posMs = Math.round(REEL.POS_MS * scale);
 
     const rand = reelSeed(nonce);
     fillReel(natTrack, reelItems(nats, finalNat, rand), 'reel-nat-text');
+    fillReel(clubTrack, reelItems(clubs, finalClub, rand), 'reel-club-text');
     fillReel(posTrack, reelItems(REEL_POSITIONS, finalPos, rand), 'reel-pos-text');
 
-    // Left-to-right: Nationality → Position
-    natCol.classList.add('slot-spinning'); posCol.classList.add('slot-spinning');
+    // Left-to-right: Nationality → Club → Position, each stopping after the last.
+    natCol.classList.add('slot-spinning');
+    clubCol.classList.add('slot-spinning');
+    posCol.classList.add('slot-spinning');
 
     requestAnimationFrame(() => {
         spinReel(natTrack, natMs);
+        spinReel(clubTrack, clubMs);
         spinReel(posTrack, posMs);
     });
 
     setTimeout(() => { natCol.classList.remove('slot-spinning'); natCol.classList.add('slot-locked'); }, natMs);
+    setTimeout(() => { clubCol.classList.remove('slot-spinning'); clubCol.classList.add('slot-locked'); }, clubMs);
     setTimeout(() => { posCol.classList.remove('slot-spinning'); posCol.classList.add('slot-locked'); }, posMs);
 }
 
@@ -585,8 +655,12 @@ function renderDraftBoard() {
                 <div class="draft-spin__back"><span>?</span></div>
                 <div class="draft-spin__reels">
                     <div id="col-nat" class="slot-col">
-                        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nationality</span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nation</span>
                         <div class="reel-window"><div class="reel-track" id="reel-nat"></div><div class="reel-mask-top"></div><div class="reel-mask-bot"></div><div class="reel-highlight"></div></div>
+                    </div>
+                    <div id="col-club" class="slot-col">
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Club</span>
+                        <div class="reel-window"><div class="reel-track" id="reel-club"></div><div class="reel-mask-top"></div><div class="reel-mask-bot"></div><div class="reel-highlight"></div></div>
                     </div>
                     <div id="col-pos" class="slot-col">
                         <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Position</span>

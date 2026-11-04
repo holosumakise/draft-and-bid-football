@@ -638,6 +638,7 @@ function serializeDraft(d) {
             spin: {
                 pos: p.mainPos || null,
                 nat: p.nationality || null,
+                club: p.team || null,
                 remaining: d.spinEndsAt ? Math.max(0, d.spinEndsAt - Date.now()) : null
             }
         };

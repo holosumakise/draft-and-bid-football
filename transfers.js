@@ -258,43 +258,98 @@
     }
 
     // ---------- UI ----------
+    const CASH_STEP = 5;
+
+    function posGroup(pos) {
+        const key = String(pos || '').toUpperCase();
+        if (key === 'GK') return 'gk';
+        const meta = typeof POSITION_META !== 'undefined' ? POSITION_META[key] : null;
+        if (meta) return ['def', 'mid', 'fwd'][meta.unit] || 'mid';
+        if (/(CB|LB|RB|WB)$/.test(key)) return 'def';
+        if (key === 'ST' || key === 'CF' || key === 'LW' || key === 'RW') return 'fwd';
+        return 'mid';
+    }
+
     function injectStyles() {
         if (document.getElementById('tw-styles')) return;
         const st = document.createElement('style');
         st.id = 'tw-styles';
         st.textContent = `
-        #screen-transfer-window { overflow-y:auto; padding:20px 16px 90px; color:#e2e8f0; }
-        .tw-wrap { max-width:960px; margin:0 auto; }
-        .tw-title { font-size:22px; font-weight:800; color:#34d399; margin:0; }
-        .tw-sub { color:#94a3b8; font-size:13px; margin:2px 0 14px; }
-        .tw-row-top { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
-        .tw-chip { padding:7px 12px; border-radius:10px; border:1px solid #334155; background:#0f172a; color:#cbd5e1; font-size:13px; font-weight:700; cursor:pointer; }
-        .tw-chip.on { background:#064e3b; border-color:#34d399; color:#6ee7b7; }
+        #screen-transfer-window { overflow-y:auto; padding:18px 14px 104px; color:#e2e8f0; }
+        .tw-wrap { max-width:940px; margin:0 auto; display:flex; flex-direction:column; gap:12px; padding-bottom:78px; }
+        .tw-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px solid #1e293b; }
+        .tw-title { font-size:19px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; color:#34d399; margin:0; }
+        .tw-sub { color:#94a3b8; font-size:12px; margin:3px 0 0; }
+        .tw-sub b { color:#e2e8f0; }
+        .tw-note { color:#64748b; font-size:12.5px; padding:14px 10px; text-align:center; border:1px dashed #1e293b; border-radius:12px; }
+        .tw-seats { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+        .tw-chip { padding:7px 11px; border-radius:10px; border:1px solid #24344f; background:#0b1220; color:#cbd5e1; font-size:12.5px; font-weight:800; cursor:pointer; text-align:left; line-height:1.25; }
+        .tw-chip.on { background:#064e3b; border-color:#34d399; color:#a7f3d0; }
         .tw-chip.tw-static { cursor:default; }
-        .tw-chip small { display:block; font-weight:500; color:#94a3b8; font-size:11px; }
-        .tw-card { background:#0b1220; border:1px solid #1e293b; border-radius:12px; padding:10px 12px; margin-bottom:10px; }
-        .tw-h { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:#64748b; font-weight:800; margin:14px 0 6px; }
-        .tw-pl { display:flex; align-items:center; gap:10px; padding:7px 4px; border-bottom:1px solid #162033; }
+        .tw-chip small { display:block; font-weight:600; color:#64748b; font-size:10.5px; }
+        .tw-chip.on small { color:#6ee7b7; }
+        .tw-chip i { font-style:normal; color:#34d399; margin-left:5px; }
+        .tw-tabs { display:flex; gap:4px; padding:4px; border-radius:12px; background:#0b1220; border:1px solid #1e293b; }
+        .tw-filters { display:flex; gap:6px; flex-wrap:wrap; }
+        .tw-tab { flex:1; padding:9px 8px; border:0; border-radius:9px; background:transparent; color:#94a3b8; font-weight:800; font-size:13px; cursor:pointer; }
+        .tw-tab.on { background:#064e3b; color:#a7f3d0; }
+        .tw-tab span { display:inline-block; margin-left:5px; padding:0 6px; border-radius:999px; background:#334155; color:#e2e8f0; font-size:11px; }
+        .tw-tab.on span { background:#34d399; color:#04231a; }
+        .tw-h { font-size:11px; letter-spacing:.10em; text-transform:uppercase; color:#64748b; font-weight:900; margin:6px 2px 5px; }
+        .tw-h span { letter-spacing:0; text-transform:none; font-weight:700; color:#475569; }
+        .tw-card { background:#0b1220; border:1px solid #1e293b; border-radius:14px; padding:2px 10px; margin-bottom:10px; }
+        .tw-pl { display:flex; align-items:center; gap:9px; padding:8px 0; border-bottom:1px solid #162033; }
         .tw-pl:last-child { border-bottom:0; }
-        .tw-pos { width:38px; font-size:11px; font-weight:800; color:#94a3b8; }
-        .tw-name { flex:1; font-weight:700; font-size:14px; }
-        .tw-name em { font-style:normal; font-size:11px; color:#94a3b8; font-weight:500; margin-left:6px; }
-        .tw-ovr { font-weight:800; color:#fbbf24; width:30px; text-align:right; }
-        .tw-val { width:64px; text-align:right; color:#94a3b8; font-size:12px; }
-        .tw-tag { font-size:10px; font-weight:800; padding:2px 6px; border-radius:6px; background:#7c2d12; color:#fdba74; margin-left:6px; }
-        .tw-btn { padding:6px 12px; border-radius:8px; border:1px solid #334155; background:#111c30; color:#e2e8f0; font-weight:700; font-size:12px; cursor:pointer; }
+        .tw-pos { width:36px; flex-shrink:0; text-align:center; padding:3px 0; border-radius:7px; font-size:10px; font-weight:900; letter-spacing:.04em; background:#1e293b; color:#cbd5e1; }
+        .tw-pos--gk { background:#2b2109; color:#fcd34d; }
+        .tw-pos--def { background:#0f2438; color:#7dd3fc; }
+        .tw-pos--mid { background:#0d2b23; color:#6ee7b7; }
+        .tw-pos--fwd { background:#2b1220; color:#f9a8d4; }
+        .tw-name { flex:1; min-width:0; font-weight:700; font-size:13.5px; display:flex; align-items:baseline; gap:6px; }
+        .tw-name em { font-style:normal; font-size:11px; color:#64748b; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .tw-ovr { width:34px; flex-shrink:0; text-align:center; padding:3px 0; border-radius:8px; background:#111c30; border:1px solid #24344f; font-weight:900; font-size:12.5px; }
+        .tw-ovr.is-elite { color:#fbbf24; border-color:#78350f; background:#241a06; }
+        .tw-val { width:58px; flex-shrink:0; text-align:right; color:#64748b; font-size:11px; }
+        .tw-tag { flex-shrink:0; font-size:9.5px; font-weight:900; letter-spacing:.06em; padding:2px 6px; border-radius:6px; background:#7c2d12; color:#fdba74; }
+        .tw-btn { padding:7px 12px; border-radius:9px; border:1px solid #334155; background:#111c30; color:#e2e8f0; font-weight:800; font-size:12px; cursor:pointer; flex-shrink:0; }
         .tw-btn:hover:not(:disabled) { border-color:#34d399; }
         .tw-btn:disabled { opacity:.4; cursor:not-allowed; }
         .tw-btn.go { background:#059669; border-color:#059669; color:#fff; }
-        .tw-btn.no { background:#7f1d1d; border-color:#7f1d1d; color:#fff; }
-        .tw-offer { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
-        .tw-offer .txt { flex:1; min-width:240px; font-size:14px; line-height:1.4; }
-        .tw-badge { background:#ef4444; color:#fff; border-radius:999px; font-size:11px; padding:1px 7px; margin-left:6px; }
-        .tw-foot { position:fixed; left:0; right:0; bottom:0; padding:12px 16px; background:#060b16ee; border-top:1px solid #1e293b; display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
-        .tw-modal-bg { position:fixed; inset:0; background:#000a; display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
-        .tw-modal { background:#0b1220; border:1px solid #334155; border-radius:14px; padding:18px; width:100%; max-width:430px; }
-        .tw-modal select, .tw-modal input { width:100%; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:8px; padding:8px; margin:4px 0 10px; font-size:14px; }
-        .tw-log { font-size:12px; color:#94a3b8; }
+        .tw-btn.no { background:#7f1d1d; border-color:#991b1b; color:#fecaca; }
+        .tw-btn.sm { padding:4px 9px; font-size:11px; }
+        .tw-offer { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid #162033; }
+        .tw-offer:last-child { border-bottom:0; }
+        .tw-swap { flex:1; min-width:230px; display:flex; align-items:stretch; gap:8px; }
+        .tw-swap__side { flex:1; padding:6px 9px; border-radius:10px; background:#111c30; border:1px solid #24344f; }
+        .tw-swap__side--in { border-color:#14532d; background:#08251a; }
+        .tw-swap__side--out { border-color:#3f2d4a; background:#1a1024; }
+        .tw-swap__side span { display:block; font-size:9.5px; letter-spacing:.10em; text-transform:uppercase; color:#64748b; font-weight:900; }
+        .tw-swap__side b { display:block; font-size:13px; margin-top:2px; }
+        .tw-swap__side small { color:#94a3b8; font-size:11px; }
+        .tw-swap__arrow { align-self:center; color:#34d399; font-weight:900; }
+        .tw-offer__act { display:flex; gap:7px; }
+        .tw-badge { background:#ef4444; color:#fff; border-radius:999px; font-size:10.5px; font-weight:900; padding:0 6px; margin-left:5px; }
+        .tw-foot { position:fixed; left:0; right:0; bottom:0; padding:11px 14px; background:#060b16f2; border-top:1px solid #1e293b; display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; }
+        .tw-foot__hint { font-size:11.5px; color:#64748b; }
+        .tw-modal-bg { position:fixed; inset:0; background:#000c; display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
+        .tw-modal { background:#0b1220; border:1px solid #334155; border-radius:16px; padding:18px; width:100%; max-width:440px; }
+        .tw-modal h3 { margin:0; font-size:16px; font-weight:900; color:#e2e8f0; }
+        .tw-modal label { display:block; font-size:10.5px; letter-spacing:.10em; text-transform:uppercase; color:#64748b; font-weight:900; margin-top:10px; }
+        .tw-modal select, .tw-modal input { width:100%; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:9px; padding:9px; margin-top:5px; font-size:14px; }
+        .tw-cashrow { display:flex; gap:6px; margin-top:7px; flex-wrap:wrap; }
+        .tw-hintline { font-size:11.5px; color:#94a3b8; margin-top:9px; }
+        .tw-modal__act { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
+        .tw-log { font-size:12px; color:#94a3b8; line-height:1.7; }
+        @media (max-width:640px) {
+            .tw-val { display:none; }
+            .tw-name { display:block; font-size:13px; }
+            .tw-name em { display:block; }
+            .tw-offer { align-items:stretch; }
+            .tw-swap { flex-direction:column; }
+            .tw-swap__arrow { display:none; }
+            .tw-offer__act { width:100%; justify-content:flex-end; }
+            .tw-foot__hint { display:none; }
+        }
         `;
         document.head.appendChild(st);
     }
@@ -317,19 +372,38 @@
 
     function playerRow(p, extra) {
         const v = Adapter.value(p);
-        return `<div class="tw-pl"><span class="tw-pos">${esc(p.mainPos)}</span>
-            <span class="tw-name">${esc(p.name)}${S.listed[p.id] ? '<span class="tw-tag">FOR SALE</span>' : ''}<em>${esc(p.team || '')}</em></span>
-            <span class="tw-ovr">${esc(p.rating)}</span>${v != null ? `<span class="tw-val">${esc(Adapter.fmt(v))}</span>` : ''}
+        const club = [p.team, p.nationality].filter(Boolean).map(esc).join(' · ');
+        return `<div class="tw-pl">
+            <span class="tw-pos tw-pos--${posGroup(p.mainPos)}">${esc(p.mainPos)}</span>
+            <span class="tw-name">${esc(p.name)}${S.listed[p.id] ? '<span class="tw-tag">LISTED</span>' : ''}${club ? `<em>${club}</em>` : ''}</span>
+            <span class="tw-ovr${p.rating >= 90 ? ' is-elite' : ''}">${esc(p.rating)}</span>
+            ${v != null ? `<span class="tw-val">${esc(Adapter.fmt(v))}</span>` : ''}
             ${extra || ''}</div>`;
     }
 
-    function offerText(o) {
+    // One offer, read as "who comes / who goes". `give` always leaves o.from and
+    // `want` always arrives there, so the club that received the offer sees the
+    // two sides in the opposite order to the club that sent it.
+    function offerHTML(o, actions) {
         const A = mgr(o.from), B = mgr(o.to);
         const give = A && A.squad.find(p => String(p.id) === String(o.give));
         const want = B && B.squad.find(p => String(p.id) === String(o.want));
-        if (!give || !want) return 'Offer no longer valid.';
-        const cash = o.cash > 0 ? ` <b>+ ${esc(Adapter.fmt(o.cash))}</b>` : '';
-        return `<b>${esc(A.name)}</b> offers <b>${esc(give.name)}</b> (${esc(give.mainPos)} ${esc(give.rating)})${cash} for <b>${esc(want.name)}</b> (${esc(want.mainPos)} ${esc(want.rating)}) from <b>${esc(B.name)}</b>`;
+        if (!give || !want) return `<div class="tw-card"><div class="tw-note">This offer is no longer valid.</div></div>`;
+        const mine = String(o.to) === String(S.acting);
+        const gets = mine ? give : want;
+        const pays = mine ? want : give;
+        const side = (label, p, cls) => `<div class="tw-swap__side ${cls}">
+            <span>${label}</span><b>${esc(p.name)}</b>
+            <small>${esc(p.mainPos)} ${esc(p.rating)} · ${esc((p.team || '').trim() || '—')}</small></div>`;
+        return `<div class="tw-card"><div class="tw-offer">
+            <div class="tw-swap">
+                ${side('You get', gets, 'tw-swap__side--in')}
+                <div class="tw-swap__arrow">⇄</div>
+                ${side('You give', pays, 'tw-swap__side--out')}
+            </div>
+            ${o.cash > 0 ? `<div class="tw-hintline">${mine ? '+' : '−'} ${esc(Adapter.fmt(o.cash))} cash</div>` : ''}
+            <div class="tw-offer__act">${actions}</div>
+        </div></div>`;
     }
 
     function render() {
@@ -346,71 +420,84 @@
         const allReady = gameState.managers.every(m => S.ready[m.id]);
         const hostDevice = isHost();
 
-        const mgrChips = gameState.managers.map(m => {
+        const seatChips = gameState.managers.map(m => {
             const inc = pendingOffers().filter(o => String(o.to) === String(m.id)).length;
             const used = Math.max(0, MAX_TRADES - tradesLeft(m.id));
             const attrs = (!online() && hostDevice) ? ` data-act="acting" data-id="${m.id}"` : '';
             const cls = `tw-chip ${String(m.id) === String(me.id) ? 'on' : ''}${online() ? ' tw-static' : ''}`;
-            return `<button type="button" class="${cls}"${attrs}>${esc(m.name)}${S.ready[m.id] ? ' ✓' : ''}${inc ? `<span class="tw-badge">${inc}</span>` : ''}<small>${used}/${MAX_TRADES} trades${Adapter.hasBudget(m) ? ' · ' + esc(Adapter.fmt(Adapter.getBudget(m))) : ''}</small></button>`;
+            return `<button type="button" class="${cls}"${attrs}>${esc(m.name)}${S.ready[m.id] ? '<i>✓</i>' : ''}${inc ? `<span class="tw-badge">${inc}</span>` : ''}<small>${used}/${MAX_TRADES} swaps${Adapter.hasBudget(m) ? ' · ' + esc(Adapter.fmt(Adapter.getBudget(m))) : ''}</small></button>`;
         }).join('');
 
-        const tabs = [['market', 'Market'], ['squad', 'My squad'], ['inbox', 'Offers' + (incoming.length ? ` (${incoming.length})` : '')]]
-            .map(([k, label]) => `<button type="button" class="tw-chip ${S.tab === k ? 'on' : ''}" data-act="tab" data-id="${k}">${label}</button>`).join('');
+        const seats = (!online() && hostDevice)
+            ? `<div class="tw-seats" title="Switch club">${seatChips}</div>`
+            : `<div class="tw-sub">You are <b>${esc(me.name)}</b>${canTrade ? '' : ' · no swaps left'}</div>`;
+
+        const tabs = [['market', 'Market', 0], ['squad', 'My squad', 0], ['inbox', 'Offers', incoming.length]]
+            .map(([k, label, count]) => `<button type="button" class="tw-tab ${S.tab === k ? 'on' : ''}" data-act="tab" data-id="${k}">${label}${count ? `<span>${count}</span>` : ''}</button>`).join('');
 
         let body = '';
         if (S.tab === 'market') {
             if (!others.length) {
-                body += '<div class="tw-sub">There are no other managers in this league, so no trades can be made. Press “I’m done” to continue.</div>';
+                body += '<div class="tw-note">No other clubs in this league, so no swaps are possible. Press done to play the second half.</div>';
             } else {
                 const filters = [`<button type="button" class="tw-chip ${S.filter === 'all' ? 'on' : ''}" data-act="filter" data-id="all">Everyone</button>`,
-                    `<button type="button" class="tw-chip ${S.filter === 'sale' ? 'on' : ''}" data-act="filter" data-id="sale">For sale only</button>`]
+                    `<button type="button" class="tw-chip ${S.filter === 'sale' ? 'on' : ''}" data-act="filter" data-id="sale">Listed only</button>`]
                     .concat(others.map(m => `<button type="button" class="tw-chip ${S.filter === String(m.id) ? 'on' : ''}" data-act="filter" data-id="${m.id}">${esc(m.name)}</button>`)).join('');
-                body += `<div class="tw-row-top">${filters}</div>`;
+                body += `<div class="tw-filters">${filters}</div>`;
                 let anyCards = false;
                 others.filter(m => S.filter === 'all' || S.filter === 'sale' || S.filter === String(m.id)).forEach(m => {
                     let list = (m.squad || []).slice().sort((a, b) => (S.listed[b.id] ? 1 : 0) - (S.listed[a.id] ? 1 : 0) || b.rating - a.rating);
                     if (S.filter === 'sale') list = list.filter(p => S.listed[p.id]);
                     if (!list.length) return;
                     anyCards = true;
-                    body += `<div class="tw-h">${esc(m.name)}${tradesLeft(m.id) <= 0 ? ' · no trades left' : ''}</div><div class="tw-card">` +
+                    const left = tradesLeft(m.id);
+                    body += `<div class="tw-h">${esc(m.name)}${left <= 0 ? ' <span>· no swaps left</span>' : ''}</div><div class="tw-card">` +
                         list.map(p => {
                             const has = pendingOffers().some(o => String(o.from) === String(me.id) && String(o.want) === String(p.id));
-                            const dis = !canTrade || tradesLeft(m.id) <= 0 || has;
-                            return playerRow(p, `<button type="button" class="tw-btn go" data-act="request" data-id="${p.id}" ${dis ? 'disabled' : ''}>${has ? 'Offer sent' : 'Make offer'}</button>`);
+                            const dis = !canTrade || left <= 0 || has;
+                            return playerRow(p, `<button type="button" class="tw-btn go" data-act="request" data-id="${p.id}" ${dis ? 'disabled' : ''}>${has ? 'Offered' : 'Offer'}</button>`);
                         }).join('') + '</div>';
                 });
-                if (!anyCards) body += '<div class="tw-sub">Nobody has anything on the market right now.</div>';
+                if (!anyCards) body += '<div class="tw-note">Nothing listed yet. List a player from “My squad”.</div>';
             }
         } else if (S.tab === 'squad') {
-            body += `<div class="tw-sub">Put a player up for sale and other managers can offer you a player (plus cash) for him. You choose which deal to accept.</div><div class="tw-card">` +
+            body += `<div class="tw-h">${esc(me.name)} <span>· ${esc(String((me.squad || []).length))} players</span></div><div class="tw-card">` +
                 (me.squad || []).slice().sort((a, b) => b.rating - a.rating).map(p => playerRow(p,
-                    `<button type="button" class="tw-btn" data-act="list" data-id="${p.id}">${S.listed[p.id] ? 'Take off market' : 'List for sale'}</button>`)).join('') + '</div>';
+                    `<button type="button" class="tw-btn${S.listed[p.id] ? ' go' : ''}" data-act="list" data-id="${p.id}">${S.listed[p.id] ? 'Withdraw listing' : 'List'}</button>`)).join('') + '</div>' +
+                '<div class="tw-hintline">A listed player can be bought by another club offering one of their own players in return.</div>';
         } else {
-            body += `<div class="tw-h">Offers for you</div>`;
-            body += incoming.length ? incoming.map(o => `<div class="tw-card tw-offer"><div class="txt">${offerText(o)}</div>
-                <button type="button" class="tw-btn go" data-act="accept" data-id="${o.id}" ${canTrade && tradesLeft(o.from) > 0 ? '' : 'disabled'}>Accept</button>
-                <button type="button" class="tw-btn no" data-act="decline" data-id="${o.id}">Decline</button></div>`).join('')
-                : '<div class="tw-sub">No offers waiting.</div>';
-            body += `<div class="tw-h">Offers you sent</div>`;
-            body += sent.length ? sent.map(o => `<div class="tw-card tw-offer"><div class="txt">${offerText(o)}</div>
-                <button type="button" class="tw-btn" data-act="withdraw" data-id="${o.id}">Withdraw</button></div>`).join('')
-                : '<div class="tw-sub">Nothing pending.</div>';
+            body += `<div class="tw-h">For you${incoming.length ? ` <span>· ${incoming.length}</span>` : ''}</div>`;
+            body += incoming.length ? incoming.map(o => offerHTML(o,
+                `<button type="button" class="tw-btn go" data-act="accept" data-id="${o.id}" ${canTrade && tradesLeft(o.from) > 0 ? '' : 'disabled'}>Accept</button>
+                <button type="button" class="tw-btn no" data-act="decline" data-id="${o.id}">Decline</button>`)).join('')
+                : '<div class="tw-note">No club has asked you for a player.</div>';
+            body += `<div class="tw-h">Sent by you${sent.length ? ` <span>· ${sent.length}</span>` : ''}</div>`;
+            body += sent.length ? sent.map(o => offerHTML(o,
+                `<button type="button" class="tw-btn" data-act="withdraw" data-id="${o.id}">Withdraw</button>`)).join('')
+                : '<div class="tw-note">You have not asked anyone for a player yet.</div>';
         }
 
+        const log = S.log.length
+            ? `<div class="tw-h">Completed swaps</div><div class="tw-card tw-log">${S.log.map(esc).join('<br>')}</div>` : '';
         const modal = S.modal ? modalHTML(me) : '';
         const closeBtn = hostDevice
-            ? `<button type="button" class="tw-btn ${allReady ? 'go' : ''}" data-act="close">${allReady ? 'Start the second half' : 'Close window now'}</button>`
+            ? `<button type="button" class="tw-btn ${allReady ? 'go' : ''}" data-act="close">${allReady ? 'Play the second half' : 'End window'}</button>`
             : '<button type="button" class="tw-btn" disabled>Waiting for host…</button>';
         el.innerHTML = `<div class="tw-wrap">
-            <h2 class="tw-title">Mid-Season Transfer Window</h2>
-            <div class="tw-sub">Halfway through the league. Swap players with other managers — at most ${MAX_TRADES} trades each. You are acting as <b>${esc(me.name)}</b>${canTrade ? '' : ' (no trades left)'}.</div>
-            <div class="tw-row-top">${mgrChips}</div>
-            <div class="tw-row-top">${tabs}</div>
+            <header class="tw-head">
+                <div>
+                    <h2 class="tw-title">Transfer window</h2>
+                    <p class="tw-sub">Halfway through the league · ${MAX_TRADES} swaps per club</p>
+                </div>
+                ${seats}
+            </header>
+            <nav class="tw-tabs">${tabs}</nav>
             ${body}
-            ${S.log.length ? `<div class="tw-h">Completed trades</div><div class="tw-card tw-log">${S.log.map(esc).join('<br>')}</div>` : ''}
+            ${log}
         </div>
         <div class="tw-foot">
-            <button type="button" class="tw-btn ${S.ready[me.id] ? '' : 'go'}" data-act="ready">${S.ready[me.id] ? 'Not done yet' : "I'm done"}</button>
+            <button type="button" class="tw-btn ${S.ready[me.id] ? '' : 'go'}" data-act="ready">${S.ready[me.id] ? 'I still want to trade' : "I'm done"}</button>
+            <span class="tw-foot__hint">${gameState.managers.filter(m => S.ready[m.id]).length}/${gameState.managers.length} clubs done</span>
             ${closeBtn}
         </div>${modal}`;
     }
@@ -422,28 +509,54 @@
         const mine = (me.squad || []).filter(p => isGK(p) === isGK(want)).sort((a, b) => b.rating - a.rating);
         if (!mine.length) {
             return `<div class="tw-modal-bg"><div class="tw-modal">
-                <div class="tw-title" style="font-size:18px">Cannot offer for ${esc(want.name)}</div>
-                <div class="tw-sub">You have no ${isGK(want) ? 'goalkeeper' : 'outfield player'} to swap. Goalkeepers can only be traded for goalkeepers.</div>
-                <div style="display:flex;justify-content:flex-end"><button type="button" class="tw-btn" data-act="modal-cancel">Close</button></div>
+                <h3>No ${isGK(want) ? 'goalkeeper' : 'outfield player'} to swap</h3>
+                <div class="tw-hintline">Goalkeepers only trade for goalkeepers. ${esc(B.name)} wants ${esc(want.name)}, and you have nobody at ${esc(want.mainPos)} to send back.</div>
+                <div class="tw-modal__act"><button type="button" class="tw-btn" data-act="modal-cancel">Close</button></div>
             </div></div>`;
         }
         if (!mine.some(p => String(p.id) === String(S.modal.give))) S.modal.give = mine[0].id;
         const give = mine.find(p => String(p.id) === String(S.modal.give));
         const diff = want.rating - give.rating;
-        const cashBlock = Adapter.hasBudget(me)
-            ? `<label>Extra cash from you (you have ${esc(Adapter.fmt(Adapter.getBudget(me)))})</label>
-               <input type="number" min="0" max="${Adapter.getBudget(me)}" step="1" value="${S.modal.cash || 0}" data-field="cash">` : '';
+        const budget = Adapter.getBudget(me);
+        const cash = Math.min(S.modal.cash || 0, budget);
+        const cashRow = Adapter.hasBudget(me)
+            ? `<label>Add cash from you · ${esc(Adapter.fmt(budget))} available</label>
+               <input type="number" inputmode="numeric" min="0" max="${budget}" step="1" value="${cash}" data-field="cash">
+               <div class="tw-cashrow">
+                   <button type="button" class="tw-btn sm" data-act="cash" data-id="down">− ${CASH_STEP}</button>
+                   <button type="button" class="tw-btn sm" data-act="cash" data-id="up">+ ${CASH_STEP}</button>
+                   <button type="button" class="tw-btn sm" data-act="cash" data-id="zero">0</button>
+                   <button type="button" class="tw-btn sm" data-act="cash" data-id="max">Max</button>
+               </div>` : '';
+        const hint = diff > 0
+            ? `You are asking for a player ${diff} higher — cash usually tempts ${esc(B.name)}.`
+            : diff < 0 ? `You are offering ${-diff} higher, so they may take this without cash.`
+            : 'Even ratings — cash is what tips the deal.';
         return `<div class="tw-modal-bg"><div class="tw-modal">
-            <div class="tw-title" style="font-size:18px">Offer for ${esc(want.name)}</div>
-            <div class="tw-sub">${esc(want.mainPos)} · ${esc(want.rating)} · ${esc(B.name)}</div>
+            <h3>Offer for ${esc(want.name)}</h3>
+            <div class="tw-hintline">${esc(want.mainPos)} ${esc(want.rating)} · ${esc(B.name)}</div>
             <label>You give</label>
-            <select data-field="give">${mine.map(p => `<option value="${p.id}" ${String(p.id) === String(S.modal.give) ? 'selected' : ''}>${esc(p.mainPos)} · ${esc(p.name)} (${esc(p.rating)})</option>`).join('')}</select>
-            <div class="tw-sub" id="tw-hint">${diff > 0 ? `You are asking for a player ${diff} rated higher — add cash to tempt ${esc(B.name)}.` : diff < 0 ? `You are offering a player ${-diff} rated higher.` : 'Equal ratings.'}</div>
-            ${cashBlock}
-            <div style="display:flex;gap:8px;justify-content:flex-end">
+            <select data-field="give">${mine.map(p => `<option value="${p.id}" ${String(p.id) === String(S.modal.give) ? 'selected' : ''}>${esc(p.mainPos)} ${esc(p.rating)} · ${esc(p.name)}</option>`).join('')}</select>
+            ${cashRow}
+            <div class="tw-hintline">${hint}</div>
+            <div class="tw-modal__act">
                 <button type="button" class="tw-btn" data-act="modal-cancel">Cancel</button>
                 <button type="button" class="tw-btn go" data-act="modal-send">Send offer</button>
             </div></div></div>`;
+    }
+
+    // The number field is the fiddly control on a phone, so the offer dialog also
+    // steps cash in fixed amounts. Capped at the budget; validation still runs on send.
+    function adjustCash(kind) {
+        if (!S || !S.modal) return;
+        const me = mgr(S.acting);
+        const budget = me ? Math.max(0, Adapter.getBudget(me)) : 0;
+        const current = Math.max(0, Math.floor(Number(S.modal.cash) || 0));
+        const next = kind === 'up' ? current + CASH_STEP
+            : kind === 'down' ? current - CASH_STEP
+            : kind === 'zero' ? 0 : budget;
+        S.modal.cash = Math.min(budget, Math.max(0, Math.floor(next)));
+        render();
     }
 
     function onInput(e) {
@@ -485,6 +598,7 @@
             case 'filter': S.filter = raw; break;
             case 'request': S.modal = { want: id, give: null, cash: 0 }; break;
             case 'modal-cancel': S.modal = null; break;
+            case 'cash': return adjustCash(raw);
             case 'modal-send': {
                 if (!S.modal) return;
                 const m = S.modal;
@@ -522,6 +636,7 @@
             case 'filter': S.filter = raw; break;
             case 'request': S.modal = { want: id, give: null, cash: 0 }; break;
             case 'modal-cancel': S.modal = null; break;
+            case 'cash': return adjustCash(raw);
             case 'modal-send': return sendOffer(S.acting, S.modal.want, S.modal.give, S.modal.cash);
             case 'list': return toggleList(S.acting, id);
             case 'accept': return respond(S.acting, id, true);

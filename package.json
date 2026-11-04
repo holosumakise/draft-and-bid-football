@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "lab": "node sim/lab.js",
-    "test": "node test/engine-core.test.js && node test/auction-logic.test.js && node test/cards.test.js && node test/draft-controls.test.js && node test/mid-season.test.js",
+    "test": "node test/engine-core.test.js && node test/auction-logic.test.js && node test/cards.test.js && node test/draft-controls.test.js && node test/mid-season.test.js && node test/playstyles.test.js && node test/specialities.test.js",
     "check": "node --check players.js && node --check config.js && node --check cards.js && node --check engine-core.js && node --check firebase-config.js && node --check game.js && node --check net.js && node --check online.js && node --check ui.js && node --check draft.js && node --check auction.js && node --check match-engine.js && node --check season.js && node --check transfers.js && node --check save.js && node --check sw.js"
   }
 }

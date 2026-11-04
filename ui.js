@@ -75,6 +75,11 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
     const target = document.getElementById(`manager-card-${winnerId}`);
     if (!panel || !target || !player) return finish();
 
+    // The stamp belongs on the player card, never across the auction panel.
+    const stampHost = panel.querySelector('.draft-reveal__card .pcard')
+        || panel.querySelector('.draft-reveal__card')
+        || panel;
+
     if (gameState.draftAnimating || document.getElementById('draft-fly-overlay') || document.querySelector('.draft-sold-stamp')) {
         if (typeof onComplete === 'function') onComplete();
         return;
@@ -118,15 +123,15 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
             pathD = `M ${x0} ${y0} C ${x0} ${(y0 + y1) / 2}, ${x1} ${(y0 + y1) / 2}, ${x1} ${y1}`;
         }
 
-        // Stamp as absolute child of the panel so it stays glued even if anything moves
-        const prevPos = panel.style.position;
-        if (!prevPos || prevPos === 'static') panel.style.position = 'relative';
+        // Stamp as an absolute child of the card so it stays on the portrait
+        const prevPos = stampHost.style.position;
+        if (!prevPos || prevPos === 'static') stampHost.style.position = 'relative';
         const stamp = document.createElement('div');
         stamp.className = 'draft-sold-stamp draft-sold-stamp-inpanel';
         stamp.textContent = 'SOLD';
         stamp.style.left = '50%';
         stamp.style.top = '50%';
-        panel.appendChild(stamp);
+        stampHost.appendChild(stamp);
         void stamp.offsetWidth;
         stamp.classList.add('stamped');
 
@@ -190,7 +195,7 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
             if (stamp.parentNode) stamp.remove();
             if (overlay.parentNode) overlay.remove();
             panel.classList.remove('draft-panel-sold-react');
-            if (prevPos !== undefined) panel.style.position = prevPos;
+            if (prevPos !== undefined) stampHost.style.position = prevPos;
             target.classList.remove('draft-target-receive');
             finish();
         };
@@ -310,6 +315,11 @@ function playDraftDiscardAnimation(onComplete) {
     const panel = board && board.firstElementChild;
     if (!panel) return finish();
 
+    // Keep the discard stamp on the card, same as the SOLD stamp.
+    const stampHost = panel.querySelector('.draft-reveal__card .pcard')
+        || panel.querySelector('.draft-reveal__card')
+        || panel;
+
     // Avoid stacking on top of an in-flight SOLD animation
     if (document.querySelector('.draft-sold-stamp') || document.getElementById('draft-fly-overlay')) {
         return finish();
@@ -318,15 +328,15 @@ function playDraftDiscardAnimation(onComplete) {
     gameState.draftAnimating = true; // block Roll until the stamp is gone, otherwise a new roll gets wiped
     updateRollButton();
 
-    const prevPos = panel.style.position;
-    if (!prevPos || prevPos === 'static') panel.style.position = 'relative';
+    const prevPos = stampHost.style.position;
+    if (!prevPos || prevPos === 'static') stampHost.style.position = 'relative';
 
     const stamp = document.createElement('div');
     stamp.className = 'draft-sold-stamp draft-sold-stamp-inpanel draft-discard-stamp';
     stamp.textContent = 'DISCARDED';
     stamp.style.left = '50%';
     stamp.style.top = '50%';
-    panel.appendChild(stamp);
+    stampHost.appendChild(stamp);
     void stamp.offsetWidth;
     stamp.classList.add('stamped');
 
@@ -339,7 +349,7 @@ function playDraftDiscardAnimation(onComplete) {
         setTimeout(() => {
             if (stamp.parentNode) stamp.remove();
             panel.classList.remove('draft-panel-sold-react');
-            if (prevPos !== undefined) panel.style.position = prevPos;
+            if (prevPos !== undefined) stampHost.style.position = prevPos;
             gameState.draftAnimating = false;
             updateRollButton();
             finish();
@@ -551,14 +561,14 @@ function updateChemistryDisplay(id) {
 
     const chem = getFormationChemistry(m);
     if (!chem.players.length) {
-        el.innerHTML = '<b>Chemistry</b> · place players to build nation links.';
+        el.innerHTML = '<b>Chemistry</b> · place players to build links.';
         return;
     }
 
     const groups = getChemistryGroups(chem.players);
     const detail = groups.length
-        ? groups.map(group => `<span>${escapeHTML(group.nation)} ${group.count}×</span> <em>+${group.bonus}</em>`).join(' · ')
-        : '<span>No nation links in the XI.</span>';
+        ? groups.map(group => `<span class="chem-group chem-group--${group.kind}">${escapeHTML(group.label)} ${group.count}×</span> <em>+${group.bonus}</em>`).join(' · ')
+        : '<span>No links in the XI.</span>';
 
     el.innerHTML = `<b>Chemistry</b> · ${detail}`;
 }
@@ -618,8 +628,10 @@ function renderPitchNodes(managerId) {
     // In an online room a rival's pitch is a preview: no handles, no dragging.
     const editable = !m.formationLocked && Net.canControl(managerId);
 
-    // Draw nation links under the tokens so the XI reads at a glance.
-    const groups = getChemistryGroups(chemistry.players);
+    // Draw the strongest links under the tokens so the XI reads at a glance.
+    // Both kinds use one polyline each and only the four loudest are drawn, or a
+    // squad with nation and club groups side by side becomes a spider web.
+    const groups = getChemistryGroups(chemistry.players).slice(0, 4);
     if (groups.length) {
         const svgNS = 'http://www.w3.org/2000/svg';
         const svg = document.createElementNS(svgNS, 'svg');
@@ -628,15 +640,15 @@ function renderPitchNodes(managerId) {
         svg.setAttribute('preserveAspectRatio', 'none');
         svg.setAttribute('aria-hidden', 'true');
         groups.forEach(group => {
-            const key = String(group.nation || 'World').trim().toLowerCase();
             const points = m.formation
                 .map(node => ({ node, player: m.squad.find(p => p.id === node.assignedPlayerId) }))
-                .filter(item => item.player && chemistryKeyOf(item.player) === key)
+                .filter(item => item.player && chemistryKeysOf(item.player, group.kind).includes(group.key))
                 .map(item => `${item.node.x},${item.node.y}`);
             if (points.length < 2) return;
             const line = document.createElementNS(svgNS, 'polyline');
             line.setAttribute('points', points.join(' '));
-            line.setAttribute('class', `chem-line${group.bonus >= CHEMISTRY.STRONG_BONUS ? ' is-strong' : ''}`);
+            line.setAttribute('class', `chem-line chem-line--${group.kind}${group.bonus >= CHEMISTRY.STRONG_BONUS ? ' is-strong' : ''}`);
+            line.setAttribute('title', `${group.label} ×${group.count}`);
             svg.appendChild(line);
         });
         if (svg.childNodes.length) pitch.appendChild(svg);

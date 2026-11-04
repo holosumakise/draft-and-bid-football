@@ -86,3 +86,16 @@
 - Redrew continuous upper-arm/elbow/forearm contours, smaller wrists and hands, resting arms, sleeve cuffs and wristbands. Normal Gold/Elite portraits retain their existing body outline. This is artwork only; edited cards.js and cache metadata dbf-shell-v16.
 - Verified npm test (35 passed), npm run check, browser rarity/small-card/mobile rendering with no page errors, and visually inspected all three posed variants. Preview outputs/socce-poses-body-adjusted.png; script work/preview-adjusted-poses.cjs in the Codex chat workspace.
 - In progress: none; gameplay remains unchanged.
+
+## 2026-11-04 — Playstyles, club chemistry, retiered links, cleaner halfway window
+
+- Playstyles: every pool player carries one curated role style (`players.js` mapping, `config.js` definitions). A style only applies while the player plays in its own position group, is zero-sum across a squad, and feeds both the live minute engine and the 38-matchday league sim through `playstyleFitDelta` / `playstyleCoherence`. Shown in the draft scout strip only — deliberately not on the player card.
+- Club chemistry added next to nationality chemistry: starters link through `player.team` or any club in `player.clubs`, and a player takes his single best link (nation or club), never both. `getChemistryGroups` drives the pitch lines (dashed amber for club) and the chemistry strip.
+- Link OVR retiered to 2 linked = +1, 3–5 = +2, 6+ = +3 (`CHEMISTRY` / `chemistryBonusFor`). Calibration on the real 616-player pool: random-XI total bonus 8.48 → 8.65 (≈2%), per-player cap and the fully-linked ceiling of 33 unchanged.
+- Halfway window: `transfers.js` UI rewritten (segmented tabs, per-club market cards, two-sided offer cards labelled "You get / You give" from the viewing club's side, cash stepper, completed-swap log, mobile stacking). Trade rules and online host/guest command flow untouched.
+- Season chart no longer rewinds: `finishGhostSeason(startFrom)` resumes `animateSeasonChart` at the halfway matchday instead of matchday 1.
+- All "era" data and copy removed (`season.js` ghost squads no longer set `player.era`).
+- Build ID `2026-11-04.13`, service-worker shell `dbf-shell-v20`.
+- Verified: 55 tests across the six `test/*.test.js` suites pass (no `npm` on this machine — suites were executed through the Qoder node kernel with the real CommonJS loader). Playwright + Edge screenshots at 1440px and 390px of the pitch, market, squad, offers, offer modal and a completed swap; offer labels and cash signs matched the underlying state in both directions; no page or console errors.
+- Scratch browser driver and screenshots: `C:\Users\GIGABYTE\Documents\Qoder\2026-11-04\94bde722\uicheck` (outside this project).
+- In progress: none. Next: nothing pending; online multi-device smoke test of the new window markup was not exercised.

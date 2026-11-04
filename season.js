@@ -41,8 +41,28 @@ function makeGhostPlayer(pos, ovr, club, idx) {
     const name = `${GHOST_FIRST[fi]} ${GHOST_LAST[li]}`;
     return {
         id: 90000 + idx, name, rating: ovr, displayOVR: String(Math.min(99, ovr)),
-        rank: null, stats, mainPos: pos, subPos: [], team: club, era: 'ghost', nationality: 'World'
+        rank: null, stats, mainPos: pos, playstyle: playstyleForName(pos, name),
+        // Ghost habits come from the name and the club's own rating ladder — the same
+        // player is the same player on every machine — and the armband still only
+        // lands on the best man in the side.
+        speciality: specialityForName(pos, name, (ovr - 68) / 17),
+        subPos: [], team: club, nationality: 'World'
     };
+}
+
+// A drafted club keeps its armbands behind a rating gate, because there the band is
+// the player's standing among the greats of the game. A generated club sits a whole
+// ladder below that board, so its leaders are elected inside the squad instead: the
+// best man wears it, his deputy wears the other one, at about the rates the drafted
+// board itself shows. The roll comes from the club's name, so the same side is the
+// same side on every machine.
+function electGhostLeaders(lineup, clubName) {
+    const ranked = lineup.slice().sort((a, b) => b.player.rating - a.player.rating ||
+        specialityHash(b.player.name) - specialityHash(a.player.name));
+    const captain = ranked[0];
+    if (captain && specialityHash(`${clubName}|armband`) % 100 < 65) captain.player.speciality = 'captain';
+    const deputy = ranked[1];
+    if (deputy && specialityHash(`${clubName}|deputy`) % 100 < 40) deputy.player.speciality = 'vice_captain';
 }
 
 function buildGhostTeam(clubName, avgByPos, seed, strengthOffset = -4, tierBiasOverride = null) {
@@ -61,7 +81,7 @@ function buildGhostTeam(clubName, avgByPos, seed, strengthOffset = -4, tierBiasO
         const player = makeGhostPlayer(slot.pos, ovr, clubName, seed * 20 + index);
         return { player, pos: slot.pos, yel: 0 };
     });
-
+    electGhostLeaders(lineup, clubName);
     const benchPositions = ['GK', 'CB', 'LB', 'CM', 'CDM', 'ST'];
     const bench = benchPositions.map((pos, index) => {
         const benchOffset = strengthOffset - 2 + Math.floor(tierBias * 0.5);
@@ -115,9 +135,16 @@ function samplePoisson(lambda) {
     return k - 1;
 }
 
-function drawRatingActions(pos) {
+// The role sets how much of the unglamorous work a player is asked for: a
+// destroyer wins balls all afternoon, a poacher hardly tracks back.
+function drawRatingActions(pos, player) {
     const mean = RATING_ACTION_MEAN[pos] || RATING_ACTION_MEAN.CM;
-    return { defActions: samplePoisson(mean.def), keyPasses: samplePoisson(mean.key) };
+    const work = playstyleWeights(player).workload;
+    const habit = specialityWeights(player).workload;
+    return {
+        defActions: samplePoisson(mean.def * work.def * habit.def),
+        keyPasses: samplePoisson(mean.key * work.key * habit.key)
+    };
 }
 
 function rollPerformance(player) {
@@ -167,7 +194,7 @@ function sofaScoreMatchRating({ goals, assists, isGK, isDEF, cleanSheet, goalsCo
 function selectActiveLineup(team) {
     return (team.lineup || [])
         .filter(slot => slot?.player)
-        .map(slot => ({ ...slot, yel: 0 }));
+        .map(slot => ({ ...slot, yel: 0, cameOn: 0 }));
 }
 
 // League matches are not minute-by-minute, so substitutions are planned up front:
@@ -207,11 +234,14 @@ function planLeagueAppearances(team) {
         let minutes = 90;
         let yellow = false;
         let red = false;
+        // A habit decides how the same body behaves over a season: the enforcer and
+        // the hot head collect bookings, the captain and the technician do not.
+        const booking = specialityBookingRateFor(slot.player);
         const cardRoll = Math.random();
-        if (cardRoll < 0.012) {
+        if (cardRoll < 0.012 * booking) {
             red = true;
             minutes = Math.min(minutes, 30 + Math.floor(Math.random() * 40));
-        } else if (cardRoll < 0.082) {
+        } else if (cardRoll < 0.082 * booking) {
             yellow = true;
         }
 
@@ -222,7 +252,8 @@ function planLeagueAppearances(team) {
             // and midfielders get pulled most. ~3 changes per match on average.
             const unit = unitOf(slot.pos);
             const lateChance  = unit === 'GK' ? 0.005 : unit === 'DEF' ? 0.20 : unit === 'MID' ? 0.30 : 0.36;
-            const earlyChance = unit === 'GK' ? 0     : 0.05;
+            // A fragile body is the one a manager takes off early; an iron man plays on.
+            const earlyChance = unit === 'GK' ? 0 : 0.05 * specialityInjuryRate(slot.player);
             if (Math.random() < lateChance) {
                 minutes = 58 + Math.floor(Math.random() * 28); // 58–85
                 subOff = true;
@@ -290,7 +321,10 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
         const sub = subFor.get(id);
         const st = starterEntry.get(id);
         if (!sub || !st) return id;
-        return Math.random() * 90 >= st.minutes ? sub.player.id : id;
+        // A Super-Sub is the man a manager sends on for a goal, so the share that
+        // lands on him is bigger than the minutes he actually played.
+        const share = clamp((90 - st.minutes) / 90 * specialityEffects(sub.player).sub, 0, 1);
+        return Math.random() < share ? sub.player.id : id;
     };
     const goalCredits = trackScoring.goals.map(creditTo);
     const assistCredits = trackScoring.assists.map(creditTo);
@@ -317,7 +351,7 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
         if (goalsByPlayer) stats.goals += goalsByPlayer;
         if (assistsByPlayer) stats.assists += assistsByPlayer;
 
-        const actions = drawRatingActions(entry.pos);
+        const actions = drawRatingActions(entry.pos, entry.player);
         // Short cameos get a slightly quieter action load so 15-minute runs do not look like full 90s.
         const minuteScale = clamp(entry.minutes / 90, 0.25, 1);
         const rating = sofaScoreMatchRating({
@@ -341,6 +375,24 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
     });
 }
 
+// A league match is a big one when both sides are chasing the same prize — the top
+// of the table or survival — and they are close enough that the result matters to
+// both. That is the only situation a Big Game Player's nerve is worth anything.
+function leagueMatchPressure(teamA, teamB) {
+    const run = _seasonRun;
+    if (!run || !run.rowsById || !run.table.length) return 0;
+    const a = run.rowsById.get(teamA.id);
+    const b = run.rowsById.get(teamB.id);
+    if (!a || !b || !a._pos || !b._pos) return 0;
+    const size = run.table.length;
+    const promotionZone = Math.max(4, Math.round(size * 0.25));
+    const relegationZone = size - Math.max(3, Math.round(size * 0.2)) + 1;
+    const titleRace = a._pos <= promotionZone && b._pos <= promotionZone;
+    const survival = a._pos >= relegationZone && b._pos >= relegationZone;
+    if (!titleRace && !survival) return 0;
+    return Math.abs(a.pts - b.pts) <= 3 ? 1 : 0.5;
+}
+
 function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
     const originalLineupA = teamA.lineup;
     const originalLineupB = teamB.lineup;
@@ -350,8 +402,8 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
     try {
         // ATT/MID/DEF edge + home advantage, then the same full match-plan matchup
         // the live engine uses. Home advantage is a small nudge, not a different model.
-        const breakdownA = getStrengthBreakdown(teamA);
-        const breakdownB = getStrengthBreakdown(teamB);
+        const breakdownA = getStrengthBreakdown(teamA, teamB.tactics);
+        const breakdownB = getStrengthBreakdown(teamB, teamA.tactics);
         const edge = EngineCore.matchupEdge(breakdownA, breakdownB);
         const expected = EngineCore.expectedGoals({
             edge,
@@ -360,8 +412,15 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
             homeAdvantage: LEAGUE_HOME_ADVANTAGE
         });
         const tactics = getTacticsMatchupFor(teamA.tactics, teamB.tactics);
-        const lambdaA = clamp(expected.lambdaA * tactics.a.attack * tactics.b.concede, 0.2, 4.0);
-        const lambdaB = clamp(expected.lambdaB * tactics.b.attack * tactics.a.concede, 0.2, 4.0);
+        // Habits ride on top of the plan: an XI that suits its own tactics and the
+        // armband on the pitch are worth goals the same way a playstyle is.
+        const pressure = leagueMatchPressure(teamA, teamB);
+        const cohA = playstyleCoherence(teamA, teamB.tactics) * specialityCoherence(teamA, teamB.tactics);
+        const cohB = playstyleCoherence(teamB, teamA.tactics) * specialityCoherence(teamB, teamA.tactics);
+        const nerveA = specialityClutchBoost(teamA, pressure);
+        const nerveB = specialityClutchBoost(teamB, pressure);
+        const lambdaA = clamp(expected.lambdaA * tactics.a.attack * tactics.b.concede * cohA * nerveA, 0.2, 4.0);
+        const lambdaB = clamp(expected.lambdaB * tactics.b.attack * tactics.a.concede * cohB * nerveB, 0.2, 4.0);
 
         let goalsForA = EngineCore.samplePoisson(lambdaA);
         let goalsForB = EngineCore.samplePoisson(lambdaB);
@@ -371,19 +430,13 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
 
         const goalIdsA = [], assistIdsA = [];
         for (let index = 0; index < goalsForA; index++) {
-            const kind = Math.random() < tactics.a.setPieceShare
-                ? 'setpiece'
-                : (Math.random() < clamp(tactics.a.counterBoost * 1.4, 0, 0.45) ? 'counter' : 'open');
-            const goal = getGoal(teamA, kind);
+            const goal = getGoal(teamA, pickGoalKind(tactics.a, setPieceShareFor(teamA, teamB, tactics.a)));
             if (goal.scorerId >= 0) goalIdsA.push(goal.scorerId);
             if (goal.assisterId != null) assistIdsA.push(goal.assisterId);
         }
         const goalIdsB = [], assistIdsB = [];
         for (let index = 0; index < goalsForB; index++) {
-            const kind = Math.random() < tactics.b.setPieceShare
-                ? 'setpiece'
-                : (Math.random() < clamp(tactics.b.counterBoost * 1.4, 0, 0.45) ? 'counter' : 'open');
-            const goal = getGoal(teamB, kind);
+            const goal = getGoal(teamB, pickGoalKind(tactics.b, setPieceShareFor(teamB, teamA, tactics.b)));
             if (goal.scorerId >= 0) goalIdsB.push(goal.scorerId);
             if (goal.assisterId != null) assistIdsB.push(goal.assisterId);
         }
@@ -516,7 +569,7 @@ function startGhostSeason() {
         if (!_seasonRun) return;
         openTransferWindow(_seasonRun, () => {
             playSeasonMatchdays(midSeason + 1, SEASON_MATCHDAYS);
-            finishGhostSeason();
+            finishGhostSeason(midSeason);
         });
     });
 }
@@ -606,7 +659,7 @@ function resumeMidSeasonTransfer(savedWindow, run) {
     _seasonRun = run;
     openTransferWindow(run, () => {
         playSeasonMatchdays(midSeason + 1, SEASON_MATCHDAYS);
-        finishGhostSeason();
+        finishGhostSeason(midSeason);
     }, savedWindow);
     return true;
 }
@@ -640,7 +693,7 @@ function playSeasonMatchdays(from, to) {
     }
 }
 
-function finishGhostSeason() {
+function finishGhostSeason(startFrom = 0) {
     const { table, playerStatsByManager, ghostStatsById, humanSeries, lastSnapshot } = _seasonRun;
     const ghosts = _seasonRun.ghosts;
     const colors = ['#34d399', '#60a5fa', '#f472b6', '#fbbf24'];
@@ -661,7 +714,9 @@ function finishGhostSeason() {
     const matchdayLabel = document.getElementById('season-md-label');
     if (matchdayLabel) matchdayLabel.classList.add('md-pulse');
     buildSeasonChartChrome();
-    animateSeasonChart(0);
+    // The halfway break already animated matchdays 1..startFrom, so replaying from
+    // zero would rewind the chart the player just watched.
+    animateSeasonChart(startFrom);
     _seasonRun = null;
 }
 
@@ -1012,12 +1067,17 @@ function simulateGhostTie(m) {
         base: BASE_EXPECTED_GOALS_PER_TEAM,
         coefficient: 0.05
     });
-    m.s1 = EngineCore.samplePoisson(expected.lambdaA);
-    m.s2 = EngineCore.samplePoisson(expected.lambdaB);
+    // A knockout tie is the big game every Big Game Player is bought for, and the
+    // shootout belongs to whoever actually nails penalties under that pressure.
+    const lambdaA = expected.lambdaA * specialityClutchBoost(m.t1, 1);
+    const lambdaB = expected.lambdaB * specialityClutchBoost(m.t2, 1);
+    m.s1 = EngineCore.samplePoisson(lambdaA);
+    m.s2 = EngineCore.samplePoisson(lambdaB);
 
     if (m.s1 === m.s2) {
         // Weighted shootout: the stronger side still has to earn it from 12 yards.
-        const p1Wins = clamp(0.5 + edge * 0.025, 0.25, 0.75);
+        const nerve = specialityPenaltyEdge(m.t1) - specialityPenaltyEdge(m.t2);
+        const p1Wins = clamp(0.5 + edge * 0.025 + nerve * 1.2, 0.25, 0.75);
         const firstWins = Math.random() < p1Wins;
         const win = 3 + Math.floor(Math.random() * 3);
         const lose = Math.max(0, win - 1 - Math.floor(Math.random() * 2));
@@ -1216,7 +1276,7 @@ function launchEuropeMatch() {
 function cloneTeamStateForMatch(team) {
     return {
         ...team,
-        lineup: (team.lineup || []).map(slot => ({ ...slot, yel: 0, min: 0 })),
+        lineup: (team.lineup || []).map(slot => ({ ...slot, yel: 0, min: 0, cameOn: 0 })),
         bench: (team.bench || []).slice(),
         reserves: (team.reserves || []).slice(),
         subs: 0,

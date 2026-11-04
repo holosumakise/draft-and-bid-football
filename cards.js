@@ -512,16 +512,44 @@ function countEmptyFormationSlots(manager, player) {
     return (manager.formation || []).filter(node => !node.assignedPlayerId && positions.has(node.pos)).length;
 }
 
-function nationLinkInfo(manager, player) {
+// The strongest link this player would hold in the XI, nation and club alike.
+// Falls back to the raw fields so the card renders even without draft.js loaded.
+function chemistryLinkInfo(manager, player) {
     if (!manager || !player) return null;
     const starters = typeof getFormationPlayers === 'function' ? getFormationPlayers(manager) : [];
-    const key = typeof chemistryKeyOf === 'function' ? chemistryKeyOf(player) : String(player.nationality || '').toLowerCase();
-    const same = starters.filter(starter => starter.id !== player.id
-        && (typeof chemistryKeyOf === 'function' ? chemistryKeyOf(starter) : String(starter.nationality || '').toLowerCase()) === key).length;
-    const next = same + 1;
-    const bonus = next >= CHEMISTRY.STRONG_MIN ? CHEMISTRY.STRONG_BONUS
-        : next >= CHEMISTRY.WARM_MIN ? CHEMISTRY.WARM_BONUS : 0;
-    return { same, next, bonus };
+    const mates = starters.filter(starter => starter.id !== player.id);
+    const label = value => String(value || '').trim().toLowerCase();
+    const keysOf = (p, kind) => (typeof chemistryKeysOf === 'function'
+        ? chemistryKeysOf(p, kind)
+        : kind === 'club' ? [label(p.team)].filter(Boolean) : [label(p.nationality) || 'world']);
+    const kinds = typeof CHEMISTRY_KINDS !== 'undefined' ? CHEMISTRY_KINDS : ['nation', 'club'];
+    const bonusFor = typeof chemistryBonusFor === 'function' ? chemistryBonusFor : count => (
+        count >= CHEMISTRY.STRONG_MIN ? CHEMISTRY.STRONG_BONUS
+            : count >= CHEMISTRY.WARM_MIN ? CHEMISTRY.WARM_BONUS
+                : count >= CHEMISTRY.LINK_MIN ? CHEMISTRY.LINK_BONUS : 0
+    );
+
+    let best = null;
+    kinds.forEach(kind => {
+        keysOf(player, kind).forEach(key => {
+            const same = mates.filter(mate => keysOf(mate, kind).includes(key)).length;
+            const next = same + 1;
+            const bonus = bonusFor(next);
+            const display = typeof chemistryLabelOf === 'function'
+                ? chemistryLabelOf(player, kind, key)
+                : (kind === 'club' ? player.team : player.nationality) || (kind === 'club' ? 'Club' : 'World');
+            if (!best || bonus > best.bonus || (bonus === best.bonus && next > best.next)) {
+                best = { kind, key, label: display, same, next, bonus };
+            }
+        });
+    });
+    return best;
+}
+
+// The role name only — the style is a label, not a manual.
+function playstyleName(player) {
+    const key = typeof playstyleOf === 'function' ? playstyleOf(player) : null;
+    return key && typeof PLAYSTYLES !== 'undefined' && PLAYSTYLES[key] ? PLAYSTYLES[key].name : '';
 }
 
 function shortManagerName(name) {
@@ -540,18 +568,30 @@ function renderScoutStrip(player, managerId) {
             <em>${countEmptyFormationSlots(manager, player)} ${cardEscape(player.mainPos || '')}</em>
         </span>`).join('');
     const focus = managers[0];
-    const link = nationLinkInfo(focus, player);
+    const link = chemistryLinkInfo(focus, player);
     const tier = cardTierOf(player);
+    const style = playstyleName(player);
+    const habit = typeof specialityName === 'function' ? specialityName(player) : '';
     return `
         <div class="scout-strip">
             <div class="scout-chip scout-chip--fit">
                 <span>Fits XI</span>
                 <div class="scout-teams">${fit}</div>
             </div>
-            ${link ? `
+            ${link && link.bonus ? `
                 <div class="scout-chip">
-                    <span>Nation link</span>
-                    <b>${cardEscape(player.nationality || 'World')} ×${link.next}${link.bonus ? ` <em>+${link.bonus}</em>` : ''}</b>
+                    <span>Link</span>
+                    <b>${cardEscape(link.label)} ×${link.next} <em>+${link.bonus}</em></b>
+                </div>` : ''}
+            ${style ? `
+                <div class="scout-chip">
+                    <span>Playstyle</span>
+                    <b class="scout-style">${cardEscape(style)}</b>
+                </div>` : ''}
+            ${habit ? `
+                <div class="scout-chip">
+                    <span>Speciality</span>
+                    <b class="scout-habit">${cardEscape(habit)}</b>
                 </div>` : ''}
             <div class="scout-chip">
                 <span>Tier</span>
@@ -595,14 +635,14 @@ function openPlayerCard(playerId, managerId) {
 
     const tier = cardTierOf(player);
     const inXI = manager ? (manager.formation || []).find(node => node.assignedPlayerId === player.id) : null;
-    const link = manager ? nationLinkInfo(manager, player) : null;
+    const link = manager ? chemistryLinkInfo(manager, player) : null;
     const rows = [
         ['Club', player.team || 'Free agent'],
         ['Nation', player.nationality || 'World'],
         ['Position', cardPositions(player) || '—'],
         ['Overall', `${cardRatingOf(player)}${player.rank ? ` · ${player.rank}` : ''}`],
         ['In XI', inXI ? `Yes · ${inXI.pos}` : 'No'],
-        ['Chemistry', link ? `${link.next} ${player.nationality || 'World'}${link.bonus ? ` · +${link.bonus}` : ''}` : '—'],
+        ['Chemistry', link && link.bonus ? `${link.next} × ${link.label} · +${link.bonus}` : '—'],
         ['Price', player.price != null ? `€${player.price}M` : '—']
     ];
 

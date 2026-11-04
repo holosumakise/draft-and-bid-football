@@ -36,28 +36,33 @@ function getDynamicOVR(player, targetPos) {
     if (subPositions.includes(targetPos)) return player.rating;
     if (targetPos === 'GK') return Math.max(1, Math.round(player.rating * 0.3));
     if (player.mainPos === 'GK') return Math.max(1, Math.round(player.rating * 0.15));
-    const loss = positionPenaltyPct(player.mainPos, targetPos);
+    const loss = positionPenaltyPct(player.mainPos, targetPos, player);
     return Math.max(1, Math.round(player.rating * (1 - loss)));
 }
 
 
-function positionPenaltyPct(from, to) {
+// A Tactical Wildcard is the one style that genuinely earns its keep in an
+// unfamiliar slot, because the role is defined by reading the shape, not the
+// patch of grass. Everyone else pays the full out-of-position price.
+function positionPenaltyPct(from, to, player) {
     if (from === to) return 0;
+    const wildcard = player && player.playstyle === 'wildcard';
+    const scale = pct => wildcard ? Math.min(pct, 0.06) : pct;
     const override = OUT_OF_POS_OVERRIDES[`${from}>${to}`];
-    if (override != null) return override;
+    if (override != null) return scale(override);
     const a = POSITION_META[from], b = POSITION_META[to];
-    if (!a || !b) return 0.3;
+    if (!a || !b) return scale(0.3);
     const unitGap = Math.abs(a.unit - b.unit);
     if (unitGap >= 2) {
         if (a.channel !== 'C' && b.channel !== 'C') {
-            return a.channel === b.channel ? 0.13 : 0.18;
+            return scale(a.channel === b.channel ? 0.13 : 0.18);
         }
-        return 0.25;
+        return scale(0.25);
     }
     let pct = unitGap * 0.06 + Math.abs(a.depth - b.depth) * 0.04;
     if (a.channel !== b.channel) pct += (a.channel === 'C' || b.channel === 'C') ? 0.03 : 0.04;
     if (unitGap === 0) pct = Math.max(0.03, pct);
-    return Math.min(0.25, pct);
+    return scale(Math.min(0.25, pct));
 }
 
 function calcPosition(x, y, isGK) {
@@ -102,7 +107,11 @@ function createTeamState(m) {
 // Split strength into attack / midfield / defence (engine-core.js) so a
 // lopsided XI is not treated as identical to a balanced one with the same OVR.
 // Missing starters lose ground on every line, not just the average.
-function getStrengthBreakdown(team) {
+// `oppTactics` lets each player's playstyle pay off (or cost) against the
+// specific match plan they are facing. A habit then rides on top of the job:
+// it decides how the same player behaves inside that plan, and an armband
+// settles the two lines that have to keep their shape.
+function getStrengthBreakdown(team, oppTactics) {
     const valid = (team && team.lineup ? team.lineup : []).filter(slot => slot && slot.player);
     if (!valid.length) return { overall: 0, att: 0, mid: 0, def: 0, count: 0 };
 
@@ -110,17 +119,31 @@ function getStrengthBreakdown(team) {
     const entries = valid.map(slot => ({
         pos: slot.pos,
         ovr: getDynamicOVR(slot.player, slot.pos) + (chemistry.get(slot.player.id) || 0)
+            + playstyleFitDelta(slot.player, team.tactics, oppTactics)
+            + specialityFitDelta(slot.player, team.tactics, oppTactics)
     }));
     const breakdown = EngineCore.strengthBreakdown(entries);
     const missingPlayersPenalty = Math.max(0, STARTERS - valid.length) * 3.5;
-    if (!missingPlayersPenalty) return breakdown;
+    if (!missingPlayersPenalty) return applyLeadership(breakdown, team);
 
-    return {
+    return applyLeadership({
         overall: breakdown.overall - missingPlayersPenalty,
         att: breakdown.att - missingPlayersPenalty,
         mid: breakdown.mid - missingPlayersPenalty,
         def: breakdown.def - missingPlayersPenalty,
         count: breakdown.count
+    }, team);
+}
+
+// Leadership is a calm-at-the-back bonus, not a goal machine: the armband holds
+// the defensive line and the screen in front of it, and never lifts the attack.
+function applyLeadership(breakdown, team) {
+    const lead = leadershipRating(team);
+    if (!lead) return breakdown;
+    return {
+        ...breakdown,
+        def: breakdown.def + lead,
+        mid: breakdown.mid + lead * 0.5
     };
 }
 
@@ -156,9 +179,19 @@ function getGoal(t, kind = 'open') {
             const finish = Math.pow(Math.max(40, sho) / 100, 1.55);
             const mobility = 0.14 * (pac / 100) + 0.12 * (dri / 100);
             const starBias = Math.pow(Math.max(55, p.rating ?? 70) / 100, 1.1);
-            let weight = role * (finish * 0.72 + mobility * 0.28) * starBias * 100;
+            // The role decides which kind of chance a player is asked to take: a
+            // poacher wants the open-play ball in the box, a target man the corner.
+            // The habit then decides how he takes it — from range, on the break, on
+            // the head, or as the fresh body thrown on late.
+            const style = playstyleWeights(p);
+            const habit = specialityWeights(p);
+            const styleFactor = kind === 'setpiece' ? style.setPiece * habit.setPiece
+                : kind === 'counter' ? style.counter * habit.counter
+                : style.score * habit.score;
+            let weight = role * (finish * 0.72 + mobility * 0.28) * starBias * 100 * styleFactor;
             // Counter goals run through the quickest players.
             if (kind === 'counter') weight *= 0.72 + (pac / 100) * 0.75;
+            if (l.cameOn) weight *= habit.sub;
             return { item: p, weight };
         });
 
@@ -188,7 +221,10 @@ function getGoal(t, kind = 'open') {
             const vision = Math.pow(Math.max(40, passing) / 100, 1.45);
             const carry = 0.16 * (dribbling / 100);
             const starBias = Math.pow(Math.max(55, player.rating ?? 70) / 100, 1.08);
-            return { item: player, weight: role * (vision + carry) * starBias * 100 };
+            // A dead ball is delivered by the man who can put it on a sixpence.
+            const habit = specialityWeights(player);
+            const habitFactor = kind === 'setpiece' ? habit.assist * habit.delivery : habit.assist;
+            return { item: player, weight: role * (vision + carry) * starBias * 100 * playstyleWeights(player).assist * habitFactor };
         });
         const selectedAssister = weightedPick(assistEntries);
         if (selectedAssister) assister = selectedAssister;
@@ -306,7 +342,7 @@ function createMatchRatings(sim) {
     [sim.t1, sim.t2].forEach((team, index) => {
         (team.lineup || []).forEach(slot => {
             if (!slot || !slot.player) return;
-            const actions = drawRatingActions(slot.pos);
+            const actions = drawRatingActions(slot.pos, slot.player);
             map[slot.player.id] = { player: slot.player, team: index + 1, pos: slot.pos, goals: 0, assists: 0, yellow: 0, red: 0, played: true, perf: rollPerformance(slot.player), defActions: actions.defActions, keyPasses: actions.keyPasses };
         });
     });
@@ -316,7 +352,7 @@ function createMatchRatings(sim) {
 function ensureRatingEntry(sim, player, teamNo, pos) {
     if (!sim.ratings[player.id]) {
         const slotPos = pos || player.mainPos;
-        const actions = drawRatingActions(slotPos);
+        const actions = drawRatingActions(slotPos, player);
         sim.ratings[player.id] = { player, team: teamNo, pos: slotPos, goals: 0, assists: 0, yellow: 0, red: 0, played: true, perf: rollPerformance(player), defActions: actions.defActions, keyPasses: actions.keyPasses };
     }
     return sim.ratings[player.id];
@@ -608,11 +644,30 @@ function getTacticsSituationalFor(sim, side, mul) {
     return { attack, concede };
 }
 
-function pickGoalKind(mul) {
-    if (Math.random() < mul.setPieceShare) return 'setpiece';
+function pickGoalKind(mul, setPieceShare = mul.setPieceShare) {
+    if (Math.random() < setPieceShare) return 'setpiece';
     const counterChance = clamp(mul.counterBoost * 1.4, 0, 0.45);
     if (counterChance > 0 && Math.random() < counterChance) return 'counter';
     return 'open';
+}
+
+// Dead-ball volume is not only the plan: a side with a long-thrower and a couple of
+// trick merchants wins more free kicks, and a side of enforcer and hot-heads gives
+// more away. Both move the share of goals that come from a set piece.
+function setPieceShareFor(team, oppTeam, mul) {
+    const share = mul.setPieceShare + specialitySetPieceBoost(team);
+    return clamp(share * specialityFoulsGiven(oppTeam), 0.04, 0.42);
+}
+
+// How much is the match actually on the line? Big Game Players are worth nothing in
+// a dead rubber, so the pressure is a number, not a flag: level late beats a
+// one-goal margin, and both beat a game already won.
+function getBigGamePressure(sim, side) {
+    const margin = side === 1 ? sim.s1 - sim.s2 : sim.s2 - sim.s1;
+    const minute = sim.minuteCount;
+    if (minute < 75) return 0;
+    if (margin === 0) return 1;
+    return Math.abs(margin) === 1 ? 0.55 : 0;
 }
 
 /** Simulate + display a period minute-by-minute so subs can pause on dead balls. */
@@ -626,8 +681,8 @@ function simulateMinute(sim, displayTime, isOT) {
     // The same ATT/MID/DEF edge that decides a league match decides this one.
     // engine-core.js converts it to expected goals for each side; tactics then
     // scale those expectations without changing the underlying model.
-    const breakdown1 = getStrengthBreakdown(t1);
-    const breakdown2 = getStrengthBreakdown(t2);
+    const breakdown1 = getStrengthBreakdown(t1, t2.tactics);
+    const breakdown2 = getStrengthBreakdown(t2, t1.tactics);
     const edge = EngineCore.matchupEdge(breakdown1, breakdown2);
     const expected = EngineCore.expectedGoals({
         edge,
@@ -643,8 +698,14 @@ function simulateMinute(sim, displayTime, isOT) {
     const sit1 = getTacticsSituationalFor(sim, 1, mul1);
     const sit2 = getTacticsSituationalFor(sim, 2, mul2);
 
-    let chance1 = Math.max(0.005, perMinute1 * sit1.attack * sit2.concede);
-    let chance2 = Math.max(0.005, perMinute2 * sit2.attack * sit1.concede);
+    const coh1 = playstyleCoherence(t1, t2.tactics) * specialityCoherence(t1, t2.tactics);
+    const coh2 = playstyleCoherence(t2, t1.tactics) * specialityCoherence(t2, t1.tactics);
+    // A Big Game Player only lifts his side once the match is actually on the line.
+    const nerve1 = specialityClutchBoost(t1, getBigGamePressure(sim, 1));
+    const nerve2 = specialityClutchBoost(t2, getBigGamePressure(sim, 2));
+
+    let chance1 = Math.max(0.005, perMinute1 * sit1.attack * sit2.concede * coh1 * nerve1);
+    let chance2 = Math.max(0.005, perMinute2 * sit2.attack * sit1.concede * coh2 * nerve2);
 
     if (isOT) { chance1 *= 0.5; chance2 *= 0.5; }
     // Teams feel each other out: goals are rarer in the opening minutes, easing back to normal by minute 7
@@ -657,17 +718,21 @@ function simulateMinute(sim, displayTime, isOT) {
     const roll = Math.random();
     if (roll < chance1) {
         sim.s1++; sim.lastGoalMinute = sim.minuteCount;
-        events.push({ type: 'goal', t: 1, ...getGoal(t1, pickGoalKind(mul1)) });
+        events.push({ type: 'goal', t: 1, ...getGoal(t1, pickGoalKind(mul1, setPieceShareFor(t1, t2, mul1))) });
     } else if (roll < chance1 + chance2) {
         sim.s2++; sim.lastGoalMinute = sim.minuteCount;
-        events.push({ type: 'goal', t: 2, ...getGoal(t2, pickGoalKind(mul2)) });
+        events.push({ type: 'goal', t: 2, ...getGoal(t2, pickGoalKind(mul2, setPieceShareFor(t2, t1, mul2))) });
     } else {
-        const cardChance = (isOT ? 0.005 : 0.015) * Math.max(0.5, (mul1.card + mul2.card) / 2);
+        // Hot heads and enforcers make the match more fractious overall, and one of
+        // them is the likelier offender — a flat random pick would hide the tag.
+        const booking = Math.sqrt(specialityBookingRate(t1) * specialityBookingRate(t2));
+        const cardChance = (isOT ? 0.005 : 0.015) * Math.max(0.5, (mul1.card + mul2.card) / 2) * booking;
         if (Math.random() < cardChance) {
             const cardShare1 = mul1.card / (mul1.card + mul2.card);
             let tn = Math.random() < cardShare1 ? 1 : 2;
             const tm = tn === 1 ? t1 : t2;
-            const p = pickRand(tm.lineup.filter(l => l.pos !== 'GK' && l.player));
+            const offenders = tm.lineup.filter(l => l.pos !== 'GK' && l.player);
+            const p = weightedPick(offenders.map(l => ({ item: l, weight: specialityEffects(l.player).card })));
             if (p) {
                 sim.cards[tn] = (sim.cards[tn] || 0) + 1;
                 p.yel++;
@@ -702,7 +767,9 @@ function getStaminaFade(slot, tactics) {
     const stats = (slot.player && slot.player.stats) || {};
     const engine = 1 + ((stats.PHY || 65) - 65) / 90 + ((stats.PAC || 65) - 65) / 260;
     const running = getTacticsProfileFor(tactics).stamina;
-    return Math.min(0.18, played * 0.005 * running / Math.max(0.6, engine));
+    // An iron man runs the same plan for longer; a fragile body goes earlier.
+    const chassis = specialityEffects(slot.player).stamina;
+    return Math.min(0.18, played * 0.005 * running * chassis / Math.max(0.6, engine));
 }
 
 function getLiveOVR(slot, tactics) {
@@ -730,8 +797,10 @@ function pickAutoSub(sim, tm, tn, forced = false, early = false) {
         const live = getLiveOVR(out, tm.tactics);
         bench.forEach(inn => {
             const naturalFit = inn.mainPos === out.pos || (inn.subPos || []).includes(out.pos) ? 0.8 : 0;
-            // Early changes are injuries / knocks, so who goes off is close to random.
-            const gain = (getDynamicOVR(inn, out.pos) - live) + naturalFit
+            // Early changes are injuries / knocks, so who goes off follows the body:
+            // a fragile starter is the one the manager loses, an iron man plays on.
+            const frailty = early ? (specialityEffects(out.player).injury - 1) * 6 : 0;
+            const gain = (getDynamicOVR(inn, out.pos) - live) + naturalFit + frailty
                 + (pitchUnit(inn.mainPos) - pitchUnit(out.pos)) * demand
                 + Math.random() * (early ? 12 : 1.5);
             if (!best || gain > best.gain) best = { out, inn, gain };
@@ -750,15 +819,17 @@ function pickAutoSub(sim, tm, tn, forced = false, early = false) {
 // changes varies the way real matches do: a few teams make 2-3, many make 4, some use all
 // five, and changes come in windows (often two or three at the same minute) rather than
 // one every few minutes. A few happen early (knocks) or at half-time.
-function buildSubPlan() {
+function buildSubPlan(tm) {
     const cap = typeof MAX_SUBS === 'number' ? MAX_SUBS : 5;
     const r = Math.random();
     let target = r < 0.03 ? 1 : r < 0.12 ? 2 : r < 0.36 ? 3 : r < 0.68 ? 4 : 5;
     target = Math.min(target, cap);
 
     const plan = [];
-    // An early change for a knock, usually just one.
-    if (target >= 2 && Math.random() < 0.10) plan.push({ minute: 18 + Math.floor(Math.random() * 27), early: true });
+    // An early change for a knock, usually just one. A dressing room full of
+    // fragile bodies loses players this way; an iron man does not.
+    const frailty = tm ? specialityInjuryRisk(tm) : 1;
+    if (target >= 2 && Math.random() < clamp(0.10 * frailty, 0.03, 0.30)) plan.push({ minute: 18 + Math.floor(Math.random() * 27), early: true });
     // Half-time tweak.
     if (plan.length < target && Math.random() < 0.14) plan.push({ minute: 46, early: false });
     // Main windows in the second half.
@@ -781,7 +852,7 @@ function applyAutomaticSub(sim, tm, tn, events) {
     // New plan for every match (team states are rebuilt per match, but key it to the sim to be safe).
     if (tm.subPlanFor !== sim) {
         tm.subPlanFor = sim;
-        tm.subPlan = buildSubPlan();
+        tm.subPlan = buildSubPlan(tm);
     }
     const minute = sim.minuteCount;
     const margin = tn === 1 ? sim.s1 - sim.s2 : sim.s2 - sim.s1;
@@ -807,6 +878,9 @@ function applyAutomaticSub(sim, tm, tn, events) {
         choice.out.player = choice.inn;
         choice.out.min = 0;
         choice.out.yel = 0;
+        // The slot remembers that it is now filled from the bench, which is what a
+        // Super-Sub's finishing bonus hangs on.
+        choice.out.cameOn = minute;
         tm.subs = (tm.subs || 0) + 1;
         ensureRatingEntry(sim, choice.inn, tn, choice.out.pos);
         events.push({ type: 'sub', t: tn, inName: choice.inn.name, outName, id: choice.inn.id });
@@ -943,10 +1017,16 @@ function startPenaltyShootout(sim) {
     const board = document.getElementById('pen-board');
     const teams = [sim.t1, sim.t2];
 
+    // The list is the team's own pick order: the men who actually take penalties step up
+    // first, and the keeper is left till sudden death, exactly as a real side lines up.
+    const takerScore = player => ((player.stats && player.stats.SHO) || player.rating || 70)
+        + (specialityEffects(player).pen * 100);
     const takersFor = team => {
         const slots = (team.lineup || []).filter(l => l && l.player);
-        const outfield = slots.filter(l => l.pos !== 'GK').map(l => l.player)
-            .sort((a, b) => ((b.stats && b.stats.SHO) || 0) - ((a.stats && a.stats.SHO) || 0));
+        const outfield = slots.filter(l => l.pos !== 'GK').map(l => l.player).sort((a, b) => {
+            const byHabit = (specialityEffects(b).taker ? 1 : 0) - (specialityEffects(a).taker ? 1 : 0);
+            return byHabit || takerScore(b) - takerScore(a);
+        });
         const gk = slots.find(l => l.pos === 'GK');
         if (gk) outfield.push(gk.player);
         return outfield.length ? outfield : [{ name: team.name, stats: { SHO: 70 } }];
@@ -963,7 +1043,8 @@ function startPenaltyShootout(sim) {
     const scores = (taker, keeper) => {
         const shooting = (taker.stats && taker.stats.SHO) || taker.rating || 75;
         const keeping = (keeper && keeper.stats && keeper.stats.DEF) || 75;
-        return Math.random() < clamp(0.76 + (shooting - 75) * 0.004 - (keeping - 75) * 0.0025, 0.5, 0.93);
+        return Math.random() < clamp(0.76 + (shooting - 75) * 0.004 - (keeping - 75) * 0.0025
+            + specialityEffects(taker).pen, 0.5, 0.93);
     };
 
     const isDecided = () => {
