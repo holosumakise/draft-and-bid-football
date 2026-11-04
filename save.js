@@ -56,7 +56,6 @@ const SaveGame = {
                 difficulty: gameState.difficulty,
                 skipsLeft: gameState.skipsLeft,
                 auctionAnchor: gameState.auctionAnchor || 0,
-                auctionProxies: {},
                 managers: gameState.managers,
                 season: gameState.season || null,
                 _gkPhaseToast: !!gameState._gkPhaseToast

@@ -661,12 +661,9 @@ function serializeDraft(d) {
 function serializeAuction(a) {
     if (!a) return null;
     return {
-        order: a.order.slice(), turnIdx: a.turnIdx, highBid: a.highBid,
+        order: a.order.slice(), turnIdx: a.turnIdx, turnSerial: a.turnSerial || 0, highBid: a.highBid,
         highBidderId: a.highBidderId, topBidOf: { ...a.topBidOf }, out: { ...a.out },
         status: a.status, turnEndsAt: a.turnEndsAt,
-        // Ceilings never leave the host. Publishing only the ids lets a guest
-        // show an AUTO badge without leaking what its rival is willing to pay.
-        proxyIds: Object.keys(gameState.auctionProxies || {}).map(Number),
         // Remote devices rebase their countdown from this instead of comparing
         // turnEndsAt to their own wall clock, which is not the host's wall clock.
         turnRemaining: a.turnEndsAt ? Math.max(0, a.turnEndsAt - Date.now()) : 0

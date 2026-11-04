@@ -9,7 +9,6 @@ let gameState = {
     activeDraft: null,
     auction: null,
     auctionAnchor: 0,
-    auctionProxies: {},
     draftAnimating: false,
     matchQueue: [],
     currentMatchData: null,
@@ -211,7 +210,6 @@ function initGame() {
     gameState.matchSim = null;
     gameState.auction = null;
     gameState.auctionAnchor = 0;
-    gameState.auctionProxies = {};
     const takenNames = new Set();
     const names = managerNamesForGame(gameState.playerCount);
     for (let i = 1; i <= gameState.playerCount; i++) {
@@ -278,7 +276,6 @@ function resumeSavedGame() {
         // Anything mid-tick is deliberately dropped: resumes start from a safe screen.
         activeDraft: null,
         auction: null,
-        auctionProxies: saved.auctionProxies || {},
         draftAnimating: false,
         matchSim: null,
         matchQueue: [],

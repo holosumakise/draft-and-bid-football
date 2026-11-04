@@ -530,8 +530,39 @@ function renderPickupWheel(board, d) {
     wheel.style.transform = `rotate(${target}deg)`;
 }
 
+// The bid amount lives in the input, but renderDraftBoard() rebuilds the whole
+// panel on every publish. Preserve what is being typed only while the auction is
+// still on the same turn: a new turn must always start with an empty field.
+function captureBidFieldState() {
+    const field = document.getElementById('bid-entry-field');
+    if (!field) return null;
+    return {
+        turn: field.dataset.bidTurn || '',
+        value: field.value,
+        focused: document.activeElement === field,
+        start: typeof field.selectionStart === 'number' ? field.selectionStart : null,
+        end: typeof field.selectionEnd === 'number' ? field.selectionEnd : null
+    };
+}
+
+function restoreBidFieldState(state) {
+    if (!state) return;
+    const field = document.getElementById('bid-entry-field');
+    if (!field) return;
+    if ((field.dataset.bidTurn || '') !== state.turn) return;
+    field.value = state.value;
+    if (typeof onBidInput === 'function') onBidInput(field);
+    if (!state.focused) return;
+    field.focus();
+    if (state.start === null || state.end === null) return;
+    try { field.setSelectionRange(state.start, state.end); } catch (e) {}
+}
+
 function renderDraftBoard() {
     const board = document.getElementById('draft-board');
+    // A rebuilt board destroys the PASS button, so never leave a hold running.
+    if (typeof cancelPassHold === 'function') cancelPassHold();
+    const bidFieldState = captureBidFieldState();
     const d = gameState.activeDraft;
     if (!d) { gameState._renderedPlayerId = null; board.innerHTML = '<div class="text-slate-400 italic">Press Roll Draft</div>'; return; }
     const { player, state, result } = d;
@@ -638,6 +669,7 @@ function renderDraftBoard() {
                     </div>` : ''}
                     ${actionHtml}
                 </div>`;
+            restoreBidFieldState(bidFieldState);
         }
     }
 }

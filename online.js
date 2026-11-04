@@ -304,16 +304,7 @@ const Online = {
             renderDraftBoard();
             return;
         }
-        gameState.auction = { ...auction, out: auction.out || {}, topBidOf: auction.topBidOf || {}, order: auction.order || [] };
-        // Only the presence of a proxy travels. Store truthy placeholders so the
-        // AUTO badge still renders on a guest; the amount stays on the host.
-        if (Array.isArray(auction.proxyIds)) {
-            const seen = {};
-            auction.proxyIds.forEach(id => { seen[Number(id)] = true; });
-            gameState.auctionProxies = seen;
-        } else {
-            gameState.auctionProxies = {};
-        }
+        gameState.auction = { ...auction, turnSerial: auction.turnSerial || 0, out: auction.out || {}, topBidOf: auction.topBidOf || {}, order: auction.order || [] };
         // A guest's clock is its own; rebasing the deadline from the remaining
         // time keeps its countdown honest even when the two devices disagree.
         if (auction.status === 'open' && Number.isFinite(auction.turnRemaining)) {

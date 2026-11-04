@@ -515,6 +515,23 @@
             box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18);
         }
 
+        /* Hold-to-pass: the fill is driven by PASS_HOLD_MS in auction.js. */
+        .pass-hold-btn { touch-action: none; -webkit-tap-highlight-color: transparent; }
+        .pass-hold-fill {
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 0;
+            background: rgba(239, 68, 68, 0.75);
+            pointer-events: none;
+        }
+        .pass-hold-btn.pass-holding .pass-hold-fill {
+            animation: pass-hold-fill 900ms linear forwards;
+        }
+        @keyframes pass-hold-fill {
+            from { width: 0; }
+            to { width: 100%; }
+        }
+
     </style>
 </head>
 <body class="font-sans antialiased text-slate-100">

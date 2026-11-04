@@ -408,7 +408,7 @@ function renderDOMForManagers() {
                 <p class="text-green-400 font-mono text-xl mb-3" id="m${m.id}-balance">€1.00B</p>
                 <div id="m${m.id}-budget" class="mb-3 hidden">
                     <div class="flex justify-between items-center text-[10px] font-bold mb-1 gap-2">
-                        <span class="text-slate-400 truncate">Max bid <span id="m${m.id}-maxbid" class="text-emerald-400 font-mono">€0M</span></span>
+                        <span class="text-slate-400 truncate">Available <span id="m${m.id}-maxbid" class="text-emerald-400 font-mono">€0M</span></span>
                         <span class="text-slate-400 truncate">Reserved <span id="m${m.id}-reserve" class="text-amber-400 font-mono">€0M</span></span>
                     </div>
                     <div class="w-full h-1.5 rounded-full overflow-hidden bg-slate-700 flex" title="Green = available to bid · Amber = reserved to fill remaining starting XI slots">

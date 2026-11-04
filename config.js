@@ -17,16 +17,10 @@ const CHEMISTRY = Object.freeze({
 
 // --- Live auction: one bidder at a time, every bid public ---
 // 9s is enough to think, short enough that four managers do not sit through a
-// minute of dead air per player. A max-bid proxy turns most of those turns into
-// instant resolutions anyway.
+// minute of dead air per player.
 const SHOT_CLOCK_MS = 9000;
 const AUCTION_TICK_MS = 200;
 const BID_RAISE_STEPS = [1, 5];
-
-// --- Auction proxy (eBay-style max bid) ---
-// The host keeps every ceiling in memory; only the fact that a manager has set
-// one is published, never the amount.
-const PROXY_MAX_STEPS = 2000;     // guard against a pathological proxy war
 
 // --- Shared balance model (engine-core.js) ---
 // One expected-goals baseline for the live match engine, the league simulator
