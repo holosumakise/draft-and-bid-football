@@ -170,56 +170,151 @@ function selectActiveLineup(team) {
         .map(slot => ({ ...slot, yel: 0 }));
 }
 
-function applySideMatchEffects(activeLineup, playerStats, goalsAgainst, trackScoring) {
-    if (!playerStats) return;
-    const isDefPos = position => ['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB'].includes(position);
-    const cleanSheet = goalsAgainst === 0;
+// League matches are not minute-by-minute, so substitutions are planned up front:
+// starters sometimes leave early and a bench player inherits the remaining minutes.
+// Without this, only the XI ever appears on the season team-stats board.
+function planLeagueAppearances(team) {
+    const starters = selectActiveLineup(team);
+    const bench = (team.bench || []).filter(Boolean).slice();
+    // Prefer like-for-like, then same unit, then anyone (never a second GK for an outfield slot).
+    const unitOf = pos => {
+        if (pos === 'GK') return 'GK';
+        if (['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(pos)) return 'DEF';
+        if (['CDM', 'CM', 'CAM', 'LM', 'RM'].includes(pos)) return 'MID';
+        return 'ATT';
+    };
+    const pickBench = (pos, used) => {
+        const available = bench.filter(p => p && !used.has(p.id));
+        if (!available.length) return null;
+        const isGkSlot = pos === 'GK';
+        const pool = available.filter(p => isGkSlot ? p.mainPos === 'GK' : p.mainPos !== 'GK');
+        const candidates = pool.length ? pool : (isGkSlot ? [] : available.filter(p => p.mainPos !== 'GK'));
+        if (!candidates.length) return null;
+        const samePos = candidates.filter(p => p.mainPos === pos || (p.subPos || []).includes(pos));
+        const sameUnit = candidates.filter(p => unitOf(p.mainPos) === unitOf(pos));
+        const shortlist = samePos.length ? samePos : (sameUnit.length ? sameUnit : candidates);
+        return shortlist[Math.floor(Math.random() * shortlist.length)];
+    };
 
-    activeLineup.forEach(slot => {
-        const stats = playerStats[slot.player.id];
-        if (!stats) return;
+    const usedBench = new Set();
+    let subsMade = 0;
+    const maxSubs = typeof MAX_SUBS === 'number' ? MAX_SUBS : 5;
+    const appearances = [];
 
+    starters.forEach(slot => {
         let minutes = 90;
-        if (Math.random() < 0.12) minutes = 60 + Math.floor(Math.random() * 25);
-        if (Math.random() < 0.03) minutes = 20 + Math.floor(Math.random() * 40);
-
         let yellow = false;
         let red = false;
         const cardRoll = Math.random();
         if (cardRoll < 0.012) {
             red = true;
-            stats.reds++;
             minutes = Math.min(minutes, 30 + Math.floor(Math.random() * 40));
         } else if (cardRoll < 0.082) {
             yellow = true;
-            stats.yellows++;
         }
 
-        stats.apps++;
-        stats.minutes += minutes;
-        if (cleanSheet && isDefPos(slot.pos)) stats.cleanSheets++;
-        if (slot.pos === 'GK') stats.goalsConcededAsGK += goalsAgainst;
+        // Planned rotation / injury / tactical change — only if a bench option exists.
+        if (!red && subsMade < maxSubs) {
+            let subOff = false;
+            if (Math.random() < 0.14) {
+                minutes = 60 + Math.floor(Math.random() * 25); // 60–84
+                subOff = true;
+            } else if (Math.random() < 0.04) {
+                minutes = 45 + Math.floor(Math.random() * 20); // 45–64
+                subOff = true;
+            }
+            if (subOff) {
+                const inn = pickBench(slot.pos, usedBench);
+                if (inn) {
+                    usedBench.add(inn.id);
+                    subsMade++;
+                    const rest = Math.max(1, 90 - minutes);
+                    appearances.push({
+                        player: slot.player, pos: slot.pos, minutes, yellow, red, fromStart: true
+                    });
+                    appearances.push({
+                        player: inn, pos: slot.pos, minutes: rest, yellow: false, red: false, fromStart: false
+                    });
+                    return;
+                }
+            }
+        }
 
-        const goalsByPlayer = trackScoring.goals.filter(id => id === slot.player.id).length;
-        const assistsByPlayer = trackScoring.assists.filter(id => id === slot.player.id).length;
+        // Red card: try to replace with a bench player for the rest of the match.
+        if (red && subsMade < maxSubs) {
+            const inn = pickBench(slot.pos, usedBench);
+            if (inn) {
+                usedBench.add(inn.id);
+                subsMade++;
+                const rest = Math.max(1, 90 - minutes);
+                appearances.push({
+                    player: slot.player, pos: slot.pos, minutes, yellow, red, fromStart: true
+                });
+                appearances.push({
+                    player: inn, pos: slot.pos, minutes: rest, yellow: false, red: false, fromStart: false
+                });
+                return;
+            }
+        }
+
+        appearances.push({
+            player: slot.player, pos: slot.pos, minutes, yellow, red, fromStart: true
+        });
+    });
+
+    return appearances;
+}
+
+function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
+    if (!playerStats) return;
+    const isDefPos = position => ['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB'].includes(position);
+    const cleanSheet = goalsAgainst === 0;
+    const appearances = planLeagueAppearances(team);
+
+    appearances.forEach(entry => {
+        const stats = playerStats[entry.player.id];
+        if (!stats) return;
+
+        if (entry.red) stats.reds++;
+        else if (entry.yellow) stats.yellows++;
+
+        stats.apps++;
+        stats.minutes += entry.minutes;
+        // Clean sheets only count for players who saw most of the match on a defensive line.
+        if (cleanSheet && isDefPos(entry.pos) && entry.minutes >= 45) stats.cleanSheets++;
+        if (entry.pos === 'GK') {
+            // Scale goals conceded by share of the match for backup keepers.
+            stats.goalsConcededAsGK += goalsAgainst * (entry.minutes / 90);
+        }
+
+        // Goals/assists stay on the players the scoring model named (almost always starters).
+        const goalsByPlayer = entry.fromStart
+            ? trackScoring.goals.filter(id => id === entry.player.id).length
+            : 0;
+        const assistsByPlayer = entry.fromStart
+            ? trackScoring.assists.filter(id => id === entry.player.id).length
+            : 0;
         if (goalsByPlayer) stats.goals += goalsByPlayer;
         if (assistsByPlayer) stats.assists += assistsByPlayer;
-        const actions = drawRatingActions(slot.pos);
+
+        const actions = drawRatingActions(entry.pos);
+        // Short cameos get a slightly quieter action load so 15-minute runs do not look like full 90s.
+        const minuteScale = clamp(entry.minutes / 90, 0.25, 1);
         const rating = sofaScoreMatchRating({
             goals: goalsByPlayer,
             assists: assistsByPlayer,
-            isGK: slot.pos === 'GK',
-            isDEF: isDefPos(slot.pos) && slot.pos !== 'GK',
-            cleanSheet,
+            isGK: entry.pos === 'GK',
+            isDEF: isDefPos(entry.pos) && entry.pos !== 'GK',
+            cleanSheet: cleanSheet && entry.minutes >= 45,
             goalsConceded: goalsAgainst,
-            yellow,
-            red,
+            yellow: entry.yellow,
+            red: entry.red,
             teamResult: trackScoring.result,
             goalDiff: trackScoring.goals.length - goalsAgainst,
-            perf: rollPerformance(slot.player),
-            saves: slot.pos === 'GK' ? Math.max(0, samplePoisson(4.6) - goalsAgainst) : 0,
-            defActions: actions.defActions,
-            keyPasses: actions.keyPasses
+            perf: rollPerformance(entry.player) * minuteScale,
+            saves: entry.pos === 'GK' ? Math.max(0, Math.round((samplePoisson(4.6) - goalsAgainst) * minuteScale)) : 0,
+            defActions: Math.round((actions.defActions || 0) * minuteScale),
+            keyPasses: Math.round((actions.keyPasses || 0) * minuteScale)
         });
         stats.ratingSum += Math.max(3, rating);
         stats.ratingCount++;
@@ -273,8 +368,8 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
             if (goal.assisterId != null) assistIdsB.push(goal.assisterId);
         }
 
-        applySideMatchEffects(teamA.lineup, statsA, goalsForB, { goals: goalIdsA, assists: assistIdsA, result: resultA });
-        applySideMatchEffects(teamB.lineup, statsB, goalsForA, { goals: goalIdsB, assists: assistIdsB, result: resultB });
+        applySideMatchEffects(teamA, statsA, goalsForB, { goals: goalIdsA, assists: assistIdsA, result: resultA });
+        applySideMatchEffects(teamB, statsB, goalsForA, { goals: goalIdsB, assists: assistIdsB, result: resultB });
         return { gf: goalsForA, ga: goalsForB, result: resultA };
     } finally {
         teamA.lineup = originalLineupA;
