@@ -714,8 +714,9 @@ function pitchUnit(pos) {
     return meta ? meta.unit : 1;
 }
 
-function pickAutoSub(sim, tm, tn) {
-    const onPitch = tm.lineup.filter(slot => slot.pos !== 'GK' && slot.player);
+function pickAutoSub(sim, tm, tn, forced = false, early = false) {
+    // A player who just came on is not taken off again, and the keeper stays put.
+    const onPitch = tm.lineup.filter(slot => slot.pos !== 'GK' && slot.player && (slot.min || 0) >= 8);
     const bench = (tm.bench || []).filter(p => p.mainPos !== 'GK');
     if (!onPitch.length || !bench.length) return null;
 
@@ -729,8 +730,10 @@ function pickAutoSub(sim, tm, tn) {
         const live = getLiveOVR(out, tm.tactics);
         bench.forEach(inn => {
             const naturalFit = inn.mainPos === out.pos || (inn.subPos || []).includes(out.pos) ? 0.8 : 0;
+            // Early changes are injuries / knocks, so who goes off is close to random.
             const gain = (getDynamicOVR(inn, out.pos) - live) + naturalFit
-                + (pitchUnit(inn.mainPos) - pitchUnit(out.pos)) * demand;
+                + (pitchUnit(inn.mainPos) - pitchUnit(out.pos)) * demand
+                + Math.random() * (early ? 12 : 1.5);
             if (!best || gain > best.gain) best = { out, inn, gain };
         });
     });
@@ -738,27 +741,77 @@ function pickAutoSub(sim, tm, tn) {
 
     // A gassed player is a liability even when the bench cannot offer an upgrade, so
     // fatigue on its own can force the change.
-    if (best.gain < SUB_MIN_GAIN && getStaminaFade(best.out, tm.tactics) < 0.12) return null;
+    // Planned changes (see buildSubPlan) always happen; only unplanned ones need a real upgrade.
+    if (!forced && best.gain < SUB_MIN_GAIN && getStaminaFade(best.out, tm.tactics) < 0.12) return null;
     return best;
 }
 
+// Each team gets its own substitution plan at kick-off, so the number and timing of
+// changes varies the way real matches do: a few teams make 2-3, many make 4, some use all
+// five, and changes come in windows (often two or three at the same minute) rather than
+// one every few minutes. A few happen early (knocks) or at half-time.
+function buildSubPlan() {
+    const cap = typeof MAX_SUBS === 'number' ? MAX_SUBS : 5;
+    const r = Math.random();
+    let target = r < 0.03 ? 1 : r < 0.12 ? 2 : r < 0.36 ? 3 : r < 0.68 ? 4 : 5;
+    target = Math.min(target, cap);
+
+    const plan = [];
+    // An early change for a knock, usually just one.
+    if (target >= 2 && Math.random() < 0.10) plan.push({ minute: 18 + Math.floor(Math.random() * 27), early: true });
+    // Half-time tweak.
+    if (plan.length < target && Math.random() < 0.14) plan.push({ minute: 46, early: false });
+    // Main windows in the second half.
+    const windows = [
+        56 + Math.floor(Math.random() * 12),   // 56-67
+        68 + Math.floor(Math.random() * 10),   // 68-77
+        78 + Math.floor(Math.random() * 10)    // 78-87
+    ];
+    const weights = [0.38, 0.40, 0.22];
+    while (plan.length < target) {
+        const roll = Math.random();
+        const w = roll < weights[0] ? 0 : roll < weights[0] + weights[1] ? 1 : 2;
+        plan.push({ minute: windows[w], early: false });
+    }
+    return plan.sort((x, y) => x.minute - y.minute);
+}
+
 function applyAutomaticSub(sim, tm, tn, events) {
-    if (sim.minuteCount < (tm.nextSubCheckMinute || SUB_FIRST_CHECK)) return;
-    tm.nextSubCheckMinute = sim.minuteCount + 6 + Math.floor(Math.random() * 6);
-    if ((tm.subs || 0) >= MAX_SUBS) return;
+    const cap = typeof MAX_SUBS === 'number' ? MAX_SUBS : 5;
+    // New plan for every match (team states are rebuilt per match, but key it to the sim to be safe).
+    if (tm.subPlanFor !== sim) {
+        tm.subPlanFor = sim;
+        tm.subPlan = buildSubPlan();
+    }
+    const minute = sim.minuteCount;
+    const margin = tn === 1 ? sim.s1 - sim.s2 : sim.s2 - sim.s1;
 
-    const choice = pickAutoSub(sim, tm, tn);
-    if (!choice) return;
+    // Game state can add a change: a trailing side with changes left throws on fresh attackers.
+    if ((minute === 70 || minute === 78 || minute === 84) && margin < 0 && (tm.subs || 0) + tm.subPlan.length < cap && Math.random() < 0.35) {
+        tm.subPlan.push({ minute, early: false });
+    }
+    // Extra time: managers often get one more change.
+    if ((minute === 91 || minute === 106) && (tm.subs || 0) + tm.subPlan.length < cap && Math.random() < 0.35) {
+        tm.subPlan.push({ minute, early: false });
+    }
 
-    const outName = choice.out.player.name;
-    tm.bench = tm.bench.filter(x => x.id !== choice.inn.id);
-    choice.out.player = choice.inn;
-    choice.out.min = 0;
-    choice.out.yel = 0;
-    tm.subs = (tm.subs || 0) + 1;
-    ensureRatingEntry(sim, choice.inn, tn, choice.out.pos);
-    events.push({ type: 'sub', t: tn, inName: choice.inn.name, outName, id: choice.inn.id });
-    sim.injuryExtraMinutes = (sim.injuryExtraMinutes || 0) + 0.5 + Math.random() * 0.5;
+    while (tm.subPlan.length && tm.subPlan[0].minute <= minute) {
+        const planned = tm.subPlan.shift();
+        if ((tm.subs || 0) >= cap) return;
+
+        const choice = pickAutoSub(sim, tm, tn, true, planned.early);
+        if (!choice) continue;
+
+        const outName = choice.out.player.name;
+        tm.bench = tm.bench.filter(x => x.id !== choice.inn.id);
+        choice.out.player = choice.inn;
+        choice.out.min = 0;
+        choice.out.yel = 0;
+        tm.subs = (tm.subs || 0) + 1;
+        ensureRatingEntry(sim, choice.inn, tn, choice.out.pos);
+        events.push({ type: 'sub', t: tn, inName: choice.inn.name, outName, id: choice.inn.id });
+        sim.injuryExtraMinutes = (sim.injuryExtraMinutes || 0) + 0.5 + Math.random() * 0.5;
+    }
 }
 
 function runLivePeriod(sim, start, end, isOT, onDone) {
