@@ -501,6 +501,7 @@ function finishOrExtraTime(sim) {
         return;
     }
 
+    sim.wentToET = true;
     appendTimelineLabel('EXTRA TIME');
     if (clock) clock.innerText = 'ET';
     runLivePeriod(sim, 91, 105, true, () => {
@@ -850,7 +851,6 @@ function displayTimelineStep(step, sim) {
             cHtml = `
                 <div class="timeline-card animate-reveal">
                     <div class="font-bold text-slate-800 text-sm md:text-base flex items-center gap-1"><span class="text-[10px]">⚽</span> ${escapeHTML(e.scorer)}</div>
-                    ${e.kind === 'setpiece' ? '<div class="text-[9px] uppercase tracking-wider font-bold text-amber-600 mt-0.5">Set piece</div>' : e.kind === 'counter' ? '<div class="text-[9px] uppercase tracking-wider font-bold text-blue-600 mt-0.5">Counter</div>' : ''}
                     ${e.assister ? `<div class="text-[10px] text-blue-500 font-semibold mt-1 flex items-center gap-1"><span class="inline-block w-4 h-4 rounded-full bg-blue-100 text-blue-600 text-[9px] font-black flex items-center justify-center leading-none">A</span>${escapeHTML(e.assister)}</div>` : ''}
                     <div class="absolute ${isL?'-right-12':'-left-12'} top-1/2 -translate-y-1/2 font-black text-xl text-slate-800">${sim.view.s1}-${sim.view.s2}</div>
                 </div>`;
@@ -1009,55 +1009,73 @@ function finishVisuals(sim) {
     const str1 = getStrength(t1) || 70;
     const str2 = getStrength(t2) || 70;
     const strRatio = str1 / (str1 + str2);
-    // Control decides territory, so a possession plan shows up in the stats as
-    // well as in the scoreline.
+    const etFactor = sim.wentToET ? 1.33 : 1;   // 120 minutes instead of 90
+    const noise = amp => (Math.random() * 2 - 1) * amp;
+
+    // --- Possession: control (tactics) + strength, kept in a believable 30-70 band ---
     const tactics = getTacticsMatchupFor(t1.tactics, t2.tactics);
     const controlEdge = tactics.a.control - tactics.b.control;
-    let poss1 = Math.round(50 + controlEdge * 34 + (strRatio - 0.5) * 22 + (Math.random() * 8 - 4));
-    poss1 = Math.max(30, Math.min(70, poss1));
+    let poss1 = Math.round(50 + controlEdge * 34 + (strRatio - 0.5) * 22 + noise(4));
+    poss1 = clamp(poss1, 30, 70);
+
+    // --- Shots: volume follows territory, tactics and the scoreline (leaders sit back) ---
     const tacticTilt = clamp((tactics.a.attack * tactics.b.concede - tactics.b.attack * tactics.a.concede) * 5, -5, 5);
-    const totShots = 8 + Math.floor(Math.random() * 14) + s1 + s2;
-    let t1S = Math.round(totShots * (poss1 / 100) + (s1 - s2) * 0.8 + tacticTilt + (Math.random() * 3 - 1.5));
-    t1S = Math.max(1, Math.min(totShots - 1, t1S));
+    const totShots = Math.round((18 + Math.random() * 8 + (s1 + s2) * 1.5) * etFactor);
+    const shotShare1 = clamp(
+        0.5 + (poss1 - 50) * 0.004 + (strRatio - 0.5) * 0.25 + tacticTilt * 0.012 + (s1 - s2) * 0.015 + noise(0.04),
+        0.25, 0.75
+    );
+    let t1S = Math.round(totShots * shotShare1);
+    // Every goal is a shot, so nobody can have fewer shots than goals.
+    t1S = clamp(t1S, s1, totShots - s2);
     const t2S = totShots - t1S;
-    const onTarget1 = Math.max(s1, Math.min(t1S, Math.round(t1S * (0.34 + Math.random() * 0.16))));
-    const onTarget2 = Math.max(s2, Math.min(t2S, Math.round(t2S * (0.34 + Math.random() * 0.16))));
+
+    // --- Shots on target: ~1/3 to 1/2 of shots, never fewer than the goals scored ---
+    const onTargetFor = (shots, goals) => clamp(Math.round(shots * (0.33 + Math.random() * 0.14)), goals, shots);
+    const onTarget1 = onTargetFor(t1S, s1);
+    const onTarget2 = onTargetFor(t2S, s2);
     sim.gkSaves = { 1: Math.max(0, onTarget2 - s2), 2: Math.max(0, onTarget1 - s1) };
 
+    // --- Corners: roughly a third of shots end in one, split by who is attacking ---
+    const totCorners = Math.max(2, Math.round((t1S + t2S) * 0.36 + noise(2)));
+    const cornerShare1 = clamp(t1S / Math.max(1, t1S + t2S) + noise(0.06), 0.1, 0.9);
+    const corners1 = clamp(Math.round(totCorners * cornerShare1), 0, totCorners);
+    const corners2 = totCorners - corners1;
+
+    // --- Offsides: caught by the OPPONENT's high line / press, more when you attack more ---
+    const highLineOf = tc => (tc.defenseKey === 'high' || tc.defenseKey === 'man' || tc.transitionKey === 'gegenpress') ? 1.25 : 1;
+    const attackShare1 = t1S / Math.max(1, t1S + t2S);
+    const offsidesFor = (opponentLine, share) => Math.max(0, Math.round((1 + Math.random() * 3.5) * opponentLine * (0.6 + share) * (sim.wentToET ? 1.2 : 1)));
+    const offsides1 = offsidesFor(highLineOf(tactics.b), attackShare1);
+    const offsides2 = offsidesFor(highLineOf(tactics.a), 1 - attackShare1);
+
+    // --- Fouls: dirtier tactics and the side chasing the ball foul more; cards need fouls ---
     const foulBias1 = tactics.a.fouls || 1;
     const foulBias2 = tactics.b.fouls || 1;
-    const highLine1 = (tactics.a.defenseKey === 'high' || tactics.a.defenseKey === 'man' || tactics.a.transitionKey === 'gegenpress') ? 1.25 : 1;
-    const highLine2 = (tactics.b.defenseKey === 'high' || tactics.b.defenseKey === 'man' || tactics.b.transitionKey === 'gegenpress') ? 1.25 : 1;
-    const totCorners = 6 + Math.floor(Math.random() * 8) + Math.floor((t1S + t2S) / 5);
-    let corners1 = Math.round(totCorners * (poss1 / 100) + (t1S - t2S) * 0.15 + (Math.random() * 2 - 1));
-    corners1 = Math.max(0, Math.min(totCorners, corners1));
-    const corners2 = totCorners - corners1;
-    const offsides1 = Math.max(0, Math.round((1 + Math.random() * 4) * highLine1 * (0.7 + t1S / Math.max(1, t1S + t2S))));
-    const offsides2 = Math.max(0, Math.round((1 + Math.random() * 4) * highLine2 * (0.7 + t2S / Math.max(1, t1S + t2S))));
-    const totFouls = 12 + Math.floor(Math.random() * 12);
-    let fouls1 = Math.round(totFouls * (0.5 + (foulBias1 - foulBias2) * 0.18 + (Math.random() * 0.12 - 0.06)));
-    fouls1 = Math.max(3, Math.min(totFouls - 3, fouls1));
+    const cards1 = (sim.cards && sim.cards[1]) || 0;
+    const cards2 = (sim.cards && sim.cards[2]) || 0;
+    const floor1 = cards1 * 2, floor2 = cards2 * 2;
+    const totFouls = Math.max(Math.round((16 + Math.random() * 10) * etFactor), floor1 + floor2 + 4);
+    const foulShare1 = 0.5 + (foulBias1 - foulBias2) * 0.18 + (50 - poss1) * 0.002 + noise(0.06);
+    const fouls1 = clamp(Math.round(totFouls * foulShare1), Math.max(3, floor1), totFouls - Math.max(3, floor2));
     const fouls2 = totFouls - fouls1;
 
-    const barRow = (left, label, right, total, colorL = 'bg-blue-500', colorR = 'bg-red-500') => {
-        const safe = Math.max(1, total);
-        const wL = Math.round((left / safe) * 100);
+    // Bars are drawn from the two numbers themselves, so "43%" strings can no longer break the width.
+    const barRow = (left, label, right, fmt = v => v, colorL = 'bg-blue-500', colorR = 'bg-red-500') => {
+        const sum = left + right;
+        const wL = sum > 0 ? Math.round((left / sum) * 100) : 50;
         const wR = 100 - wL;
         return `
-        <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>${left}</span><span>${label}</span><span>${right}</span></div>
+        <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>${fmt(left)}</span><span>${label}</span><span>${fmt(right)}</span></div>
         <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden mb-3"><div class="${colorL} h-full" style="width:${wL}%"></div><div class="${colorR} h-full" style="width:${wR}%"></div></div>`;
     };
-    const onTargetTotal = Math.max(1, onTarget1 + onTarget2);
-    const cornersTotal = Math.max(1, corners1 + corners2);
-    const offsidesTotal = Math.max(1, offsides1 + offsides2);
-    const foulsTotal = Math.max(1, fouls1 + fouls2);
     const statBars = `
-        ${barRow(poss1 + '%', 'POSSESSION', (100 - poss1) + '%', 100)}
-        ${barRow(t1S, 'SHOTS', t2S, totShots)}
-        ${barRow(onTarget1, 'SHOTS ON TARGET', onTarget2, onTargetTotal)}
-        ${barRow(corners1, 'CORNERS', corners2, cornersTotal)}
-        ${barRow(offsides1, 'OFFSIDES', offsides2, offsidesTotal)}
-        ${barRow(fouls1, 'FOULS', fouls2, foulsTotal)}
+        ${barRow(poss1, 'POSSESSION', 100 - poss1, v => v + '%')}
+        ${barRow(t1S, 'SHOTS', t2S)}
+        ${barRow(onTarget1, 'SHOTS ON TARGET', onTarget2)}
+        ${barRow(corners1, 'CORNERS', corners2)}
+        ${barRow(offsides1, 'OFFSIDES', offsides2)}
+        ${barRow(fouls1, 'FOULS', fouls2)}
     `;
     document.getElementById('match-stats-bars').innerHTML = statBars;
     document.getElementById('match-stats-container').classList.remove('hidden');

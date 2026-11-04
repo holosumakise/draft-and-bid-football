@@ -201,7 +201,9 @@ function planLeagueAppearances(team) {
     const maxSubs = typeof MAX_SUBS === 'number' ? MAX_SUBS : 5;
     const appearances = [];
 
-    starters.forEach(slot => {
+    // Shuffle so the 5-sub cap isn't always eaten by the GK/defenders listed first.
+    const order = starters.slice().sort(() => Math.random() - 0.5);
+    order.forEach(slot => {
         let minutes = 90;
         let yellow = false;
         let red = false;
@@ -216,11 +218,16 @@ function planLeagueAppearances(team) {
         // Planned rotation / injury / tactical change — only if a bench option exists.
         if (!red && subsMade < maxSubs) {
             let subOff = false;
-            if (Math.random() < 0.14) {
-                minutes = 60 + Math.floor(Math.random() * 25); // 60–84
+            // Real-football substitution pattern: keepers almost never come off, forwards
+            // and midfielders get pulled most. ~3 changes per match on average.
+            const unit = unitOf(slot.pos);
+            const lateChance  = unit === 'GK' ? 0.005 : unit === 'DEF' ? 0.20 : unit === 'MID' ? 0.30 : 0.36;
+            const earlyChance = unit === 'GK' ? 0     : 0.05;
+            if (Math.random() < lateChance) {
+                minutes = 58 + Math.floor(Math.random() * 28); // 58–85
                 subOff = true;
-            } else if (Math.random() < 0.04) {
-                minutes = 45 + Math.floor(Math.random() * 20); // 45–64
+            } else if (Math.random() < earlyChance) {
+                minutes = 40 + Math.floor(Math.random() * 20); // 40–59 (injury / tactical)
                 subOff = true;
             }
             if (subOff) {
@@ -233,7 +240,7 @@ function planLeagueAppearances(team) {
                         player: slot.player, pos: slot.pos, minutes, yellow, red, fromStart: true
                     });
                     appearances.push({
-                        player: inn, pos: slot.pos, minutes: rest, yellow: false, red: false, fromStart: false
+                        player: inn, pos: slot.pos, minutes: rest, yellow: false, red: false, fromStart: false, replaces: slot.player.id
                     });
                     return;
                 }
@@ -251,7 +258,7 @@ function planLeagueAppearances(team) {
                     player: slot.player, pos: slot.pos, minutes, yellow, red, fromStart: true
                 });
                 appearances.push({
-                    player: inn, pos: slot.pos, minutes: rest, yellow: false, red: false, fromStart: false
+                    player: inn, pos: slot.pos, minutes: rest, yellow: false, red: false, fromStart: false, replaces: slot.player.id
                 });
                 return;
             }
@@ -271,6 +278,23 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
     const cleanSheet = goalsAgainst === 0;
     const appearances = planLeagueAppearances(team);
 
+    // The scoring model names players from the starting XI. If that starter was replaced,
+    // roll a minute for the goal/assist: after he left, the credit goes to his substitute.
+    const subFor = new Map();
+    const starterEntry = new Map();
+    appearances.forEach(e => {
+        if (e.fromStart) starterEntry.set(e.player.id, e);
+        else if (e.replaces != null) subFor.set(e.replaces, e);
+    });
+    const creditTo = id => {
+        const sub = subFor.get(id);
+        const st = starterEntry.get(id);
+        if (!sub || !st) return id;
+        return Math.random() * 90 >= st.minutes ? sub.player.id : id;
+    };
+    const goalCredits = trackScoring.goals.map(creditTo);
+    const assistCredits = trackScoring.assists.map(creditTo);
+
     appearances.forEach(entry => {
         const stats = playerStats[entry.player.id];
         if (!stats) return;
@@ -287,13 +311,9 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
             stats.goalsConcededAsGK += goalsAgainst * (entry.minutes / 90);
         }
 
-        // Goals/assists stay on the players the scoring model named (almost always starters).
-        const goalsByPlayer = entry.fromStart
-            ? trackScoring.goals.filter(id => id === entry.player.id).length
-            : 0;
-        const assistsByPlayer = entry.fromStart
-            ? trackScoring.assists.filter(id => id === entry.player.id).length
-            : 0;
+        // Goals/assists go to whoever was on the pitch when they happened (starter or sub).
+        const goalsByPlayer = goalCredits.filter(id => id === entry.player.id).length;
+        const assistsByPlayer = assistCredits.filter(id => id === entry.player.id).length;
         if (goalsByPlayer) stats.goals += goalsByPlayer;
         if (assistsByPlayer) stats.assists += assistsByPlayer;
 
