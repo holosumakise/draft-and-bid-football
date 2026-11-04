@@ -668,7 +668,7 @@ function renderAuctionPanel() {
         return `
             ${header}
             <div class="flex-1 flex flex-col justify-center gap-2">
-                <div class="text-center text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">${standing.length === 1 ? 'Only club left' : 'You hold the high bid'}</div>
+                ${standing.length > 1 ? '<div class="text-center text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">You hold the high bid</div>' : ''}
                 <div class="text-center text-2xl font-black leading-none text-amber-300">€${a.highBid}M</div>
                 <div class="text-center text-xs font-bold text-slate-400">is the price</div>
                 <button type="button" onclick="auctionControl('hammer')"
@@ -685,11 +685,6 @@ function renderAuctionPanel() {
     return `
         ${header}
         <div class="flex-1 flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-1">
-            <div class="text-center rounded-lg border border-emerald-600/60 bg-emerald-900/30 px-2 py-1.5">
-                <div class="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Your Turn</div>
-                <div class="text-lg font-black text-white leading-tight truncate">${escapeHTML(bidder ? bidder.name : '')}</div>
-                <div class="text-[11px] font-bold text-emerald-200/80">Max bid €${maxBid}M</div>
-            </div>
             <div class="flex items-center gap-1.5">
                 <input type="text" inputmode="numeric" autocomplete="off" id="bid-entry-field" value="${bidEntry}"
                     placeholder="Bid €${floor}M+" oninput="setBidEntry(this.value)"
