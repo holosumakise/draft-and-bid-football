@@ -57,9 +57,10 @@ function chooseLocal() {
         difficulty.classList.add('hidden');
         gameState.playerCount = 2;
     } else {
+        // Local Tournament allows 1–4 human managers (solo drafts against a ghost league).
         container.classList.remove('hidden');
         difficulty.classList.remove('hidden');
-        gameState.playerCount = Math.min(4, Math.max(2, parseInt(select.value, 10) || 4));
+        gameState.playerCount = Math.min(4, Math.max(1, parseInt(select.value, 10) || 4));
     }
     generateNameInputs();
     selectDifficulty(gameState.difficulty);
@@ -173,7 +174,7 @@ function startRoom() {
 function generateNameInputs() {
     const count = gameState.mode === 'H2H'
         ? 2
-        : Math.min(4, Math.max(2, parseInt(document.getElementById('player-count').value, 10) || 4));
+        : Math.min(4, Math.max(1, parseInt(document.getElementById('player-count').value, 10) || 4));
     gameState.playerCount = count;
     const container = document.getElementById('names-container');
     container.innerHTML = '';
