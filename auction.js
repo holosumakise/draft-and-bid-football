@@ -581,18 +581,24 @@ function auctionStatusChip(managerId) {
     const isTurn = !!a && a.status === 'open' && auctionCurrentBidderId() === managerId;
     const auto = !!a && auctionHasProxy(managerId);
     const offline = typeof Net !== 'undefined' && Net.online && typeof Net.isManagerConnected === 'function' && !Net.isManagerConnected(managerId);
+    const leading = !!a && a.highBidderId === managerId && a.highBid > 0;
     const label = !a ? '—'
         : a.out[managerId] ? 'OUT'
         : offline ? 'OFFLINE'
-        : a.highBidderId === managerId ? `HIGH €${a.highBid}M${auto ? ' · AUTO' : ''}`
+        : leading ? (auto ? 'AUTO' : '')
         : isTurn ? (auto ? 'AUTO…' : 'BIDDING') : (auto ? 'AUTO' : 'WAITING');
     const tone = a && a.out[managerId] ? 'text-slate-500 bg-slate-800 border-slate-700'
         : offline ? 'text-amber-300 bg-amber-950 border-amber-700'
-        : a && a.highBidderId === managerId ? 'text-emerald-300 bg-emerald-950 border-emerald-700'
+        : leading ? 'text-emerald-200 bg-emerald-900 border-emerald-500'
         : isTurn ? `text-${color}-300 bg-slate-800 border-${color}-500 animate-pulse`
         : auto ? 'text-cyan-300 bg-cyan-950 border-cyan-700'
         : 'text-slate-400 bg-slate-800 border-slate-700';
-    return `<span class="text-[10px] font-bold px-2 py-1 rounded-md border ${tone} whitespace-nowrap">${escapeHTML(m ? m.name : '?')}: ${label}</span>`;
+    // The leader's chip leads with the phrase instead of the name so it
+    // reads like a scoreboard line: "Current Bid: Alice - €8M".
+    const text = leading
+        ? `Current Bid: ${m ? m.name : '?'} - €${a.highBid}M${auto ? ' · AUTO' : ''}`
+        : `${m ? m.name : '?'}: ${label}`;
+    return `<span class="text-[10px] font-bold px-2 py-1 rounded-md border ${tone} whitespace-nowrap">${escapeHTML(text)}</span>`;
 }
 
 function renderAuctionPanel() {
@@ -612,7 +618,7 @@ function renderAuctionPanel() {
     const header = `
         <div class="w-full mb-2 shrink-0">
             <div class="flex items-center justify-between text-[10px] font-bold text-slate-400 mb-1 gap-2">
-                <span class="truncate">Live auction · ${a.highBid > 0 ? `high €${a.highBid}M (${escapeHTML(highBidderName)})` : `opens at €${MIN_BID}M`}</span>
+                <span class="truncate">Live auction · ${a.highBid > 0 ? `Current Bid: ${escapeHTML(highBidderName)} - €${a.highBid}M` : `opens at €${MIN_BID}M`}</span>
                 <span id="auction-clock" class="font-mono font-black text-amber-300 shrink-0">${Math.ceil(SHOT_CLOCK_MS / 1000)}s</span>
             </div>
             <div class="w-full h-1.5 rounded-full overflow-hidden bg-slate-700">
