@@ -96,7 +96,7 @@ function createTeamState(m) {
         .filter(Boolean);
     const assignedIds = new Set([...lineup, ...bench].map(slot => slot.player ? slot.player.id : slot.id));
     const reserves = m.squad.filter(player => !assignedIds.has(player.id));
-    return { id: m.id, name: m.name, lineup, bench, reserves, subs: 0, tactics: m.tactics || { mentality: 'balanced', press: 'mid' } };
+    return { id: m.id, name: m.name, lineup, bench, reserves, subs: 0, tactics: normalizeTactics(m.tactics) };
 }
 
 // Split strength into attack / midfield / defence (engine-core.js) so a
@@ -142,7 +142,7 @@ function weightedPick(entries) {
 
 // Position role weights for goal / assist distribution (lineup slot, not mainPos)
 
-function getGoal(t) {
+function getGoal(t, kind = 'open') {
     const scorerEntries = t.lineup
         .filter(l => l.player && l.pos !== 'GK' && l.player.mainPos !== 'GK')
         .map(l => {
@@ -151,11 +151,15 @@ function getGoal(t) {
             const pac = st.PAC ?? 70;
             const dri = st.DRI ?? 70;
             const pos = l.pos || p.mainPos;
-            const role = SCORER_ROLE[pos] ?? 0.6;
+            const openRole = SCORER_ROLE[pos] ?? 0.6;
+            const role = kind === 'setpiece' ? (SET_PIECE_SCORER_ROLE[pos] ?? openRole) : openRole;
             const finish = Math.pow(Math.max(40, sho) / 100, 1.55);
             const mobility = 0.14 * (pac / 100) + 0.12 * (dri / 100);
             const starBias = Math.pow(Math.max(55, p.rating ?? 70) / 100, 1.1);
-            return { item: p, weight: role * (finish * 0.72 + mobility * 0.28) * starBias * 100 };
+            let weight = role * (finish * 0.72 + mobility * 0.28) * starBias * 100;
+            // Counter goals run through the quickest players.
+            if (kind === 'counter') weight *= 0.72 + (pac / 100) * 0.75;
+            return { item: p, weight };
         });
 
     const scorer = weightedPick(scorerEntries) || { name: 'Own Goal', team: 'Unknown', id: -1, stats: {} };
@@ -165,8 +169,11 @@ function getGoal(t) {
     const avgPassing = outfield.length
         ? outfield.reduce((sum, slot) => sum + (slot.player.stats?.PAS ?? slot.player.rating ?? 70), 0) / outfield.length
         : 70;
-    // Stronger teams complete more assisted goals; still leave room for solo efforts
-    const assistChance = clamp(0.58 + ((avgPassing - 72) / 100) * 0.5, 0.48, 0.88);
+    // Stronger teams complete more assisted goals; still leave room for solo efforts.
+    // Set pieces are almost always delivered by a specialist.
+    const assistChance = kind === 'setpiece'
+        ? 0.82
+        : clamp(0.58 + ((avgPassing - 72) / 100) * 0.5, 0.48, 0.88);
 
     let assister = null;
     if (outfield.length && Math.random() < assistChance) {
@@ -176,7 +183,8 @@ function getGoal(t) {
             const passing = stats.PAS ?? player.rating ?? 70;
             const dribbling = stats.DRI ?? 70;
             const position = slot.pos || player.mainPos;
-            const role = ASSIST_ROLE[position] ?? 0.7;
+            const openRole = ASSIST_ROLE[position] ?? 0.7;
+            const role = kind === 'setpiece' ? (SET_PIECE_ASSIST_ROLE[position] ?? openRole) : openRole;
             const vision = Math.pow(Math.max(40, passing) / 100, 1.45);
             const carry = 0.16 * (dribbling / 100);
             const starBias = Math.pow(Math.max(55, player.rating ?? 70) / 100, 1.08);
@@ -189,16 +197,17 @@ function getGoal(t) {
         scorer: scorer.name,
         scorerId: scorer.id,
         assister: assister?.name || null,
-        assisterId: assister?.id ?? null
+        assisterId: assister?.id ?? null,
+        kind
     };
 }
 
 // --- Match-day tactics, ratings and substitutions ---
 
-let matchTactics = { mentality: 'balanced', press: 'mid' };
+let matchTactics = normalizeTactics(DEFAULT_TACTICS);
 
 function getTacticsMultipliers() {
-    return getTacticsMultipliersFor(matchTactics);
+    return getTacticsProfileFor(matchTactics);
 }
 
 function pctLabel(value) {
@@ -206,31 +215,64 @@ function pctLabel(value) {
     return `${pct > 0 ? '+' : ''}${pct}%`;
 }
 
+function tacticsOptionButton(kind, key, opt, active, extraClass = '') {
+    const selected = active
+        ? 'border-green-400 bg-green-500/15 text-green-300'
+        : 'border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400';
+    return `<button type="button" aria-pressed="${active ? 'true' : 'false'}" onclick="setTacticsOption('${kind}', '${key}')" class="text-left px-3 py-2 rounded-lg border transition ${selected} ${extraClass}">
+        <div class="text-xs font-bold leading-tight">${opt.label}</div>
+        <div class="text-[10px] leading-tight mt-0.5 ${active ? 'text-green-200/80' : 'text-slate-500'}">${opt.short}</div>
+    </button>`;
+}
+
 function renderTacticsOptions() {
-    document.getElementById('mentality-options').innerHTML = Object.entries(TACTICS_MENTALITY).map(([key, opt]) => {
-        const active = matchTactics.mentality === key;
-        return `<button type="button" onclick="setTacticsOption('mentality', '${key}')" class="py-2 rounded-lg text-sm font-bold border transition ${active ? 'border-green-400 bg-green-500 text-slate-900' : 'border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400'}">${opt.label}</button>`;
+    const possKeys = Object.keys(TACTICS_POSSESSION);
+    document.getElementById('attack-options').innerHTML = possKeys.map((key, index) => {
+        const opt = TACTICS_POSSESSION[key];
+        const span = possKeys.length % 2 === 1 && index === possKeys.length - 1 ? 'col-span-2' : '';
+        return tacticsOptionButton('possession', key, opt, matchTactics.possession === key, span);
     }).join('');
-    document.getElementById('press-options').innerHTML = Object.entries(TACTICS_PRESS).map(([key, opt]) => {
-        const active = matchTactics.press === key;
-        return `<button type="button" onclick="setTacticsOption('press', '${key}')" class="py-2 rounded-lg text-sm font-bold border transition ${active ? 'border-green-400 bg-green-500 text-slate-900' : 'border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400'}">${opt.label}</button>`;
-    }).join('');
+    document.getElementById('block-options').innerHTML = Object.entries(TACTICS_DEFENSE).map(([key, opt]) =>
+        tacticsOptionButton('defense', key, opt, matchTactics.defense === key)
+    ).join('');
+    document.getElementById('marking-options').innerHTML = Object.entries(TACTICS_TRANSITION).map(([key, opt]) =>
+        tacticsOptionButton('transition', key, opt, matchTactics.transition === key)
+    ).join('');
     updateTacticsSummary();
 }
 
 function setTacticsOption(kind, key) {
-    if (kind === 'mentality') matchTactics.mentality = key;
-    else if (kind === 'press') matchTactics.press = key;
+    if (kind === 'possession' && TACTICS_POSSESSION[key]) matchTactics.possession = key;
+    else if (kind === 'defense' && TACTICS_DEFENSE[key]) matchTactics.defense = key;
+    else if (kind === 'transition' && TACTICS_TRANSITION[key]) matchTactics.transition = key;
     renderTacticsOptions();
 }
 
 function updateTacticsSummary() {
-    const mul = getTacticsMultipliers();
+    const plan = normalizeTactics(matchTactics);
+    const profile = getTacticsProfileFor(plan);
+    const planLabel = `${TACTICS_POSSESSION[plan.possession].label} · ${TACTICS_DEFENSE[plan.defense].label} · ${TACTICS_TRANSITION[plan.transition].label}`;
+    const row = (label, value, good) => {
+        const tone = Math.abs(value - 1) < 0.005 ? 'text-slate-300' : good ? 'text-green-400' : 'text-red-400';
+        return `<div class="flex justify-between gap-3"><span>${label}</span><span class="font-bold ${tone}">${pctLabel(value)}</span></div>`;
+    };
+    const tips = [];
+    if (plan.defense === 'high' || plan.defense === 'man') tips.push('High engagement fades after 70′.');
+    if (plan.defense === 'low') tips.push('Low block gets harder to break late.');
+    if (plan.possession === 'positional' || plan.possession === 'central') tips.push('Possession play is exposed if transition is soft.');
+    if (plan.possession === 'direct') tips.push('Route One punishes high presses.');
+    if (plan.transition === 'gegenpress') tips.push('Gegenpressing costs stamina and cards.');
+    if (plan.transition === 'tacticalFoul') tips.push('Tactical fouling racks up cards and set pieces.');
+    if (plan.transition === 'counter' || plan.transition === 'restAttack') tips.push('Counter setups punish expansive opponents.');
     document.getElementById('tactics-summary').innerHTML = `
-        <div class="flex justify-between"><span>Chance creation</span><span class="font-bold ${mul.attack >= 1 ? 'text-green-400' : 'text-red-400'}">${pctLabel(mul.attack)}</span></div>
-        <div class="flex justify-between"><span>Goals conceded risk</span><span class="font-bold ${mul.concede <= 1 ? 'text-green-400' : 'text-red-400'}">${pctLabel(mul.concede)}</span></div>
-        <div class="flex justify-between"><span>Card risk</span><span class="font-bold ${mul.card <= 1 ? 'text-green-400' : 'text-red-400'}">${pctLabel(mul.card)}</span></div>
-        ${matchTactics.press === 'high' ? '<div class="text-[10px] text-amber-400 pt-1">High press fades after 70 minutes as legs tire.</div>' : ''}`;
+        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">${planLabel}</div>
+        ${row('Chance creation', profile.attack, profile.attack >= 1)}
+        ${row('Conceding risk', profile.concede, profile.concede <= 1)}
+        ${row('Control', 1 + profile.control, profile.control >= 0)}
+        ${row('Counter exposure', profile.transition, profile.transition <= 1)}
+        ${row('Card risk', profile.card, profile.card <= 1)}
+        ${row('Stamina cost', profile.stamina, profile.stamina <= 1)}
+        ${tips.length ? `<div class="text-[10px] text-amber-400 pt-1 leading-snug">${tips.slice(0, 2).join(' ')}</div>` : ''}`;
 }
 
 function confirmTactics() {
@@ -242,7 +284,7 @@ function confirmTactics() {
         const mId = pendingTacticsManagerId;
         pendingTacticsManagerId = null;
         const m = gameState.managers.find(x => x.id === mId);
-        m.tactics = { mentality: matchTactics.mentality, press: matchTactics.press };
+        m.tactics = normalizeTactics(matchTactics);
 
         m.formationLocked = true;
         renderPitchNodes(mId); renderBenchNodes(mId);
@@ -425,6 +467,7 @@ function simulateMatchSequence(t1, t2) {
         s1: 0, s2: 0,
         view: { s1: 0, s2: 0 },
         minuteCount: 0, lastGoalMinute: -15,
+        cards: { 1: 0, 2: 0 },
         ratings: {},
         penRes: null,
         penLine: null,
@@ -478,17 +521,108 @@ function finishOrExtraTime(sim) {
     });
 }
 
+function getTacticsProfileFor(tactics) {
+    const plan = normalizeTactics(tactics);
+    const poss = TACTICS_POSSESSION[plan.possession];
+    const defense = TACTICS_DEFENSE[plan.defense];
+    const trans = TACTICS_TRANSITION[plan.transition];
+    return {
+        plan,
+        possessionKey: plan.possession,
+        defenseKey: plan.defense,
+        transitionKey: plan.transition,
+        // Legacy aliases so older situational code still reads a key.
+        attackKey: plan.possession,
+        blockKey: plan.defense,
+        attack: poss.attack * defense.attack * trans.attack,
+        concede: defense.concede * trans.concede,
+        control: poss.control + defense.control + trans.control,
+        transition: poss.transition * defense.transition * trans.transition,
+        card: poss.card * defense.card * trans.card,
+        stamina: poss.stamina * defense.stamina * trans.stamina,
+        setPiece: poss.setPiece * defense.setPiece * trans.setPiece,
+        fouls: defense.fouls * trans.fouls,
+        counter: poss.counter * (trans.counter || 1),
+        vsDefense: poss.vsDefense
+    };
+}
+
+// Kept as an alias: older modules and saved games may call this name.
 function getTacticsMultipliersFor(tactics) {
-    if (!tactics) tactics = { mentality: 'balanced', press: 'mid' };
-    const mentality = TACTICS_MENTALITY[tactics.mentality] || TACTICS_MENTALITY.balanced;
-    const press = TACTICS_PRESS[tactics.press] || TACTICS_PRESS.mid;
-    return { attack: mentality.attack * press.attack, concede: mentality.concede * press.concede, card: press.card, pressKey: tactics.press || 'mid' };
+    return getTacticsProfileFor(tactics);
+}
+
+// The same plan meets a different plan: style-vs-block, marking-vs-attack,
+// control, counter exposure and set-piece pressure all land here so both the
+// live minute engine and the headless league simulator use one calculation.
+function getTacticsMatchupFor(tacticsA, tacticsB) {
+    const a = getTacticsProfileFor(tacticsA);
+    const b = getTacticsProfileFor(tacticsB);
+    const controlEdge = clamp(a.control - b.control, -0.45, 0.45);
+    const aStyle = (a.vsDefense && a.vsDefense[b.defenseKey]) || 1;
+    const bStyle = (b.vsDefense && b.vsDefense[a.defenseKey]) || 1;
+    const aSetPiece = 1 + ((a.setPiece * b.fouls) - 1) * TACTICS_SET_PIECE_ATTACK_WEIGHT;
+    const bSetPiece = 1 + ((b.setPiece * a.fouls) - 1) * TACTICS_SET_PIECE_ATTACK_WEIGHT;
+    // Opponent's transition exposure fuels your counter; your transition style multiplies how hard you hit it.
+    const aCounterBoost = Math.min(0.40, Math.max(0, b.transition - 1) * a.counter * TACTICS_COUNTER_SCALE);
+    const bCounterBoost = Math.min(0.40, Math.max(0, a.transition - 1) * b.counter * TACTICS_COUNTER_SCALE);
+    const aAttack = a.attack * aSetPiece * (1 + controlEdge * TACTICS_CONTROL_SCALE) * aStyle * (1 + aCounterBoost);
+    const bAttack = b.attack * bSetPiece * (1 - controlEdge * TACTICS_CONTROL_SCALE) * bStyle * (1 + bCounterBoost);
+    return {
+        a: {
+            ...a,
+            attack: aAttack,
+            concede: a.concede,
+            counterBoost: aCounterBoost,
+            controlEdge,
+            setPieceShare: clamp(TACTICS_SET_PIECE_GOAL_SHARE * a.setPiece * b.fouls, 0.04, 0.38)
+        },
+        b: {
+            ...b,
+            attack: bAttack,
+            concede: b.concede,
+            counterBoost: bCounterBoost,
+            controlEdge: -controlEdge,
+            setPieceShare: clamp(TACTICS_SET_PIECE_GOAL_SHARE * b.setPiece * a.fouls, 0.04, 0.38)
+        }
+    };
+}
+
+// Late-game life: pressing legs go, low blocks sit deeper, and the side chasing
+// the game leans into its attacking style.
+function getTacticsSituationalFor(sim, side, mul) {
+    let attack = mul.attack;
+    let concede = mul.concede;
+    const minute = sim.minuteCount;
+    const margin = side === 1 ? sim.s1 - sim.s2 : sim.s2 - sim.s1;
+    if (minute > 70) {
+        // High engagement and gegenpressing fade late.
+        if (mul.defenseKey === 'high' || mul.defenseKey === 'man') { attack *= 0.86; concede *= 1.06; }
+        if (mul.transitionKey === 'gegenpress') { attack *= 0.92; concede *= 1.05; }
+        if (mul.defenseKey === 'low' || mul.transitionKey === 'restDefense') concede *= 0.92;
+        // Chasing sides lean into vertical options.
+        if ((mul.possessionKey === 'direct' || mul.transitionKey === 'counter' || mul.transitionKey === 'restAttack') && margin < 0) {
+            attack *= 1.10; concede *= 1.04;
+        }
+        if ((mul.possessionKey === 'positional' || mul.possessionKey === 'central') && margin > 0) concede *= 0.95;
+        if (mul.possessionKey === 'overload' && margin < 0) { attack *= 1.08; concede *= 1.04; }
+        if (mul.possessionKey === 'spatial' && margin < 0) { attack *= 1.06; concede *= 1.03; }
+    }
+    return { attack, concede };
+}
+
+function pickGoalKind(mul) {
+    if (Math.random() < mul.setPieceShare) return 'setpiece';
+    const counterChance = clamp(mul.counterBoost * 1.4, 0, 0.45);
+    if (counterChance > 0 && Math.random() < counterChance) return 'counter';
+    return 'open';
 }
 
 /** Simulate + display a period minute-by-minute so subs can pause on dead balls. */
 function simulateMinute(sim, displayTime, isOT) {
     const { t1, t2 } = sim;
     sim.minuteCount++;
+    if (!sim.cards) sim.cards = { 1: 0, 2: 0 };
     // Minutes actually spent on the pitch, which added time and substitutions both extend.
     [t1, t2].forEach(tm => (tm.lineup || []).forEach(slot => { slot.min = (slot.min || 0) + 1; }));
     const events = [];
@@ -506,21 +640,14 @@ function simulateMinute(sim, displayTime, isOT) {
     const perMinute1 = EngineCore.goalChancePerMinute(expected.lambdaA);
     const perMinute2 = EngineCore.goalChancePerMinute(expected.lambdaB);
 
-    const mul1 = getTacticsMultipliersFor(t1.tactics);
-    const mul2 = getTacticsMultipliersFor(t2.tactics);
+    const matchup = getTacticsMatchupFor(t1.tactics, t2.tactics);
+    const mul1 = matchup.a;
+    const mul2 = matchup.b;
+    const sit1 = getTacticsSituationalFor(sim, 1, mul1);
+    const sit2 = getTacticsSituationalFor(sim, 2, mul2);
 
-    let attackMult1 = mul1.attack;
-    let concedeMult1 = mul1.concede;
-    if (mul1.pressKey === 'high' && sim.minuteCount > 70) attackMult1 *= 0.86;
-    if (mul1.pressKey === 'low' && sim.minuteCount > 70) concedeMult1 *= 0.94;
-
-    let attackMult2 = mul2.attack;
-    let concedeMult2 = mul2.concede;
-    if (mul2.pressKey === 'high' && sim.minuteCount > 70) attackMult2 *= 0.86;
-    if (mul2.pressKey === 'low' && sim.minuteCount > 70) concedeMult2 *= 0.94;
-
-    let chance1 = Math.max(0.005, perMinute1 * attackMult1 * concedeMult2);
-    let chance2 = Math.max(0.005, perMinute2 * attackMult2 * concedeMult1);
+    let chance1 = Math.max(0.005, perMinute1 * sit1.attack * sit2.concede);
+    let chance2 = Math.max(0.005, perMinute2 * sit2.attack * sit1.concede);
 
     if (isOT) { chance1 *= 0.5; chance2 *= 0.5; }
     // Teams feel each other out: goals are rarer in the opening minutes, easing back to normal by minute 7
@@ -533,17 +660,19 @@ function simulateMinute(sim, displayTime, isOT) {
     const roll = Math.random();
     if (roll < chance1) {
         sim.s1++; sim.lastGoalMinute = sim.minuteCount;
-        events.push({ type: 'goal', t: 1, ...getGoal(t1) });
+        events.push({ type: 'goal', t: 1, ...getGoal(t1, pickGoalKind(mul1)) });
     } else if (roll < chance1 + chance2) {
         sim.s2++; sim.lastGoalMinute = sim.minuteCount;
-        events.push({ type: 'goal', t: 2, ...getGoal(t2) });
+        events.push({ type: 'goal', t: 2, ...getGoal(t2, pickGoalKind(mul2)) });
     } else {
-        if (Math.random() < (isOT ? 0.005 : 0.015)) {
+        const cardChance = (isOT ? 0.005 : 0.015) * Math.max(0.5, (mul1.card + mul2.card) / 2);
+        if (Math.random() < cardChance) {
             const cardShare1 = mul1.card / (mul1.card + mul2.card);
             let tn = Math.random() < cardShare1 ? 1 : 2;
             const tm = tn === 1 ? t1 : t2;
             const p = pickRand(tm.lineup.filter(l => l.pos !== 'GK' && l.player));
             if (p) {
+                sim.cards[tn] = (sim.cards[tn] || 0) + 1;
                 p.yel++;
                 if (p.yel >= 2) {
                     tm.lineup = tm.lineup.filter(x => x !== p);
@@ -575,7 +704,7 @@ function getStaminaFade(slot, tactics) {
     if (played <= 0) return 0;
     const stats = (slot.player && slot.player.stats) || {};
     const engine = 1 + ((stats.PHY || 65) - 65) / 90 + ((stats.PAC || 65) - 65) / 260;
-    const running = tactics && tactics.press === 'high' ? 1.35 : tactics && tactics.press === 'low' ? 0.85 : 1;
+    const running = getTacticsProfileFor(tactics).stamina;
     return Math.min(0.18, played * 0.005 * running / Math.max(0.6, engine));
 }
 
@@ -725,6 +854,7 @@ function displayTimelineStep(step, sim) {
             cHtml = `
                 <div class="timeline-card animate-reveal">
                     <div class="font-bold text-slate-800 text-sm md:text-base flex items-center gap-1"><span class="text-[10px]">⚽</span> ${escapeHTML(e.scorer)}</div>
+                    ${e.kind === 'setpiece' ? '<div class="text-[9px] uppercase tracking-wider font-bold text-amber-600 mt-0.5">Set piece</div>' : e.kind === 'counter' ? '<div class="text-[9px] uppercase tracking-wider font-bold text-blue-600 mt-0.5">Counter</div>' : ''}
                     ${e.assister ? `<div class="text-[10px] text-blue-500 font-semibold mt-1 flex items-center gap-1"><span class="inline-block w-4 h-4 rounded-full bg-blue-100 text-blue-600 text-[9px] font-black flex items-center justify-center leading-none">A</span>${escapeHTML(e.assister)}</div>` : ''}
                     <div class="absolute ${isL?'-right-12':'-left-12'} top-1/2 -translate-y-1/2 font-black text-xl text-slate-800">${sim.view.s1}-${sim.view.s2}</div>
                 </div>`;
@@ -883,18 +1013,28 @@ function finishVisuals(sim) {
     const str1 = getStrength(t1) || 70;
     const str2 = getStrength(t2) || 70;
     const strRatio = str1 / (str1 + str2);
-    let poss1 = Math.round(strRatio * 100 + (Math.random() * 16 - 8));
+    // Control decides territory, so a possession plan shows up in the stats as
+    // well as in the scoreline.
+    const tactics = getTacticsMatchupFor(t1.tactics, t2.tactics);
+    const controlEdge = tactics.a.control - tactics.b.control;
+    let poss1 = Math.round(50 + controlEdge * 34 + (strRatio - 0.5) * 22 + (Math.random() * 8 - 4));
     poss1 = Math.max(30, Math.min(70, poss1));
+    const tacticTilt = clamp((tactics.a.attack * tactics.b.concede - tactics.b.attack * tactics.a.concede) * 5, -5, 5);
     const totShots = 8 + Math.floor(Math.random() * 14) + s1 + s2;
-    let t1S = Math.round(totShots * (poss1 / 100) + (s1 - s2) * 0.8 + (Math.random() * 3 - 1.5));
+    let t1S = Math.round(totShots * (poss1 / 100) + (s1 - s2) * 0.8 + tacticTilt + (Math.random() * 3 - 1.5));
     t1S = Math.max(1, Math.min(totShots - 1, t1S));
     const t2S = totShots - t1S;
+    const cards1 = sim.cards ? (sim.cards[1] || 0) : 0;
+    const cards2 = sim.cards ? (sim.cards[2] || 0) : 0;
+    const cardTotal = Math.max(1, cards1 + cards2);
 
     const statBars = `
         <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>${poss1}%</span><span>POSSESSION</span><span>${100 - poss1}%</span></div>
         <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden mb-3"><div class="bg-blue-500 h-full" style="width:${poss1}%"></div><div class="bg-red-500 h-full" style="width:${100 - poss1}%"></div></div>
         <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>${t1S}</span><span>SHOTS</span><span>${t2S}</span></div>
-        <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden"><div class="bg-blue-500 h-full" style="width:${(t1S / totShots) * 100}%"></div><div class="bg-red-500 h-full" style="width:${(t2S / totShots) * 100}%"></div></div>
+        <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden mb-3"><div class="bg-blue-500 h-full" style="width:${(t1S / totShots) * 100}%"></div><div class="bg-red-500 h-full" style="width:${(t2S / totShots) * 100}%"></div></div>
+        <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>${cards1}</span><span>CARDS</span><span>${cards2}</span></div>
+        <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden"><div class="bg-yellow-400 h-full" style="width:${(cards1 / cardTotal) * 100}%"></div><div class="bg-orange-500 h-full" style="width:${(cards2 / cardTotal) * 100}%"></div></div>
     `;
     document.getElementById('match-stats-bars').innerHTML = statBars;
     document.getElementById('match-stats-container').classList.remove('hidden');
@@ -909,7 +1049,7 @@ function finishVisuals(sim) {
     if (actualS1 !== actualS2 || penRes) triggerConfetti();
 
 
-    sim.stats = { poss1, t1S, t2S, onTarget1, onTarget2 };
+    sim.stats = { poss1, t1S, t2S, onTarget1, onTarget2, cards1, cards2 };
     broadcastMatch(sim);
 
     if (gameState.currentMatchData?.isEurope && typeof onEuropeMatchFinished === 'function') {

@@ -233,8 +233,8 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
     teamB.lineup = selectActiveLineup(teamB);
 
     try {
-        // ATT/MID/DEF edge + home advantage, then the same tactics multipliers the
-        // live engine uses. Home advantage is a small nudge, not a different model.
+        // ATT/MID/DEF edge + home advantage, then the same full match-plan matchup
+        // the live engine uses. Home advantage is a small nudge, not a different model.
         const breakdownA = getStrengthBreakdown(teamA);
         const breakdownB = getStrengthBreakdown(teamB);
         const edge = EngineCore.matchupEdge(breakdownA, breakdownB);
@@ -244,10 +244,9 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
             coefficient: MATCH_STRENGTH_COEFFICIENT,
             homeAdvantage: LEAGUE_HOME_ADVANTAGE
         });
-        const mulA = getTacticsMultipliersFor(teamA.tactics);
-        const mulB = getTacticsMultipliersFor(teamB.tactics);
-        const lambdaA = clamp(expected.lambdaA * mulA.attack * mulB.concede, 0.2, 4.0);
-        const lambdaB = clamp(expected.lambdaB * mulB.attack * mulA.concede, 0.2, 4.0);
+        const tactics = getTacticsMatchupFor(teamA.tactics, teamB.tactics);
+        const lambdaA = clamp(expected.lambdaA * tactics.a.attack * tactics.b.concede, 0.2, 4.0);
+        const lambdaB = clamp(expected.lambdaB * tactics.b.attack * tactics.a.concede, 0.2, 4.0);
 
         let goalsForA = EngineCore.samplePoisson(lambdaA);
         let goalsForB = EngineCore.samplePoisson(lambdaB);
@@ -257,13 +256,19 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
 
         const goalIdsA = [], assistIdsA = [];
         for (let index = 0; index < goalsForA; index++) {
-            const goal = getGoal(teamA);
+            const kind = Math.random() < tactics.a.setPieceShare
+                ? 'setpiece'
+                : (Math.random() < clamp(tactics.a.counterBoost * 1.4, 0, 0.45) ? 'counter' : 'open');
+            const goal = getGoal(teamA, kind);
             if (goal.scorerId >= 0) goalIdsA.push(goal.scorerId);
             if (goal.assisterId != null) assistIdsA.push(goal.assisterId);
         }
         const goalIdsB = [], assistIdsB = [];
         for (let index = 0; index < goalsForB; index++) {
-            const goal = getGoal(teamB);
+            const kind = Math.random() < tactics.b.setPieceShare
+                ? 'setpiece'
+                : (Math.random() < clamp(tactics.b.counterBoost * 1.4, 0, 0.45) ? 'counter' : 'open');
+            const goal = getGoal(teamB, kind);
             if (goal.scorerId >= 0) goalIdsB.push(goal.scorerId);
             if (goal.assisterId != null) assistIdsB.push(goal.assisterId);
         }

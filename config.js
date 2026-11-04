@@ -40,7 +40,7 @@ const DRAFT_OVR_MIN_WEIGHT = 0.25;
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // a room older than this is treated as expired and deleted when someone touches it
 // Bump on every deploy. A room records the build that created it and refuses guests
 // running a different one, so host and guests never simulate with different rules.
-const BUILD_ID = '2026-11-03.4';
+const BUILD_ID = '2026-11-04.2';
 
 // Once the room's skips are gone, an unwanted player is handed to one club picked at
 // random. The wheel spins this long, then pauses before the sale is announced.
@@ -238,14 +238,184 @@ const AWARD_FORMULAS = {
     world:    { perf: 1.0, big: 0.9, euro: 0.9, league: 0.5, prestige: 1.0 }   // continental stage + star power
 };
 
-const TACTICS_MENTALITY = {
-    defensive: { label: 'Defensive', attack: 0.82, concede: 0.72 },
-    balanced: { label: 'Balanced', attack: 1.00, concede: 1.00 },
-    attacking: { label: 'Attacking', attack: 1.22, concede: 1.14 }
-};
-const TACTICS_PRESS = {
-    low: { label: 'Low', attack: 0.94, concede: 0.90, card: 0.70 },
-    mid: { label: 'Mid', attack: 1.00, concede: 1.00, card: 1.00 },
-    high: { label: 'High', attack: 1.08, concede: 1.10, card: 1.45 }
-};
+// --- Match plan ---
+// Three independent phases from modern coaching: how you build in possession,
+// how you defend out of possession, and how you handle the moments of transition.
+// Each profile feeds chance creation, control, counters, cards, stamina and set pieces.
+const DEFAULT_TACTICS = Object.freeze({ possession: 'positional', defense: 'mid', transition: 'balanced' });
+
+// In Possession (Build-Up & Attacking)
+const TACTICS_POSSESSION = Object.freeze({
+    positional: {
+        label: 'Positional Play',
+        short: 'Zones, triangles, fluid rotations',
+        attack: 1.05, control: 0.16, transition: 1.06, card: 0.96, stamina: 1.02, setPiece: 1.00, counter: 0.88,
+        vsDefense: { high: 0.96, mid: 1.03, low: 1.06, zonal: 1.02, man: 0.98 }
+    },
+    lavolpiana: {
+        label: 'La Salida Lavolpiana',
+        short: 'DM drops between CBs; fullbacks bomb on',
+        attack: 1.06, control: 0.12, transition: 1.08, card: 0.97, stamina: 1.06, setPiece: 0.98, counter: 0.92,
+        vsDefense: { high: 1.00, mid: 1.04, low: 1.02, zonal: 1.03, man: 0.99 }
+    },
+    spatial: {
+        label: 'Spatial Exploitation',
+        short: 'Half-spaces & Zone 14',
+        attack: 1.10, control: 0.08, transition: 1.05, card: 0.98, stamina: 1.04, setPiece: 1.02, counter: 1.00,
+        vsDefense: { high: 1.02, mid: 1.05, low: 0.98, zonal: 1.04, man: 1.01 }
+    },
+    overload: {
+        label: 'Overloads & Isolation',
+        short: 'Load one flank, switch to the free man',
+        attack: 1.13, control: 0.03, transition: 1.06, card: 1.02, stamina: 1.08, setPiece: 1.04, counter: 1.06,
+        vsDefense: { high: 1.05, mid: 1.04, low: 1.00, zonal: 1.05, man: 0.97 }
+    },
+    central: {
+        label: 'Central Overloads',
+        short: 'False 9 & inverted fullbacks',
+        attack: 1.08, control: 0.14, transition: 1.10, card: 0.97, stamina: 1.10, setPiece: 0.96, counter: 0.94,
+        vsDefense: { high: 1.01, mid: 1.05, low: 1.00, zonal: 1.03, man: 0.98 }
+    },
+    direct: {
+        label: 'Route One',
+        short: 'Bypass midfield; target-man hold-up',
+        attack: 1.09, control: -0.14, transition: 0.92, card: 1.04, stamina: 1.02, setPiece: 1.14, counter: 1.18,
+        vsDefense: { high: 1.10, mid: 0.98, low: 0.92, zonal: 0.97, man: 1.04 }
+    }
+});
+
+// Out of Possession (Defending)
+const TACTICS_DEFENSE = Object.freeze({
+    high: {
+        label: 'High Press',
+        short: 'High engagement line; squeeze space',
+        attack: 1.07, concede: 1.10, control: 0.12, transition: 1.16, card: 1.32, stamina: 1.34, setPiece: 0.98, fouls: 1.18
+    },
+    mid: {
+        label: 'Mid Block',
+        short: 'Balanced engagement line and shape',
+        attack: 1.00, concede: 0.98, control: 0.02, transition: 1.00, card: 1.00, stamina: 1.00, setPiece: 1.00, fouls: 1.00
+    },
+    low: {
+        label: 'Low Block',
+        short: 'Deep Catenaccio shape; protect the box',
+        attack: 0.88, concede: 0.80, control: -0.18, transition: 0.86, card: 0.82, stamina: 0.88, setPiece: 0.94, fouls: 0.90
+    },
+    zonal: {
+        label: 'Zonal Mid Block',
+        short: 'Guard zones; pass on runners',
+        attack: 0.99, concede: 0.96, control: 0.04, transition: 0.97, card: 0.90, stamina: 0.96, setPiece: 1.00, fouls: 0.88
+    },
+    man: {
+        label: 'Man-to-Man Press',
+        short: 'Track runners; disrupt creators',
+        attack: 1.04, concede: 0.94, control: -0.02, transition: 1.08, card: 1.28, stamina: 1.20, setPiece: 1.02, fouls: 1.26
+    }
+});
+
+// Transitions (Change of Possession)
+const TACTICS_TRANSITION = Object.freeze({
+    gegenpress: {
+        label: 'Gegenpressing',
+        short: 'Swarm the ball the second it is lost',
+        attack: 1.04, concede: 1.06, control: 0.06, transition: 1.22, card: 1.18, stamina: 1.28, setPiece: 0.98, fouls: 1.12,
+        counter: 0.85
+    },
+    restDefense: {
+        label: 'Rest-Defense',
+        short: 'Structure while attacking; kill counters',
+        attack: 0.96, concede: 0.88, control: 0.02, transition: 0.82, card: 0.94, stamina: 0.94, setPiece: 1.00, fouls: 0.95,
+        counter: 0.90
+    },
+    counter: {
+        label: 'Counter-Attack',
+        short: 'Vertical transition the moment you win it',
+        attack: 1.08, concede: 1.04, control: -0.08, transition: 0.96, card: 1.02, stamina: 1.06, setPiece: 1.02, fouls: 1.00,
+        counter: 1.28
+    },
+    restAttack: {
+        label: 'Rest-Attack',
+        short: 'Leave forwards high as outlets',
+        attack: 1.06, concede: 1.08, control: -0.06, transition: 1.04, card: 1.00, stamina: 1.04, setPiece: 0.98, fouls: 0.98,
+        counter: 1.20
+    },
+    balanced: {
+        label: 'Balanced',
+        short: 'Standard recover and progress',
+        attack: 1.00, concede: 1.00, control: 0.00, transition: 1.00, card: 1.00, stamina: 1.00, setPiece: 1.00, fouls: 1.00,
+        counter: 1.00
+    },
+    tacticalFoul: {
+        label: 'Tactical Fouling',
+        short: 'Stop the counter with a foul high up',
+        attack: 0.98, concede: 0.94, control: 0.00, transition: 0.90, card: 1.35, stamina: 0.98, setPiece: 1.06, fouls: 1.40,
+        counter: 0.95
+    }
+});
+
+// How hard control, counters and set pieces pull on the final goal rates.
+const TACTICS_CONTROL_SCALE = 0.18;
+const TACTICS_COUNTER_SCALE = 0.45;
+const TACTICS_SET_PIECE_ATTACK_WEIGHT = 0.22;
+const TACTICS_SET_PIECE_GOAL_SHARE = 0.16;
+
+// Set-piece goals favour aerial defenders and front-post strikers rather than
+// the usual open-play finishers.
+const SET_PIECE_SCORER_ROLE = Object.freeze({
+    CB: 2.4, ST: 1.9, CF: 1.5, CDM: 1.2,
+    LB: 0.9, RB: 0.9, LWB: 0.8, RWB: 0.8,
+    CAM: 0.8, CM: 0.7, LM: 0.6, RM: 0.6, LW: 0.7, RW: 0.7
+});
+const SET_PIECE_ASSIST_ROLE = Object.freeze({
+    CAM: 2.4, LM: 2.0, RM: 2.0, CM: 1.8,
+    LB: 1.6, RB: 1.6, LWB: 1.5, RWB: 1.5,
+    LW: 1.4, RW: 1.4, CDM: 1.0, ST: 0.5, CF: 0.6, CB: 0.6
+});
+
+// Saves and older rooms may still hold { attackStyle, block, marking } or the
+// even older { mentality, press }. Map those onto the new three-phase plan.
+function normalizeTactics(tactics) {
+    const source = tactics || {};
+    const validPoss = TACTICS_POSSESSION[source.possession];
+    const validDef = TACTICS_DEFENSE[source.defense];
+    const validTrans = TACTICS_TRANSITION[source.transition];
+    if (validPoss && validDef && validTrans) {
+        return { possession: source.possession, defense: source.defense, transition: source.transition };
+    }
+
+    // Migrate from the previous attackStyle / block / marking shape.
+    let possession = source.possession;
+    if (!TACTICS_POSSESSION[possession]) {
+        const legacyAttack = source.attackStyle
+            || (source.mentality === 'attacking' ? 'overload' : source.mentality === 'defensive' ? 'direct' : null);
+        const attackMap = {
+            positional: 'positional', tiki: 'positional', overload: 'overload',
+            direct: 'direct', inverted: 'central'
+        };
+        possession = attackMap[legacyAttack] || DEFAULT_TACTICS.possession;
+    }
+
+    let defense = source.defense;
+    if (!TACTICS_DEFENSE[defense]) {
+        const legacyBlock = source.block
+            || (source.press === 'high' ? 'high' : source.press === 'low' ? 'low' : null);
+        if (source.marking === 'man') defense = 'man';
+        else if (source.marking === 'zonal' && (legacyBlock === 'mid' || !legacyBlock)) defense = 'zonal';
+        else defense = TACTICS_DEFENSE[legacyBlock] ? legacyBlock : DEFAULT_TACTICS.defense;
+    }
+
+    let transition = source.transition;
+    if (!TACTICS_TRANSITION[transition]) {
+        if (source.block === 'high' || source.press === 'high') transition = 'gegenpress';
+        else if (source.attackStyle === 'direct') transition = 'counter';
+        else if (source.block === 'low' || source.press === 'low') transition = 'restDefense';
+        else transition = DEFAULT_TACTICS.transition;
+    }
+
+    return {
+        possession: TACTICS_POSSESSION[possession] ? possession : DEFAULT_TACTICS.possession,
+        defense: TACTICS_DEFENSE[defense] ? defense : DEFAULT_TACTICS.defense,
+        transition: TACTICS_TRANSITION[transition] ? transition : DEFAULT_TACTICS.transition
+    };
+}
 const PEN_KICK_DELAY = 1100;

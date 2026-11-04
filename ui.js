@@ -1069,7 +1069,7 @@ function openTacticsModalForManager(mId) {
     pendingTacticsManagerId = mId;
     const m = gameState.managers.find(x => x.id === mId);
     document.getElementById('tactics-matchup').innerText = `${m.name} Tactics`;
-    matchTactics = { mentality: 'balanced', press: 'mid', ...(m.tactics || {}) };
+    matchTactics = normalizeTactics(m.tactics);
     renderTacticsOptions();
     const modal = document.getElementById('tactics-modal'), panel = document.getElementById('tactics-panel');
     modal.classList.remove('hidden'); modal.classList.add('flex');

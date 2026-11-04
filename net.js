@@ -612,7 +612,7 @@ function serializeManagerOwn(m) {
         formationLocked: !!m.formationLocked,
         formation: (m.formation || []).map(n => ({ id: n.id, x: n.x, y: n.y, isGK: !!n.isGK, pos: n.pos, assignedPlayerId: n.assignedPlayerId ?? null })),
         bench: (m.bench || []).map(n => ({ id: n.id, pos: n.pos, assignedPlayerId: n.assignedPlayerId ?? null })),
-        tactics: m.tactics ? { mentality: m.tactics.mentality, press: m.tactics.press } : null
+        tactics: m.tactics ? normalizeTactics(m.tactics) : null
     };
 }
 

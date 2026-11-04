@@ -264,7 +264,7 @@ const Online = {
             if (!Net.canControl(id) || (this.restoreOwnPending && Array.isArray(own.formation))) {
                 if (Array.isArray(own.formation)) m.formation = own.formation.map(fillNode);
                 if (Array.isArray(own.bench)) m.bench = own.bench.map(fillBenchNode);
-                if (own.tactics) m.tactics = { mentality: own.tactics.mentality || 'balanced', press: own.tactics.press || 'mid' };
+                if (own.tactics) m.tactics = normalizeTactics(own.tactics);
                 m.formationPreset = own.formationPreset || '4-4-2';
                 m.formationLocked = !!own.formationLocked;
             }
@@ -392,11 +392,15 @@ const Online = {
         const bars = document.getElementById('match-stats-bars');
         if (!bars) return;
         const total = Math.max(1, s.t1S + s.t2S);
+        const cards1 = s.cards1 || 0, cards2 = s.cards2 || 0;
+        const cardTotal = Math.max(1, cards1 + cards2);
         bars.innerHTML = `
             <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>${s.poss1}%</span><span>POSSESSION</span><span>${100 - s.poss1}%</span></div>
             <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden mb-3"><div class="bg-blue-500 h-full" style="width:${s.poss1}%"></div><div class="bg-red-500 h-full" style="width:${100 - s.poss1}%"></div></div>
             <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>${s.t1S}</span><span>SHOTS</span><span>${s.t2S}</span></div>
-            <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden"><div class="bg-blue-500 h-full" style="width:${(s.t1S / total) * 100}%"></div><div class="bg-red-500 h-full" style="width:${(s.t2S / total) * 100}%"></div></div>`;
+            <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden mb-3"><div class="bg-blue-500 h-full" style="width:${(s.t1S / total) * 100}%"></div><div class="bg-red-500 h-full" style="width:${(s.t2S / total) * 100}%"></div></div>
+            <div class="flex justify-between text-xs font-bold text-slate-500 mb-1"><span>${cards1}</span><span>CARDS</span><span>${cards2}</span></div>
+            <div class="w-full bg-slate-200 h-2 rounded flex overflow-hidden"><div class="bg-yellow-400 h-full" style="width:${(cards1 / cardTotal) * 100}%"></div><div class="bg-orange-500 h-full" style="width:${(cards2 / cardTotal) * 100}%"></div></div>`;
         document.getElementById('match-stats-container')?.classList.remove('hidden');
     },
 
