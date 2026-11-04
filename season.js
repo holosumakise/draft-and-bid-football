@@ -489,13 +489,101 @@ function startGhostSeason() {
         ghostStatsById[ghost.id] = initGhostTeamStats(ghost);
     });
 
-    let lastSnapshot = null;
     const humanSeries = {};
     humans.forEach(team => {
         humanSeries[team.id] = { id: team.id, name: team.name, managerId: team.managerId, positions: [], results: [] };
     });
 
-    for (let matchday = 1; matchday <= SEASON_MATCHDAYS; matchday++) {
+    _seasonRun = {
+        allTeams, humans, ghosts, schedule, table, rowsById,
+        playerStatsByManager, ghostStatsById, humanSeries, lastSnapshot: null
+    };
+
+    // Half-way through the league the managers get a transfer window. It needs at
+    // least two human clubs: ghost clubs never trade, so a solo league has no
+    // possible partner and goes straight to the second half.
+    const midSeason = Math.floor(SEASON_MATCHDAYS / 2);
+    const windowAvailable = typeof openTransferWindow === 'function'
+        && gameState.managers.length >= 2;
+    if (!windowAvailable) {
+        playSeasonMatchdays(1, SEASON_MATCHDAYS);
+        return finishGhostSeason();
+    }
+    playSeasonMatchdays(1, midSeason);
+    openTransferWindow(_seasonRun, () => {
+        playSeasonMatchdays(midSeason + 1, SEASON_MATCHDAYS);
+        finishGhostSeason();
+    });
+}
+
+let _seasonRun = null; // kept out of gameState on purpose (it holds the whole fixture list)
+
+// The mid-season pause is the only moment a league exists across two turns, so
+// it is the only point that needs a JSON-safe copy for SaveGame. Teams travel as
+// data and the fixture list as team ids; restoreSeasonRun() puts the object
+// references back together.
+function serializeSeasonRun(run) {
+    if (!run || !Array.isArray(run.allTeams)) return null;
+    return {
+        teams: run.allTeams.map(team => ({
+            id: team.id, name: team.name, isGhost: !!team.isGhost, managerId: team.managerId ?? null,
+            lineup: team.lineup || [], bench: team.bench || [], reserves: team.reserves || [],
+            subs: team.subs || 0, tactics: team.tactics || null
+        })),
+        schedule: (run.schedule || []).map(matchday => matchday.map(pair => [pair[0].id, pair[1].id])),
+        humanIds: (run.humans || []).map(team => team.id),
+        ghostIds: (run.ghosts || []).map(team => team.id),
+        table: (run.table || []).map(row => ({ ...row })),
+        playerStatsByManager: run.playerStatsByManager || {},
+        ghostStatsById: run.ghostStatsById || {},
+        humanSeries: run.humanSeries || {},
+        lastSnapshot: run.lastSnapshot || null
+    };
+}
+
+function restoreSeasonRun(data) {
+    if (!data || !Array.isArray(data.teams) || !Array.isArray(data.schedule)) return null;
+    const teams = data.teams.map(team => ({
+        id: team.id, name: team.name, isGhost: !!team.isGhost, managerId: team.managerId ?? null,
+        lineup: team.lineup || [], bench: team.bench || [], reserves: team.reserves || [],
+        subs: team.subs || 0, tactics: team.tactics || null
+    }));
+    const byId = new Map(teams.map(team => [String(team.id), team]));
+    const schedule = data.schedule.map(matchday => matchday.map(pair => {
+        const a = byId.get(String(pair[0]));
+        const b = byId.get(String(pair[1]));
+        return a && b ? [a, b] : null;
+    }).filter(Boolean));
+    const table = (data.table || []).map(row => ({ ...row }));
+    return {
+        allTeams: teams,
+        humans: (data.humanIds || []).map(id => byId.get(String(id))).filter(Boolean),
+        ghosts: (data.ghostIds || []).map(id => byId.get(String(id))).filter(Boolean),
+        schedule,
+        table,
+        rowsById: new Map(table.map(row => [row.id, row])),
+        playerStatsByManager: data.playerStatsByManager || {},
+        ghostStatsById: data.ghostStatsById || {},
+        humanSeries: data.humanSeries || {},
+        lastSnapshot: data.lastSnapshot || null
+    };
+}
+
+// Resume a league that was saved while the transfer window was open.
+function resumeMidSeasonTransfer(savedWindow, run) {
+    if (!run || typeof openTransferWindow !== 'function') return false;
+    const midSeason = Math.floor(SEASON_MATCHDAYS / 2);
+    _seasonRun = run;
+    openTransferWindow(run, () => {
+        playSeasonMatchdays(midSeason + 1, SEASON_MATCHDAYS);
+        finishGhostSeason();
+    }, savedWindow);
+    return true;
+}
+
+function playSeasonMatchdays(from, to) {
+    const { schedule, table, rowsById, playerStatsByManager, ghostStatsById, humanSeries } = _seasonRun;
+    for (let matchday = from; matchday <= to; matchday++) {
         for (const [teamA, teamB] of schedule[matchday - 1]) {
             const statsA = getSeasonStatsForTeam(teamA, playerStatsByManager, ghostStatsById);
             const statsB = getSeasonStatsForTeam(teamB, playerStatsByManager, ghostStatsById);
@@ -514,13 +602,17 @@ function startGhostSeason() {
             if (humanSeries[row.id]) humanSeries[row.id].positions.push(row._pos);
         });
 
-        lastSnapshot = ranked.map(row => ({
+        _seasonRun.lastSnapshot = ranked.map(row => ({
             id: row.id, name: row.name, isHuman: row.isHuman, managerId: row.managerId,
             p: row.p, w: row.w, d: row.d, l: row.l,
             gf: row.gf, ga: row.ga, gd: row.gd, pts: row.pts, pos: row._pos
         }));
     }
+}
 
+function finishGhostSeason() {
+    const { table, playerStatsByManager, ghostStatsById, humanSeries, lastSnapshot } = _seasonRun;
+    const ghosts = _seasonRun.ghosts;
     const colors = ['#34d399', '#60a5fa', '#f472b6', '#fbbf24'];
     const seriesList = Object.values(humanSeries).map((series, index) => ({ ...series, color: colors[index % colors.length] }));
     gameState.season = {
@@ -540,6 +632,7 @@ function startGhostSeason() {
     if (matchdayLabel) matchdayLabel.classList.add('md-pulse');
     buildSeasonChartChrome();
     animateSeasonChart(0);
+    _seasonRun = null;
 }
 
 function applyMatchResult(row, gf, ga, result) {

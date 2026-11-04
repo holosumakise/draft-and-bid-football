@@ -291,6 +291,17 @@ function resumeSavedGame() {
     updateRollButton();
     checkMatchReady();
 
+    // A local save made during the mid-season pause carries the league run and
+    // the transfer market, so put the manager straight back into that window.
+    if (snapshot.seasonRun && snapshot.transfer
+        && typeof restoreSeasonRun === 'function' && typeof resumeMidSeasonTransfer === 'function') {
+        const run = restoreSeasonRun(snapshot.seasonRun);
+        if (run && resumeMidSeasonTransfer(snapshot.transfer, run)) {
+            showToast('Mid-season transfer window restored.');
+            return;
+        }
+    }
+
     if (gameState.season && Array.isArray(gameState.season.finalTable) && gameState.season.finalTable.length) {
         showScreen('screen-season-results');
         showSeasonResults();

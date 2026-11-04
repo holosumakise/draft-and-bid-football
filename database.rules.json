@@ -48,6 +48,9 @@
           "match": {
             ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
           },
+          "transfer": {
+            ".write": "auth != null && root.child('rooms').child($code).child('meta/hostId').val() === auth.uid"
+          },
           "managers": {
             "$slot": {
               "host": {

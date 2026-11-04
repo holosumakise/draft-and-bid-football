@@ -57,6 +57,7 @@ const Online = {
         this.mirrorSeen = 0;
         this.mirrorKey = null;
         this.pendingManagers = null;
+        if (typeof TransferWindow !== 'undefined' && TransferWindow.clear) TransferWindow.clear();
         this.note('');
         this.applyGuestLock();
     },
@@ -157,6 +158,7 @@ const Online = {
         Net.publishNow('season', null);
         Net.publishNow('europe', null);
         Net.publishNow('match', null);
+        Net.publishNow('transfer', null);
         Net.publishScreen('screen-game');
     },
 
@@ -176,6 +178,15 @@ const Online = {
             const seat = Number(slot);
             if (!Number.isFinite(claimed) || claimed !== seat) return;
             applyAuctionAction(seat, (payload && payload.action) || {});
+            return;
+        }
+        if (type === 'transfer') {
+            const claimed = Number(payload && payload.managerId);
+            const seat = Number(slot);
+            if (!Number.isFinite(claimed) || claimed !== seat) return;
+            if (typeof TransferWindow !== 'undefined' && TransferWindow.hostAction) {
+                TransferWindow.hostAction(seat, payload.action, payload);
+            }
         }
     },
 
@@ -203,7 +214,7 @@ const Online = {
         this.onHostStart(meta);
         const game = room.game || {};
         this.restoreOwnPending = true;
-        ['info', 'managers', 'draft', 'auction', 'match', 'season', 'europe', 'screen'].forEach(key => {
+        ['info', 'managers', 'draft', 'auction', 'match', 'season', 'europe', 'transfer', 'screen'].forEach(key => {
             if (game[key] !== undefined && game[key] !== null) this.onState(key, game[key]);
         });
         this.restoreOwnPending = false;
@@ -228,6 +239,7 @@ const Online = {
             case 'match': this.applyMatch(value); break;
             case 'season': this.applySeason(value); break;
             case 'europe': this.applyEurope(value); break;
+            case 'transfer': this.applyTransfer(value); break;
         }
     },
 
@@ -331,6 +343,9 @@ const Online = {
         if (screenId === 'screen-lobby' || screenId === 'screen-main') {
             this.gameLive = screenId !== 'screen-main';
         }
+        // The transfer screen is created on demand, so build it before the raw
+        // screen switch tries to activate it.
+        if (screenId === 'screen-transfer-window' && typeof TransferWindow !== 'undefined') TransferWindow.showGuest();
         showScreenLocal(screenId);
         if (screenId === 'screen-season' && gameState.season) this.playSeasonChart();
         if (screenId === 'screen-season-results' && gameState.season) showSeasonResults();
@@ -437,6 +452,13 @@ const Online = {
         gameState.season = season;
         if (document.getElementById('screen-season')?.classList.contains('active')) this.playSeasonChart();
         if (document.getElementById('screen-season-results')?.classList.contains('active')) showSeasonResults();
+    },
+
+    // The host owns the transfer window; a guest only renders its snapshot and
+    // sends commands for its own club.
+    applyTransfer(state) {
+        if (typeof TransferWindow === 'undefined' || !TransferWindow.applySnapshot) return;
+        TransferWindow.applySnapshot(state);
     },
 
     // Clients get the finished table, so they replay the chart at their own pace.

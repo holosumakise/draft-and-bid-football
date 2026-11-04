@@ -45,6 +45,12 @@ const SaveGame = {
     },
 
     snapshot() {
+        // Only the mid-season pause has a live league run worth saving; at every
+        // other time _seasonRun is null.
+        const liveRun = (typeof _seasonRun !== 'undefined' && _seasonRun && typeof serializeSeasonRun === 'function')
+            ? serializeSeasonRun(_seasonRun) : null;
+        const transfer = (typeof TransferWindow !== 'undefined' && TransferWindow.persist)
+            ? TransferWindow.persist() : null;
         return {
             version: 2,
             savedAt: Date.now(),
@@ -61,7 +67,9 @@ const SaveGame = {
                 _gkPhaseToast: !!gameState._gkPhaseToast
             },
             availablePlayers,
-            nextPlayerId
+            nextPlayerId,
+            seasonRun: liveRun,
+            transfer
         };
     },
 

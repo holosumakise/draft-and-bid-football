@@ -345,7 +345,7 @@ const Net = {
             const managers = this.roomRef.child('game/managers');
             this.listeners.push([managers, managers.on('value', v => Online.onManagersNode(v.val()))]);
         } else {
-            ['draft', 'auction', 'managers', 'info', 'screen', 'season', 'europe', 'match'].forEach(key => {
+            ['draft', 'auction', 'managers', 'info', 'screen', 'season', 'europe', 'match', 'transfer'].forEach(key => {
                 const ref = this.roomRef.child('game').child(key);
                 this.listeners.push([ref, ref.on('value', v => this.onGameState(key, v.val()))]);
             });
@@ -516,6 +516,14 @@ const Net = {
     publishScreen(screenId) { this.publish('screen', screenId); },
     publishSeason() { this.publishNow('season', serializeSeason(gameState.season)); },
     publishEurope() { this.publishNow('europe', serializeEurope(gameState.europe)); },
+    publishTransfer() {
+        if (!this.online || !this.isHost) return;
+        this.publish('transfer', (typeof TransferWindow !== 'undefined' && TransferWindow) ? TransferWindow.snapshot() : null);
+    },
+    publishTransferNow() {
+        if (!this.online || !this.isHost || !this.roomRef) return;
+        this.publishNow('transfer', (typeof TransferWindow !== 'undefined' && TransferWindow) ? TransferWindow.snapshot() : null);
+    },
     publishMatch(value) { this.publish('match', value); },
 
     // --- client side ---
@@ -561,7 +569,7 @@ const Net = {
     },
 
     onGameState(key, value) {
-        if (value === null && key !== 'draft' && key !== 'auction') return;
+        if (value === null && key !== 'draft' && key !== 'auction' && key !== 'transfer') return;
         const handler = this._handlers.onState;
         if (handler) handler(key, value);
     },
