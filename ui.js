@@ -373,70 +373,91 @@ function renderDOMForManagers() {
     const n = gameState.managers.length;
     let gridCls, pitchCls;
     if (n === 1) {
-        gridCls = 'grid grid-cols-1 max-w-xl mx-auto gap-6 mb-6 w-full';
-        pitchCls = 'grid grid-cols-1 max-w-md mx-auto gap-8 w-full';
+        gridCls = 'grid-cols-1 max-w-xl mx-auto';
+        pitchCls = 'grid-cols-1 max-w-md mx-auto';
     } else if (n === 2) {
-        gridCls = 'grid grid-cols-1 md:grid-cols-2 gap-6 mb-6';
-        pitchCls = 'grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12';
+        gridCls = 'grid-cols-1 md:grid-cols-2';
+        pitchCls = 'grid-cols-1 md:grid-cols-2';
     } else if (n === 3) {
-        gridCls = 'grid grid-cols-1 md:grid-cols-3 gap-4 mb-6';
-        pitchCls = 'grid grid-cols-1 md:grid-cols-3 gap-6';
+        gridCls = 'grid-cols-1 md:grid-cols-3';
+        pitchCls = 'grid-cols-1 md:grid-cols-3';
     } else {
-        gridCls = 'grid grid-cols-1 md:grid-cols-2 gap-6 mb-6';
-        pitchCls = 'grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12';
+        gridCls = 'grid-cols-1 md:grid-cols-2';
+        pitchCls = 'grid-cols-1 md:grid-cols-2';
     }
-    infoContainer.className = gridCls;
-    pitchContainer.className = pitchCls;
-    
+    infoContainer.className = `managers-grid ${gridCls}`;
+    pitchContainer.className = `pitches-grid ${pitchCls}`;
+
     const colors = ['blue', 'red', 'purple', 'orange'];
 
     gameState.managers.forEach((m, idx) => {
         const c = colors[idx % colors.length];
-        
+        const locked = !!m.formationLocked;
+        const canEdit = Net.canControl(m.id);
+        const presetKey = m.formationPreset || '4-4-2';
+        const presetOptions = Object.keys(FORMATION_PRESETS).map(key => `
+            <option value="${key}" ${presetKey === key ? 'selected' : ''}>${FORMATION_PRESETS[key].label || key}</option>`).join('');
+
         infoContainer.innerHTML += `
-            <div id="manager-card-${m.id}" class="bg-slate-800 rounded-xl p-4 border-l-4 border-${c}-500 flex flex-col">
-                <div class="flex justify-between items-center mb-1">
-                    <h3 class="text-xl font-bold text-white flex items-center gap-2 min-w-0">
-                        <span class="truncate">${escapeHTML(m.name)}</span>
-                        <span id="m${m.id}-conn" class="hidden text-[9px] font-black uppercase tracking-wider text-amber-300 bg-amber-950 border border-amber-700 rounded px-1.5 py-0.5 shrink-0">Reconnecting</span>
-                    </h3>
-                    <div class="text-right">
-                        <div class="text-sm font-bold text-yellow-400">Team OVR: <span id="m${m.id}-ovr-live">0</span></div>
-                        <div class="text-xs font-bold text-slate-400"><span id="m${m.id}-count">0</span>/${MAX_SQUAD_SIZE} Squad</div>
+            <div id="manager-card-${m.id}" class="manager-card" data-accent="${c}">
+                <div class="manager-card__top">
+                    <div class="manager-avatar">M${m.id}</div>
+                    <div style="min-width:0;flex:1;">
+                        <h3 class="manager-card__name">
+                            <span>${escapeHTML(m.name)}</span>
+                            <span id="m${m.id}-conn" class="hidden text-[9px] font-black uppercase tracking-wider text-amber-300 bg-amber-950 border border-amber-700 rounded px-1.5 py-0.5 shrink-0">Reconnecting</span>
+                        </h3>
+                        <div class="manager-card__meta">Team OVR <b id="m${m.id}-ovr-live">0</b> · <span id="m${m.id}-count">0</span>/${MAX_SQUAD_SIZE} squad</div>
+                    </div>
+                    <div class="manager-card__balance" id="m${m.id}-balance-wrap">
+                        <span id="m${m.id}-balance">€1.00B</span>
+                        <small>Balance</small>
                     </div>
                 </div>
-                <p class="text-green-400 font-mono text-xl mb-3" id="m${m.id}-balance">€1.00B</p>
-                <div id="m${m.id}-budget" class="mb-3 hidden">
-                    <div class="flex justify-between items-center text-[10px] font-bold mb-1 gap-2">
-                        <span class="text-slate-400 truncate">Available <span id="m${m.id}-maxbid" class="text-emerald-400 font-mono">€0M</span></span>
-                        <span class="text-slate-400 truncate">Reserved <span id="m${m.id}-reserve" class="text-amber-400 font-mono">€0M</span></span>
+
+                <div id="m${m.id}-budget" class="budget-track hidden">
+                    <div class="budget-track__labels">
+                        <span>Available <b id="m${m.id}-maxbid">€0M</b></span>
+                        <span>Reserved <i id="m${m.id}-reserve">€0M</i></span>
                     </div>
-                    <div class="w-full h-1.5 rounded-full overflow-hidden bg-slate-700 flex" title="Green = available to bid · Amber = reserved to fill remaining starting XI slots">
-                        <div id="m${m.id}-budget-bar" class="h-full bg-emerald-500 transition-all duration-300" style="width:100%"></div>
-                        <div id="m${m.id}-reserve-bar" class="h-full bg-amber-500 transition-all duration-300" style="width:0%"></div>
+                    <div class="budget-track__bar" title="Green = available to bid · Amber = reserved to fill remaining starting XI slots">
+                        <div id="m${m.id}-budget-bar" style="width:100%;background:#34d399"></div>
+                        <div id="m${m.id}-reserve-bar" style="width:0%;background:#fbbf24"></div>
                     </div>
                 </div>
-                <div id="m${m.id}-chem" class="mb-3 text-[10px] leading-tight text-slate-400"></div>
-                <div class="bg-slate-900 rounded border border-slate-700 flex flex-col h-32 text-sm">
-                    <div class="p-2 overflow-y-auto custom-scrollbar flex-1"><ul id="m${m.id}-squad" class="space-y-1 text-slate-300"></ul></div>
+
+                <div id="m${m.id}-chem" class="chem-line"></div>
+
+                <div class="squad-list-wrap">
+                    <div class="squad-list-head">Squad <span>Tap a player for card</span></div>
+                    <ul id="m${m.id}-squad" class="squad-list"></ul>
                 </div>
             </div>`;
 
         pitchContainer.innerHTML += `
-            <div class="flex flex-col items-center">
-                <h3 class="text-lg font-bold mb-1 text-${c}-400">${escapeHTML(m.name)} Formation</h3>
-                <p id="m${m.id}-formation-hint" class="text-[10px] text-slate-400 text-center mb-2 max-w-[400px] leading-tight"></p>
+            <div class="pitch-wrap" data-accent="${c}">
+                <div class="pitch-team">
+                    <h3>${escapeHTML(m.name)} <span>XI</span></h3>
+                    <span class="pitch-team__ovr">${locked ? 'Locked' : 'Drafting'}</span>
+                </div>
+                <div class="formation-bar">
+                    <label for="formation-${m.id}">Formation</label>
+                    <select id="formation-${m.id}" class="formation-select" disabled>
+                        ${presetOptions}
+                    </select>
+                </div>
+                <p id="m${m.id}-formation-hint" class="pitch-hint"></p>
                 <div class="pitch" id="pitch-${m.id}">
                     <div class="center-circle"></div><div class="center-dot"></div>
                     <div class="penalty-box-top"></div><div class="six-yard-top"></div>
                     <div class="penalty-box-bottom"></div><div class="six-yard-bottom"></div>
                 </div>
-                <div class="w-full mt-4 max-w-[400px]">
-                    <h4 class="text-sm font-bold text-slate-400 text-center mb-1">Bench (${BENCH_SLOTS} slots)</h4>
-                    <div id="bench-${m.id}" class="bench-area"></div>
+                <div class="bench-label">Bench · ${BENCH_SLOTS} slots</div>
+                <div id="bench-${m.id}" class="bench-area"></div>
+                <div class="pitch-actions">
+                    <button id="lock-btn-${m.id}" onclick="lockFormation(${m.id})" class="btn btn--primary">${locked ? 'Formation Locked' : 'Confirm Formation'}</button>
+                    <button onclick="autoFillLineup(${m.id})" id="autofill-btn-${m.id}" class="btn btn--dark">Auto-fill Best XI</button>
                 </div>
-                <button id="lock-btn-${m.id}" onclick="lockFormation(${m.id})" class="mt-4 w-full max-w-[400px] py-3 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold border border-slate-500 transition shadow-lg text-white">Confirm Formation</button>
-                <button onclick="autoFillLineup(${m.id})" id="autofill-btn-${m.id}" class="mt-2 w-full max-w-[400px] py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold border border-blue-400 transition shadow-lg text-white">Auto-fill Best XI</button>
             </div>`;
     });
 
@@ -450,6 +471,8 @@ function renderDOMForManagers() {
                 const btn = document.getElementById(id);
                 if (btn) { btn.disabled = true; btn.classList.add('opacity-40', 'cursor-not-allowed'); }
             });
+            const select = document.getElementById(`formation-${m.id}`);
+            if (select) select.disabled = true;
             const hint = document.getElementById(`m${m.id}-formation-hint`);
             if (hint) hint.innerHTML = '<span class="text-slate-500 italic">This manager sets their own XI on their device.</span>';
         });
@@ -466,32 +489,29 @@ function updateConnectionBadge(id) {
 
 function updateDashboard(id) {
     const m = gameState.managers.find(x => x.id === id);
-    if(!m) return;
-    
+    if (!m) return;
+
     const balEl = document.getElementById(`m${id}-balance`);
+    const balWrap = document.getElementById(`m${id}-balance-wrap`);
     const isSolo = gameState.managers.length === 1;
-    
-    if (balEl) {
-        if (isSolo) {
-            balEl.classList.add('hidden');
-        } else {
-            balEl.innerText = formatBalance(m.balance);
-            balEl.classList.remove('hidden');
-        }
+
+    if (balWrap) {
+        if (isSolo) balWrap.classList.add('hidden');
+        else balWrap.classList.remove('hidden');
     }
+    if (balEl && !isSolo) balEl.innerText = formatBalance(m.balance);
 
     updateConnectionBadge(id);
-    
+
     document.getElementById(`m${id}-count`).innerText = m.squad.length;
     const list = document.getElementById(`m${id}-squad`);
-    list.innerHTML = m.squad.length === 0 ? '<li class="text-slate-500 italic">Empty.</li>' : m.squad.map(p => `
-        <li class="flex justify-between items-center bg-slate-800 p-1.5 rounded mb-1 border border-slate-700 text-xs">
-            <div class="flex items-center min-w-0 w-full overflow-hidden">
-                <span class="font-bold text-slate-400 text-[10px] min-w-[55px] max-w-[65px] shrink-0 border-r border-slate-600 mr-2 truncate text-left pr-1">${escapeHTML(formatPositions(p))}</span>
-                <span class="text-slate-100 font-semibold truncate flex-1">${escapeHTML(p.name)}</span>
-            </div>
-            ${!isSolo ? `<span class="text-green-400 font-bold ml-2 shrink-0">€${p.price}M</span>` : ''}
-        </li>`).join('');
+    if (!list) return;
+    list.innerHTML = m.squad.length === 0
+        ? '<li class="squad-empty">No players yet.</li>'
+        : m.squad.map(p => renderSquadRow(p, {
+            managerId: m.id,
+            price: isSolo ? null : p.price
+        })).join('');
 
     updateBudgetTracker(id);
     updateChemistryDisplay(id);
@@ -531,18 +551,16 @@ function updateChemistryDisplay(id) {
 
     const chem = getFormationChemistry(m);
     if (!chem.players.length) {
-        el.innerHTML = '<span class="text-slate-500">🧪 Chemistry: place players to build nation links.</span>';
+        el.innerHTML = '<b>Chemistry</b> · place players to build nation links.';
         return;
     }
 
     const groups = getChemistryGroups(chem.players);
     const detail = groups.length
-        ? groups.map(group => `<span class="text-slate-300">${escapeHTML(group.nation)} ${group.count}×</span> <span class="text-emerald-400 font-bold">+${group.bonus}</span>`).join(' · ')
-        : '<span class="text-slate-500">No nation links in the XI.</span>';
+        ? groups.map(group => `<span>${escapeHTML(group.nation)} ${group.count}×</span> <em>+${group.bonus}</em>`).join(' · ')
+        : '<span>No nation links in the XI.</span>';
 
-    el.innerHTML = `
-        <div class="font-bold text-slate-400">🧪 Chemistry</div>
-        <div class="mt-0.5 truncate" title="${escapeHTML(groups.map(group => `${group.nation} ${group.count}× +${group.bonus}`).join(' · '))}">${detail}</div>`;
+    el.innerHTML = `<b>Chemistry</b> · ${detail}`;
 }
 
 function updateTeamOVR(id) {
@@ -591,12 +609,39 @@ function formationOvrInfo(player, node, chemBonus) {
 
 function renderPitchNodes(managerId) {
     const pitch = document.getElementById(`pitch-${managerId}`);
+    if (!pitch) return;
     pitch.querySelectorAll('.pitch-node').forEach(n => n.remove());
+    pitch.querySelectorAll('.chem-lines').forEach(n => n.remove());
     const m = gameState.managers.find(x => x.id === managerId);
+    if (!m) return;
     const chemistry = getFormationChemistry(m);
     // In an online room a rival's pitch is a preview: no handles, no dragging.
     const editable = !m.formationLocked && Net.canControl(managerId);
-    
+
+    // Draw nation links under the tokens so the XI reads at a glance.
+    const groups = getChemistryGroups(chemistry.players);
+    if (groups.length) {
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('class', 'chem-lines');
+        svg.setAttribute('viewBox', '0 0 100 100');
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('aria-hidden', 'true');
+        groups.forEach(group => {
+            const key = String(group.nation || 'World').trim().toLowerCase();
+            const points = m.formation
+                .map(node => ({ node, player: m.squad.find(p => p.id === node.assignedPlayerId) }))
+                .filter(item => item.player && chemistryKeyOf(item.player) === key)
+                .map(item => `${item.node.x},${item.node.y}`);
+            if (points.length < 2) return;
+            const line = document.createElementNS(svgNS, 'polyline');
+            line.setAttribute('points', points.join(' '));
+            line.setAttribute('class', `chem-line${group.bonus >= CHEMISTRY.STRONG_BONUS ? ' is-strong' : ''}`);
+            svg.appendChild(line);
+        });
+        if (svg.childNodes.length) pitch.appendChild(svg);
+    }
+
     m.formation.forEach(nodeData => {
         const el = document.createElement('div'); el.className = 'pitch-node';
         el.style.left = `${nodeData.x}%`; el.style.top = `${nodeData.y}%`;
@@ -604,22 +649,22 @@ function renderPitchNodes(managerId) {
         el.dataset.nodeId = String(nodeData.id);
         el.dataset.slotType = 'pitch';
         const player = m.squad.find(p => p.id === nodeData.assignedPlayerId);
-        const color = nodeData.isGK ? 'bg-yellow-500' : 'bg-slate-700';
 
         const chemBonus = player ? (chemistry.bonuses.get(player.id) || 0) : 0;
         const ovrInfo = player ? formationOvrInfo(player, nodeData, chemBonus) : null;
         const chemRing = chemBonus >= CHEMISTRY.STRONG_BONUS ? 'chem-strong' : (chemBonus > 0 ? 'chem-warm' : '');
+        const gkClass = nodeData.isGK ? 'pitch-node-circle--gk' : '';
 
-    el.innerHTML = `
-        <div class="relative">
-            <div class="pitch-node-circle ${color} ${chemRing} ${m.formationLocked ? 'locked' : ''} ${nodeData.isGK ? 'gk-fixed' : ''}">
-                <span class="node-pos font-bold">${nodeData.pos}</span>
+        el.innerHTML = `
+            <div class="relative">
+                <div class="pitch-node-circle ${gkClass} ${chemRing} ${m.formationLocked ? 'locked' : ''} ${nodeData.isGK ? 'gk-fixed' : ''}">
+                    ${player ? `<span class="node-ovr">${ovrInfo.label}</span>` : ''}
+                    <span class="node-pos">${nodeData.pos}</span>
+                </div>
+                ${editable && !player ? `<button onclick="openPlayerSelect(${m.id}, ${nodeData.id}, 'pitch')" class="pitch-node__add" title="Assign player">+</button>` : ''}
+                ${editable && player ? `<button onclick="removePlayerFromNode(${m.id}, ${nodeData.id}, 'pitch')" class="pitch-node__remove" title="Remove player">&times;</button>` : ''}
             </div>
-            ${editable && !player ? `<button onclick="openPlayerSelect(${m.id}, ${nodeData.id}, 'pitch')" class="absolute -top-2 -right-2 bg-green-500 text-slate-900 rounded-full w-5 h-5 flex items-center justify-center font-black shadow z-20">+</button>` : ''}
-            ${editable && player ? `<button onclick="removePlayerFromNode(${m.id}, ${nodeData.id}, 'pitch')" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center font-black shadow z-20">&times;</button>` : ''}
-        </div>
-        ${player ? `<div class="pitch-node-label flex flex-col items-center leading-none pb-1" title="${escapeHTML(player.team || 'Player')}${chemBonus ? ` · Chemistry +${chemBonus}` : ''}"><span class="text-white text-[10px] truncate w-14 text-center mt-0.5">${escapeHTML(shortName(player.name))}</span><span class="${ovrInfo.color}">${ovrInfo.label}${chemBonus ? ` <span class="text-emerald-300 text-[9px] font-black">+${chemBonus}</span>` : ''}</span></div>` : ''}
-    `;
+            ${player ? `<div class="pitch-node-label" title="${escapeHTML(player.team || 'Player')}${chemBonus ? ` · Chemistry +${chemBonus}` : ''}"><span>${escapeHTML(shortName(player.name))}</span>${chemBonus ? `<i>+${chemBonus}</i>` : ''}</div>` : ''}`;
         pitch.appendChild(el);
         if (!nodeData.isGK && editable) makeDraggable(el, pitch, m, nodeData);
     });
@@ -627,8 +672,10 @@ function renderPitchNodes(managerId) {
 
 function renderBenchNodes(managerId) {
     const container = document.getElementById(`bench-${managerId}`);
+    if (!container) return;
     container.innerHTML = '';
     const m = gameState.managers.find(x => x.id === managerId);
+    if (!m) return;
     const editable = !m.formationLocked && Net.canControl(managerId);
     m.bench.forEach(nodeData => {
         const el = document.createElement('div'); el.className = 'bench-node';
@@ -638,12 +685,12 @@ function renderBenchNodes(managerId) {
         const player = m.squad.find(p => p.id === nodeData.assignedPlayerId);
         el.innerHTML = `
             <div class="bench-circle ${player ? 'filled' : ''}">
-                ${player ? `<span class="truncate px-1 text-[10px] text-white">${escapeHTML(shortName(player.name))}</span>` : `<span class="text-[10px]">SUB</span>`}
+                ${player
+                    ? `<span class="bench-ovr">${player.displayOVR ?? player.rating}</span><span class="bench-name">${escapeHTML(shortName(player.name))}</span>`
+                    : '<span>SUB</span>'}
             </div>
-            ${editable && !player ? `<button onclick="openPlayerSelect(${m.id}, '${nodeData.id}', 'bench')" class="absolute -top-2 -right-2 bg-slate-500 text-white rounded-full w-5 h-5 flex items-center justify-center font-black shadow z-20">+</button>` : ''}
-            ${editable && player ? `<button onclick="removePlayerFromNode(${m.id}, '${nodeData.id}', 'bench')" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center font-black shadow z-20">&times;</button>` : ''}
-            ${player ? `<div class="pitch-node-label mt-1 text-[9px]"><span class="${player.rank ? 'text-amber-300' : 'text-green-400'}">${player.displayOVR ?? player.rating}</span></div>` : ''}
-        `;
+            ${editable && !player ? `<button onclick="openPlayerSelect(${m.id}, '${nodeData.id}', 'bench')" class="pitch-node__add" title="Assign bench player">+</button>` : ''}
+            ${editable && player ? `<button onclick="removePlayerFromNode(${m.id}, '${nodeData.id}', 'bench')" class="pitch-node__remove" title="Remove bench player">&times;</button>` : ''}`;
         container.appendChild(el);
         if (player && editable) makeBenchDraggable(el, m, nodeData);
     });
@@ -910,61 +957,118 @@ function makeDraggable(element, container, m, nodeData) {
 }
 
 // --- Modals ---
-let modalState = { managerId: null, nodeId: null, type: null, timer: null };
+let modalState = { managerId: null, nodeId: null, type: null, filter: 'ALL', timer: null };
+
+function pickerFilterOf(player) {
+    const pos = player && player.mainPos;
+    if (pos === 'GK') return 'GK';
+    if (['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(pos)) return 'DEF';
+    if (['CDM', 'CM', 'CAM', 'LM', 'RM'].includes(pos)) return 'MID';
+    if (['LW', 'RW', 'CF', 'ST'].includes(pos)) return 'ATT';
+    return 'MID';
+}
+
+function pickerMatchesFilter(player, filter) {
+    return filter === 'ALL' || pickerFilterOf(player) === filter;
+}
+
+function renderPickerFilters(avail) {
+    const wrap = document.getElementById('picker-filters');
+    if (!wrap) return;
+    const filters = [
+        { key: 'ALL', label: 'All' },
+        { key: 'GK', label: 'GK' },
+        { key: 'DEF', label: 'DEF' },
+        { key: 'MID', label: 'MID' },
+        { key: 'ATT', label: 'ATT' }
+    ];
+    wrap.innerHTML = filters.map(item => {
+        const count = item.key === 'ALL' ? avail.length : avail.filter(player => pickerFilterOf(player) === item.key).length;
+        return `<button type="button" class="picker-filter ${modalState.filter === item.key ? 'is-active' : ''}" onclick="setPickerFilter('${item.key}')">${item.label} <span style="opacity:.55">${count}</span></button>`;
+    }).join('');
+}
+
+function setPickerFilter(filter) {
+    modalState.filter = filter;
+    renderPlayerPickerList();
+}
+
+function renderPlayerPickerList() {
+    const m = gameState.managers.find(x => x.id === modalState.managerId);
+    if (!m) return;
+    const node = modalState.type === 'pitch'
+        ? m.formation.find(n => n.id === modalState.nodeId)
+        : m.bench.find(n => n.id === modalState.nodeId);
+    if (!node) return;
+
+    const assigned = [...m.formation, ...m.bench].map(n => n.assignedPlayerId).filter(id => id);
+    const avail = m.squad.filter(player => !assigned.includes(player.id));
+    renderPickerFilters(avail);
+
+    const filtered = avail.filter(player => pickerMatchesFilter(player, modalState.filter));
+    filtered.sort((a, b) => {
+        const av = node.pos === 'SUB' ? a.rating : getDynamicOVR(a, node.pos);
+        const bv = node.pos === 'SUB' ? b.rating : getDynamicOVR(b, node.pos);
+        return bv - av || b.rating - a.rating;
+    });
+
+    const list = document.getElementById('modal-player-list');
+    if (!list) return;
+    list.innerHTML = filtered.length ? filtered.map(player => {
+        const dOvr = node.pos === 'SUB' ? player.rating : getDynamicOVR(player, node.pos);
+        const isFit = node.pos === 'SUB' || dOvr >= player.rating - 1;
+        const fitText = node.pos === 'SUB'
+            ? `OVR ${player.rating}`
+            : `OVR at ${node.pos}: <b>${Math.round(dOvr)}</b>${isFit ? ' · natural' : ''}`;
+        return `
+            <div class="picker-card" role="button" tabindex="0" onclick="assignPlayer(${player.id})"
+                 onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();assignPlayer(${player.id})}">
+                ${renderPlayerCard(player, { size: 'md' })}
+                <span class="picker-card__fit">${fitText}</span>
+                <button type="button" class="picker-card__info" title="View full card"
+                    onclick="event.stopPropagation();openPlayerCard(${player.id}, ${m.id})">i</button>
+            </div>`;
+    }).join('') : '<div class="picker-empty">No available players for this slot.</div>';
+}
+
 function openPlayerSelect(mId, nId, type) {
     clearLineupSelection();
     clearTimeout(modalState.timer);
-    modalState = { managerId: mId, nodeId: nId, type, timer: null };
+    modalState = { managerId: mId, nodeId: nId, type, filter: 'ALL', timer: null };
     const m = gameState.managers.find(x => x.id === mId);
+    if (!m) return;
     const node = type === 'pitch' ? m.formation.find(n => n.id === nId) : m.bench.find(n => n.id === nId);
-    document.getElementById('modal-pos-name').innerText = node.pos;
-    const assigned = [...m.formation, ...m.bench].map(n => n.assignedPlayerId).filter(id => id);
-    const avail = m.squad.filter(p => !assigned.includes(p.id));
-    
-    const list = document.getElementById('modal-player-list');
-    list.innerHTML = avail.length ? avail.map(p => {
-        const dOvr = getDynamicOVR(p, node.pos);
-        const isFit = node.pos === 'SUB' || dOvr >= p.rating - 1;
-        let label, color;
-        if (isFit && p.rank) {
-            label = p.displayOVR;
-            color = p.rank === 'GOAT' ? 'text-amber-300' : 'text-fuchsia-300';
-        } else {
-            label = String(Math.min(100, dOvr));
-            color = node.pos === 'SUB' ? 'text-green-400' : (dOvr < p.rating * 0.7 ? 'text-red-400' : (dOvr < p.rating ? 'text-yellow-400' : 'text-green-400'));
-        }
-        return `
-            <div class="flex justify-between items-center bg-slate-700 p-3 rounded-lg border border-slate-600">
-                <div>
-                    <div class="font-bold text-white text-lg">${escapeHTML(p.name)}</div>
-                    <div class="text-xs text-slate-300">Pos: ${escapeHTML(formatPositions(p))}${p.team ? ' · ' + escapeHTML(p.team) : ''}</div>
-                </div>
-                <div class="flex items-center gap-3">
-                    <div class="text-right"><div class="text-[10px] text-slate-400 uppercase">OVR</div><div class="font-black ${color} text-xl leading-none">${label}</div></div>
-                    <button onclick="assignPlayer(${p.id})" class="px-4 py-2 bg-blue-500 hover:bg-blue-400 text-white rounded-lg font-bold shadow">Select</button>
-                </div>
-            </div>`;
-    }).join('') : '<p class="text-slate-400 italic text-center py-4">No available players.</p>';
+    if (!node) return;
 
-    const modal = document.getElementById('player-modal'), panel = document.getElementById('player-modal-panel');
-    modal.classList.remove('hidden'); modal.classList.add('flex');
+    document.getElementById('modal-pos-name').innerText = node.pos;
+    const sub = document.getElementById('modal-picker-sub');
+    if (sub) sub.innerText = type === 'pitch'
+        ? `Best available players for the ${node.pos} slot`
+        : 'Best available players for the bench';
+    renderPlayerPickerList();
+
+    const modal = document.getElementById('player-modal');
+    modal.classList.remove('hidden');
+    requestAnimationFrame(() => modal.classList.add('is-open'));
     setTimeout(() => {
-        modal.classList.remove('opacity-0');
-        panel.classList.remove('scale-95');
-        const first = panel.querySelector('#modal-player-list button') || panel.querySelector('button');
+        const first = modal.querySelector('#modal-player-list .picker-card') || modal.querySelector('.modal-close');
         if (first) first.focus();
-    }, 10);
+    }, 30);
 }
+
 function closeModal() {
-    const modal = document.getElementById('player-modal'), panel = document.getElementById('player-modal-panel');
-    modal.classList.add('opacity-0'); panel.classList.add('scale-95');
+    const modal = document.getElementById('player-modal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
     clearTimeout(modalState.timer);
-    modalState.timer = setTimeout(() => { modal.classList.remove('flex'); modal.classList.add('hidden'); }, 200);
+    modalState.timer = setTimeout(() => modal.classList.add('hidden'), 180);
 }
+
 function assignPlayer(pId) {
     const m = gameState.managers.find(x => x.id === modalState.managerId);
     if (!m || !Net.canControl(m.id)) return;
     const node = modalState.type === 'pitch' ? m.formation.find(n => n.id === modalState.nodeId) : m.bench.find(n => n.id === modalState.nodeId);
+    if (!node) return;
     node.assignedPlayerId = pId;
     modalState.type === 'pitch' ? renderPitchNodes(m.id) : renderBenchNodes(m.id);
     updateTeamOVR(m.id); updateDashboard(m.id); closeModal();
@@ -1153,8 +1257,9 @@ document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     const isOpen = id => {
         const modal = document.getElementById(id);
-        return modal && !modal.classList.contains('hidden') && modal.classList.contains('flex');
+        return modal && !modal.classList.contains('hidden');
     };
+    if (isOpen('card-modal')) { closePlayerCard(); return; }
     if (isOpen('howto-modal')) { closeHowTo(); return; }
     if (isOpen('player-modal')) { closeModal(); return; }
     if (isOpen('tactics-modal')) { closeTacticsModal(); return; }

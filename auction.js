@@ -365,6 +365,87 @@ window.addEventListener('pointerup', cancelPassHold);
 window.addEventListener('blur', cancelPassHold);
 document.addEventListener('visibilitychange', () => { if (document.hidden) cancelPassHold(); });
 
+// --- Keyboard controls ---------------------------------------------------
+// Only ever act for the club whose turn it is on this device, and never steal a
+// key from an input the player is typing in.
+//   +          focus the amount field (type a number, then Enter)
+//   Enter      submit the typed amount
+//   Z / X      raise by +1 / +5
+//   Space      hold to pass (release early to cancel)
+function auctionKeysActive() {
+    const a = getOpenAuction();
+    if (!a) return null;
+    const bidderId = auctionCurrentBidderId();
+    if (bidderId == null || !Net.canControl(bidderId)) return null;
+    return a;
+}
+
+function isTextEntry(el) {
+    if (!el) return false;
+    const tag = String(el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || !!el.isContentEditable;
+}
+
+function bidEntryField() {
+    return document.getElementById('bid-entry-field');
+}
+
+// Enter is only captured while the amount field itself has focus, so a focused
+// button keeps its normal Enter behaviour.
+function submitTypedBid(event) {
+    const field = bidEntryField();
+    if (!field || event.target !== field) return false;
+    if (!String(field.value || '').replace(/\D/g, '')) return false;
+    event.preventDefault();
+    auctionControl('raise', bidFieldValue());
+    return true;
+}
+
+document.addEventListener('keydown', event => {
+    if (event.ctrlKey || event.altKey || event.metaKey) return;
+    const onPassButton = !!(event.target && event.target.closest && event.target.closest('.pass-hold-btn'));
+    if (onPassButton && (event.key === ' ' || event.key === 'Enter')) return;
+    if (!auctionKeysActive()) return;
+    const typing = isTextEntry(event.target);
+
+    if (event.key === 'Enter') { submitTypedBid(event); return; }
+
+    // Space is a hold, never a tap: one stray press must not pass for you.
+    if (event.key === ' ') {
+        if (typing) return;
+        event.preventDefault();
+        if (event.repeat || passHold) return;
+        const button = document.querySelector('.pass-hold-btn');
+        if (button) startPassHold(button);
+        return;
+    }
+
+    if (typing) return;
+
+    if (event.key === '+') {
+        event.preventDefault();
+        const field = bidEntryField();
+        if (field) { field.focus(); field.select(); }
+        return;
+    }
+    if (event.key === 'z' || event.key === 'Z') {
+        event.preventDefault();
+        auctionControl('raise', null, BID_RAISE_STEPS[0]);
+        return;
+    }
+    if (event.key === 'x' || event.key === 'X') {
+        event.preventDefault();
+        auctionControl('raise', null, BID_RAISE_STEPS[1]);
+    }
+});
+
+document.addEventListener('keyup', event => {
+    if (event.key === ' ' && passHold) {
+        event.preventDefault();
+        cancelPassHold();
+    }
+});
+
 function finishAuctionSold() {
     const a = gameState.auction;
     const draft = gameState.activeDraft;
@@ -515,7 +596,7 @@ function renderAuctionClock() {
     const seconds = Math.ceil(left / 1000);
     if (clock) {
         clock.innerText = a.status === 'open' ? `${seconds}s` : 'Closed';
-        clock.className = `font-mono font-black text-base shrink-0 ${seconds <= 5 && a.status === 'open' ? 'text-red-400 animate-pulse' : 'text-amber-300'}`;
+        clock.className = `auction__clock${seconds <= 5 && a.status === 'open' ? ' is-danger' : ''}`;
     }
     if (bar) bar.style.width = `${clamp((left / SHOT_CLOCK_MS) * 100, 0, 100)}%`;
 }
@@ -523,14 +604,8 @@ function renderAuctionClock() {
 function auctionStatusChip(managerId) {
     const a = gameState.auction;
     const m = auctionManagerById(managerId);
-    // Static accent classes so Tailwind can see them; one colour per seat.
-    const palettes = [
-        { ring: 'border-blue-400', dot: 'bg-blue-400' },
-        { ring: 'border-red-400', dot: 'bg-red-400' },
-        { ring: 'border-purple-400', dot: 'bg-purple-400' },
-        { ring: 'border-orange-400', dot: 'bg-orange-400' }
-    ];
-    const palette = palettes[Math.max(0, gameState.managers.findIndex(x => x.id === managerId)) % palettes.length];
+    const colors = ['#60a5fa', '#fb7185', '#a78bfa', '#fb923c'];
+    const dotColor = colors[Math.max(0, gameState.managers.findIndex(x => x.id === managerId)) % colors.length];
     const isTurn = !!a && a.status === 'open' && auctionCurrentBidderId() === managerId;
     const offline = typeof Net !== 'undefined' && Net.online && typeof Net.isManagerConnected === 'function' && !Net.isManagerConnected(managerId);
     const leading = !!a && a.highBidderId === managerId && a.highBid > 0;
@@ -539,29 +614,23 @@ function auctionStatusChip(managerId) {
         : offline ? 'OFFLINE'
         : leading ? `LEADING €${a.highBid}M`
         : isTurn ? 'BIDDING NOW' : 'WAITING';
-    const tone = a && a.out[managerId] ? 'border-slate-700 bg-slate-800/60 text-slate-500'
-        : offline ? 'border-amber-600 bg-amber-950/70 text-amber-200'
-        : leading ? 'border-emerald-400 bg-emerald-900/70 text-emerald-100'
-        : isTurn ? `${palette.ring} bg-slate-800 text-white shadow-lg`
-        : 'border-slate-600 bg-slate-800/70 text-slate-300';
-    const dot = a && a.out[managerId] ? 'bg-slate-600'
-        : offline ? 'bg-amber-400'
-        : leading ? 'bg-emerald-400'
-        : isTurn ? `${palette.dot} animate-pulse`
-        : 'bg-slate-500';
+    const stateClass = a && a.out[managerId] ? 'is-out'
+        : offline ? 'is-offline'
+        : leading ? 'is-leading'
+        : isTurn ? 'is-turn' : '';
     return `
-        <div class="flex items-center gap-2 rounded-lg border-2 px-2 py-2 ${tone}">
-            <span class="w-2.5 h-2.5 rounded-full shrink-0 ${dot}"></span>
-            <div class="min-w-0 flex-1 leading-tight">
-                <div class="text-[13px] font-black truncate">${escapeHTML(m ? m.name : '?')}</div>
-                <div class="text-[11px] font-black uppercase tracking-widest truncate">${escapeHTML(label)}</div>
+        <div class="auction-chip ${stateClass}">
+            <span class="dot" style="background:${dotColor}"></span>
+            <div class="auction-chip__body">
+                <span class="auction-chip__name">${escapeHTML(m ? m.name : '?')}</span>
+                <span class="auction-chip__state">${escapeHTML(label)}</span>
             </div>
         </div>`;
 }
 
 function passHoldButton(extraClass = '') {
     return `<button type="button"
-        class="pass-hold-btn relative overflow-hidden w-full py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-bold text-sm select-none ${extraClass}"
+        class="pass-hold-btn btn-pass ${extraClass}"
         onpointerdown="startPassHold(this)" onpointerup="cancelPassHold()" onpointerleave="cancelPassHold()" onpointercancel="cancelPassHold()"
         onkeydown="if (!event.repeat && (event.key === ' ' || event.key === 'Enter')) { event.preventDefault(); startPassHold(this); }"
         onkeyup="cancelPassHold()" onblur="cancelPassHold()"
@@ -586,35 +655,32 @@ function renderAuctionPanel() {
     const standing = auctionActiveIds();
 
     const header = `
-        <div class="w-full mb-2 shrink-0">
-            <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 gap-2">
-                <span class="truncate">Live Auction</span>
-                <span id="auction-clock" class="font-mono font-black text-base text-amber-300 shrink-0">${Math.ceil(SHOT_CLOCK_MS / 1000)}s</span>
+        <div class="auction">
+            <div class="auction__head">
+                <span>Live Auction</span>
+                <span id="auction-clock" class="auction__clock">${Math.ceil(SHOT_CLOCK_MS / 1000)}s</span>
             </div>
-            <div class="w-full h-1.5 rounded-full overflow-hidden bg-slate-700">
-                <div id="auction-clock-bar" class="h-full bg-amber-400 transition-all duration-200" style="width:100%"></div>
-            </div>
-            <div class="mt-2 rounded-xl border-2 px-3 py-2 text-center ${a.highBid > 0 ? 'border-amber-500/60 bg-amber-500/10' : 'border-slate-600 bg-slate-900/60'}">
+            <div class="auction__bar"><div id="auction-clock-bar" style="width:100%"></div></div>
+            <div class="auction__bid ${a.highBid > 0 ? 'is-live' : ''}">
                 ${a.highBid > 0 ? `
-                    <div class="text-[10px] font-black uppercase tracking-[0.22em] text-amber-400">Current Bid</div>
-                    <div class="mt-0.5 flex items-baseline justify-center gap-1.5 flex-wrap leading-none">
-                        <span class="text-2xl font-black text-white break-words">${escapeHTML(highBidderName)}</span>
-                        <span class="text-xl font-black text-slate-500">-</span>
-                        <span class="text-2xl font-black text-amber-300">€${a.highBid}M</span>
+                    <div class="auction__bid-label">Current Bid</div>
+                    <div class="auction__bid-row">
+                        <span class="auction__bid-name">${escapeHTML(highBidderName)}</span>
+                        <span class="auction__bid-value">€${a.highBid}M</span>
                     </div>` : `
-                    <div class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Opening Bid</div>
-                    <div class="mt-0.5 text-2xl font-black leading-none text-amber-300">€${MIN_BID}M</div>`}
+                    <div class="auction__bid-label">Opening Bid</div>
+                    <div class="auction__bid-row"><span class="auction__bid-value">€${MIN_BID}M</span></div>`}
             </div>
-            <div class="grid grid-cols-2 gap-1.5 mt-2">${a.order.map(id => auctionStatusChip(id)).join('')}</div>
+            <div class="auction__chips">${a.order.map(id => auctionStatusChip(id)).join('')}</div>
         </div>`;
 
     if (!mine) {
         return `
             ${header}
-            <div class="flex-1 flex flex-col justify-center gap-1.5 text-center py-3">
-                <span class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">On The Clock</span>
-                <span class="text-2xl font-black text-white leading-tight break-words">${escapeHTML(bidder ? bidder.name : 'Next bidder')}</span>
-                <span class="text-sm font-bold text-slate-300">${holdsHighBid ? `Decides whether to raise or buy at €${a.highBid}M.` : `Must reach €${floor}M to stay in.`}</span>
+            <div class="auction__actions" style="text-align:center;padding:8px 0;">
+                <span class="eyebrow">Current Bidder</span>
+                <span style="font-family:var(--font-display);font-size:22px;font-weight:900;line-height:1.1;color:var(--text);">${escapeHTML(bidder ? bidder.name : 'Next bidder')}</span>
+                <span class="auction-note">${holdsHighBid ? `Decides whether to raise or buy at €${a.highBid}M.` : `Must reach €${floor}M to stay in.`}</span>
             </div>`;
     }
 
@@ -623,33 +689,34 @@ function renderAuctionPanel() {
     if (holdsHighBid) {
         return `
             ${header}
-            <div class="flex-1 flex flex-col justify-center gap-2">
-                ${standing.length > 1 ? '<div class="text-center text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">You hold the high bid</div>' : ''}
-                <div class="text-center text-2xl font-black leading-none text-amber-300">€${a.highBid}M</div>
-                <div class="text-center text-xs font-bold text-slate-400">is the price</div>
-                <button type="button" onclick="auctionControl('hammer')"
-                   class="w-full py-3 bg-orange-500 hover:bg-orange-400 text-white rounded-lg font-black text-base shadow">BUY AT €${a.highBid}M</button>
+            <div class="auction__actions">
+                ${standing.length > 1 ? '<p class="auction-note">You hold the high bid.</p>' : ''}
+                <div class="auction__bid-value" style="text-align:center;">€${a.highBid}M</div>
+                <p class="auction-note">is the price</p>
+                <button type="button" onclick="auctionControl('hammer')" class="btn-buy">BUY AT €${a.highBid}M</button>
                 ${passHoldButton()}
             </div>`;
     }
 
-    const raiseSteps = BID_RAISE_STEPS.map(step => `
+    const raiseSteps = BID_RAISE_STEPS.map((step, index) => `
         <button type="button" onclick="auctionControl('raise', null, ${step})" ${canRaise ? '' : 'disabled'}
-            class="flex-1 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-black">+${step}</button>`).join('');
+            class="bid-step" title="Shortcut: ${index === 0 ? 'Z' : 'X'}">+${step}</button>`).join('');
 
     return `
         ${header}
-        <div class="flex-1 flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-1">
-            <div class="flex items-center gap-1.5">
+        <div class="auction__actions">
+            <div class="bid-row">
                 <input type="text" inputmode="numeric" autocomplete="off" id="bid-entry-field" value=""
                     data-bid-turn="${a.turnSerial || 0}"
-                    placeholder="Bid €${floor}M+" oninput="onBidInput(this)"
-                    class="flex-1 min-w-0 bg-slate-950 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white tracking-widest focus:border-emerald-400 outline-none">
+                    placeholder="Bid €${floor}M+" aria-label="Bid for ${escapeHTML(bidder ? bidder.name : 'current manager')} in millions" oninput="onBidInput(this)"
+                    class="bid-input">
             </div>
-            <div class="flex gap-1.5">${raiseSteps}</div>
+            <div class="bid-steps">${raiseSteps}</div>
             <button type="button" id="btn-bid-raise" onclick="auctionControl('raise', bidFieldValue())"
-                   class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-900 rounded-lg font-black text-sm shadow" disabled>RAISE</button>
+                   class="btn-raise" disabled>RAISE</button>
             ${passHoldButton()}
-            ${!canRaise ? '<p class="text-[10px] font-bold text-red-400">You cannot cover the current bid.</p>' : ''}
+            ${!canRaise ? '<p class="auction-note" style="color:#fb7185;">You cannot cover the current bid.</p>' : ''}
+            <p class="auction-note">+ type an amount, Enter to bid · Z +1 · X +5 · hold Space to pass</p>
         </div>`;
 }
+

@@ -240,8 +240,8 @@ function updateRollButton() {
     btn.classList.toggle('opacity-50', btn.disabled); btn.classList.toggle('cursor-not-allowed', btn.disabled);
     const skipEl = document.getElementById('skips-left-label');
     if (skipEl) {
-        skipEl.innerText = `Skips: ${gameState.skipsLeft}`;
-        skipEl.className = `text-xs font-bold px-2 py-1 rounded-lg border ${gameState.skipsLeft <= 0 ? 'text-red-400 bg-red-950 border-red-800' : 'text-slate-400 bg-slate-800 border-slate-700'}`;
+        skipEl.innerText = `Skips ${gameState.skipsLeft}`;
+        skipEl.className = `draft-skip${gameState.skipsLeft <= 0 ? ' is-low' : ''}`;
     }
     Net.publishInfo();
 }
@@ -504,14 +504,17 @@ function renderPickupWheel(board, d) {
     }).join('');
 
     board.innerHTML = `
-        <div data-draft-card="${d.player.id}" class="w-full bg-slate-800 rounded-xl border border-amber-500/40 shadow-2xl px-4 py-6 flex flex-col justify-center items-center min-h-[280px] gap-4">
-            <h4 class="text-amber-300 font-bold tracking-widest uppercase text-sm">Skips gone · Pickup wheel</h4>
-            <div class="relative w-[200px] h-[200px]">
-                <div id="pickup-wheel" class="wheel" style="background:conic-gradient(from 0deg, ${stops})">${labels}</div>
-                <div class="wheel-hub">€${MIN_BID}M</div>
-                <div class="wheel-pointer"></div>
+        <div data-draft-card="${d.player.id}" class="draft-pickup">
+            <div class="eyebrow" style="color:#fbbf24;">Skips gone · Pickup wheel</div>
+            <div class="draft-pickup__body">
+                <div class="draft-pickup__card">${renderPlayerCard(d.player, { size: 'sm' })}</div>
+                <div class="relative w-[200px] h-[200px]">
+                    <div id="pickup-wheel" class="wheel" style="background:conic-gradient(from 0deg, ${stops})">${labels}</div>
+                    <div class="wheel-hub">€${MIN_BID}M</div>
+                    <div class="wheel-pointer"></div>
+                </div>
             </div>
-            <p class="text-[11px] text-slate-400 text-center max-w-[260px]">${escapeHTML(d.player.name)} goes to the club the wheel stops on.</p>
+            <p class="auction-note">${escapeHTML(d.player.name)} goes to the club the wheel stops on.</p>
         </div>`;
 
     const wheel = document.getElementById('pickup-wheel');
@@ -558,29 +561,39 @@ function restoreBidFieldState(state) {
     try { field.setSelectionRange(state.start, state.end); } catch (e) {}
 }
 
+function draftEmptyStateHtml() {
+    return `
+        <div class="draft-empty">
+            <div class="draft-empty__ball"></div>
+            <b>Ready to draft</b>
+            <small>Press Roll Draft to reveal the first player from the pool.</small>
+        </div>`;
+}
+
 function renderDraftBoard() {
     const board = document.getElementById('draft-board');
     // A rebuilt board destroys the PASS button, so never leave a hold running.
     if (typeof cancelPassHold === 'function') cancelPassHold();
     const bidFieldState = captureBidFieldState();
     const d = gameState.activeDraft;
-    if (!d) { gameState._renderedPlayerId = null; board.innerHTML = '<div class="text-slate-400 italic">Press Roll Draft</div>'; return; }
+    if (!d) { gameState._renderedPlayerId = null; board.innerHTML = draftEmptyStateHtml(); return; }
     const { player, state, result } = d;
 
     if (state === 'spinning') {
         board.innerHTML = `
-            <div class="w-full bg-slate-800 rounded-xl border border-slate-600 shadow-2xl px-4 py-6 flex flex-col justify-center items-center min-h-[280px]">
-                <h4 class="text-slate-400 font-bold mb-5 tracking-widest uppercase text-sm">Drafting</h4>
-                <div class="w-full grid grid-cols-2 gap-4 max-w-md mx-auto">
-                    <div id="col-nat" class="slot-col flex flex-col items-center gap-2 rounded-xl bg-slate-900/70 border border-slate-600 px-2 py-3">
+            <div class="draft-spin">
+                <div class="draft-spin__back"><span>?</span></div>
+                <div class="draft-spin__reels">
+                    <div id="col-nat" class="slot-col">
                         <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nationality</span>
                         <div class="reel-window"><div class="reel-track" id="reel-nat"></div><div class="reel-mask-top"></div><div class="reel-mask-bot"></div><div class="reel-highlight"></div></div>
                     </div>
-                    <div id="col-pos" class="slot-col flex flex-col items-center gap-2 rounded-xl bg-slate-900/70 border border-slate-600 px-2 py-3">
+                    <div id="col-pos" class="slot-col">
                         <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Position</span>
                         <div class="reel-window"><div class="reel-track" id="reel-pos"></div><div class="reel-mask-top"></div><div class="reel-mask-bot"></div><div class="reel-highlight"></div></div>
                     </div>
                 </div>
+                <div class="auction-note">The pool is deciding...</div>
             </div>`;
         // Every device that shows a spinning card animates it once per roll, so a
         // guest sees the same reel as the host instead of a frozen window.
@@ -615,7 +628,7 @@ function renderDraftBoard() {
                 }
                 gameState.activeDraft = null;
                 Net.publishDraftNow();
-                board.innerHTML = '<div class="text-slate-400 italic">Press Roll Draft</div>';
+                board.innerHTML = draftEmptyStateHtml();
                 return;
             }
             // An unsold player needs no recap panel — the DISCARDED stamp on the card
@@ -634,18 +647,18 @@ function renderDraftBoard() {
             }
             gameState.activeDraft = null;
             Net.publishDraftNow();
-            board.innerHTML = '<div class="text-slate-400 italic">Press Roll Draft</div>';
+            board.innerHTML = draftEmptyStateHtml();
         } else {
             let actionHtml;
             if (isSolo) {
                 const m = gameState.managers[0];
                 const out = m.squad.length >= MAX_SQUAD_SIZE;
                 actionHtml = `
-                    <div class="flex-1 flex flex-col justify-center gap-3">
-                        <p class="text-center text-xs text-slate-400">${out ? 'Squad full — you can only skip.' : 'Solo draft — take the player or skip.'}</p>
-                        <div class="flex gap-2">
-                            <button onclick="soloSkipPlayer()" class="flex-1 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-bold text-sm">Skip</button>
-                            <button onclick="soloTakePlayer()" class="flex-1 py-2 bg-green-500 hover:bg-green-400 text-slate-900 rounded-lg font-black text-sm ${out ? 'opacity-40 pointer-events-none' : ''}" ${out ? 'disabled' : ''}>Take Player</button>
+                    <div class="auction__actions">
+                        <p class="auction-note">${out ? 'Squad full — you can only skip this player.' : 'Solo draft — take the player or skip.'}</p>
+                        <div style="display:flex;gap:7px;">
+                            <button onclick="soloSkipPlayer()" class="btn btn--ghost" style="flex:1;">Skip</button>
+                            <button onclick="soloTakePlayer()" class="btn btn--primary" style="flex:1;" ${out ? 'disabled' : ''}>Take Player</button>
                         </div>
                     </div>`;
             } else {
@@ -654,20 +667,17 @@ function renderDraftBoard() {
 
             const freshCard = gameState._renderedPlayerId !== player.id;
             gameState._renderedPlayerId = player.id;
+            const focusManager = gameState.managers.find(m => Net.canControl(m.id)) || gameState.managers[0];
+            const scoutHtml = renderScoutStrip(player, focusManager ? focusManager.id : null);
             board.innerHTML = `
-                <div data-draft-card="${player.id}" class="w-full bg-slate-800 rounded-xl p-4 border-2 border-green-500/50 shadow-lg flex flex-col h-full ${freshCard ? 'animate-reveal' : ''} relative">
-                    <div class="absolute -top-3 -right-3 bg-slate-700 text-[9px] px-2 py-1 rounded-full border border-slate-600 font-bold truncate max-w-[120px] text-white">${escapeHTML(player.nationality || 'World')}</div>
-                    <div class="flex justify-between items-start mb-2 pb-2 border-b border-slate-700 mt-1">
-                        <div class="flex-1 min-w-0 pr-2">
-                            <h3 class="font-bold text-lg text-white truncate">${escapeHTML(player.name)}</h3>
-                            <span class="text-xs font-bold text-slate-400 tracking-wide block">${escapeHTML(formatPositions(player))}</span>
-                        </div>
-                        <div class="bg-gradient-to-br ${player.rankColor || 'from-green-400 to-green-600 text-slate-900'} font-black text-lg px-2 rounded-md">${player.displayOVR ?? player.rating}</div>
+                <div data-draft-card="${player.id}" class="draft-reveal ${freshCard ? 'animate-reveal' : ''}">
+                    <div class="draft-reveal__card">
+                        ${renderPlayerCard(player, { size: 'xl' })}
                     </div>
-                    ${player.stats ? `<div class="grid grid-cols-6 gap-1 mb-2 text-center">
-                        ${['PAC','SHO','PAS','DRI','DEF','PHY'].map(s => `<div><div class="text-[9px] text-slate-500 font-bold">${statLabel(s, player.mainPos === 'GK')}</div><div class="text-xs font-black text-white">${player.stats[s]}</div></div>`).join('')}
-                    </div>` : ''}
-                    ${actionHtml}
+                    <div class="draft-reveal__side">
+                        ${scoutHtml}
+                        ${actionHtml}
+                    </div>
                 </div>`;
             restoreBidFieldState(bidFieldState);
         }
