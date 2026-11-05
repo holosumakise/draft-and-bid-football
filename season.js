@@ -854,20 +854,42 @@ function animateSeasonChart(mdIndex, limit = SEASON_MATCHDAYS, onDone) {
 }
 
 function collectAllPlayerStats() {
-    const all = [];
+    // A player can appear in more than one club's map after a mid-season move,
+    // or in an older save where the stat record was not moved. Merge by player
+    // id so the awards always use his full-season totals.
+    const byPlayer = new Map();
+    const add = st => {
+        if (!st || st.id == null) return;
+        const key = String(st.id);
+        const rec = byPlayer.get(key);
+        if (!rec) { byPlayer.set(key, { ...st }); return; }
+        ['goals', 'assists', 'cleanSheets', 'apps', 'minutes', 'yellows', 'reds',
+            'ratingSum', 'ratingCount', 'goalsConcededAsGK'].forEach(field => {
+            rec[field] = (rec[field] || 0) + (st[field] || 0);
+        });
+        if (st.name) rec.name = st.name;
+        if (st.mainPos) rec.mainPos = st.mainPos;
+        if (st.team) { rec.team = st.team; rec.teamId = st.teamId; }
+    };
     const byMgr = gameState.season.playerStatsByManager;
     if (byMgr) {
         Object.keys(byMgr).forEach(mid => {
-            Object.values(byMgr[mid]).forEach(st => all.push(st));
+            Object.values(byMgr[mid] || {}).forEach(add);
         });
     }
     const ghostStats = gameState.season.ghostStatsById;
     if (ghostStats) {
         Object.keys(ghostStats).forEach(gid => {
-            Object.values(ghostStats[gid]).forEach(st => all.push(st));
+            Object.values(ghostStats[gid] || {}).forEach(add);
         });
     }
-    return all;
+    // The club that currently holds the player is his team for display, even
+    // though the totals above include the spell at his previous club.
+    gameState.managers.forEach(m => (m.squad || []).forEach(p => {
+        const rec = byPlayer.get(String(p.id));
+        if (rec) { rec.team = m.name; rec.teamId = m.id; }
+    }));
+    return Array.from(byPlayer.values());
 }
 
 function showSeasonResults() {
@@ -910,44 +932,6 @@ function showSeasonResults() {
             </div>`;
     }).join('');
 
-    const xiBox = document.getElementById('season-xi-stats');
-    const byMgr = gameState.season.playerStatsByManager;
-    xiBox.innerHTML = gameState.managers.map(m => {
-        const stats = Object.values(byMgr[m.id] || {}).filter(s => (s.minutes || 0) > 0)
-            .sort((a, b) => {
-                const ra = a.ratingCount ? a.ratingSum / a.ratingCount : 0;
-                const rb = b.ratingCount ? b.ratingSum / b.ratingCount : 0;
-                return rb - ra;
-            });
-        const rows = stats.map(s => {
-            const avg = s.ratingCount ? (s.ratingSum / s.ratingCount).toFixed(2) : '—';
-            const mins = s.minutes || 0;
-            return `<tr class="border-b border-slate-800/80">
-                <td class="py-1 pr-2 text-slate-400 text-[10px] font-bold">${s.mainPos}</td>
-                <td class="py-1 pr-2 text-white text-xs font-semibold truncate max-w-[120px]">${escapeHTML(s.name)}</td>
-                <td class="py-1 px-1 text-center text-xs text-slate-300">${mins}'</td>
-                <td class="py-1 px-1 text-center text-xs text-emerald-400 font-bold">${s.goals}</td>
-                <td class="py-1 px-1 text-center text-xs text-blue-400 font-bold">${s.assists}</td>
-                <td class="py-1 px-1 text-center text-xs text-amber-300 font-black">${avg}</td>
-            </tr>`;
-        }).join('') || '<tr><td colspan="6" class="text-slate-500 text-xs py-2">No minutes tracked.</td></tr>';
-        return `<div class="mb-5">
-            <h3 class="text-sm font-bold text-emerald-400 mb-2">${escapeHTML(m.name)} · Squad Stats</h3>
-            <div class="overflow-x-auto rounded-lg border border-slate-700">
-                <table class="w-full text-left">
-                    <thead class="bg-slate-800 text-[10px] uppercase text-slate-500">
-                        <tr>
-                            <th class="py-1.5 px-2">Pos</th><th class="py-1.5 px-2">Player</th>
-                            <th class="py-1.5 px-1 text-center">Mins</th><th class="py-1.5 px-1 text-center">G</th>
-                            <th class="py-1.5 px-1 text-center">A</th><th class="py-1.5 px-1 text-center">Sofa</th>
-                        </tr>
-                    </thead>
-                    <tbody class="px-2">${rows}</tbody>
-                </table>
-            </div>
-        </div>`;
-    }).join('');
-
     const stats = collectAllPlayerStats().filter(s => (s.minutes || 0) > 0);
     // Season awards need a real sample: one or two good cameos must not beat a starter's full season.
     const AWARD_MIN_MINUTES = 600;
@@ -972,16 +956,17 @@ function showSeasonResults() {
     gameState.season.awards = { topScorer, topAssist, goldenGlove, potm };
 
     const awards = [
-        { title: 'Golden Boot', icon: '⚽', sub: topScorer ? `${topScorer.goals} goals` : '—', name: topScorer?.name },
-        { title: 'Best Playmaker', icon: '🅰️', sub: topAssist ? `${topAssist.assists} assists` : '—', name: topAssist?.name },
-        { title: 'Golden Glove', icon: '🧤', sub: goldenGlove ? `${goldenGlove.cleanSheets} clean sheets` : '—', name: goldenGlove?.name },
-        { title: 'Player of the Season', icon: '⭐', sub: potm ? `${avgRating(potm)} Sofa · ${potm.goals}G ${potm.assists}A` : '—', name: potm?.name }
+        { title: 'Golden Boot', icon: '⚽', team: topScorer ? topScorer.team : '', sub: topScorer ? `${topScorer.goals} goals` : '—', name: topScorer?.name },
+        { title: 'Best Playmaker', icon: '🅰️', team: topAssist ? topAssist.team : '', sub: topAssist ? `${topAssist.assists} assists` : '—', name: topAssist?.name },
+        { title: 'Golden Glove', icon: '🧤', team: goldenGlove ? goldenGlove.team : '', sub: goldenGlove ? `${goldenGlove.cleanSheets} clean sheets` : '—', name: goldenGlove?.name },
+        { title: 'Player of the Season', icon: '⭐', team: potm ? potm.team : '', sub: potm ? `${avgRating(potm)} Sofa · ${potm.goals}G ${potm.assists}A` : '—', name: potm?.name }
     ];
 
     document.getElementById('season-awards').innerHTML = awards.map(a => `
         <div class="award-card">
             <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">${a.icon} ${a.title}</div>
             <div class="text-lg font-black text-white truncate">${a.name ? escapeHTML(a.name) : '—'}</div>
+            <div class="text-[11px] font-bold text-emerald-300/90 truncate mt-0.5">${a.team ? escapeHTML(a.team) : '—'}</div>
             <div class="text-xs text-slate-400 mt-1">${a.sub}</div>
         </div>
     `).join('');
@@ -1506,15 +1491,17 @@ function buildAwardCandidates() {
     const final = season.finalTable || [];
     const europe = gameState.europe;
     const out = [];
+    // collectAllPlayerStats merges both spells of a transferred player and points
+    // his record at the club that holds him now.
+    const mergedLeague = new Map(collectAllPlayerStats().map(s => [String(s.id), s]));
     gameState.managers.forEach(m => {
         const row = final.find(r => r.isHuman && r.managerId === m.id) || null;
         const part = europe && europe.participants ? europe.participants.find(h => h.managerId === m.id) : null;
-        const league = (season.playerStatsByManager && season.playerStatsByManager[m.id]) || {};
         const euro = (part && part.euroStats) || {};
         const outcome = euroOutcome(part);
         const euroTies = part && part.path ? part.path.length : 0;
         (m.squad || []).forEach(p => {
-            const L = league[p.id] || {}, E = euro[p.id] || {};
+            const L = mergedLeague.get(String(p.id)) || {}, E = euro[p.id] || {};
             const ratingCount = (L.ratingCount || 0) + (E.ratingCount || 0);
             const c = {
                 id: p.id, name: p.name, pos: p.mainPos, ovr: p.rating || 80,

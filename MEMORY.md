@@ -114,3 +114,11 @@
 - Listing moved out of the tab strip into a **My squad** dialog opened from the header. Player rows use a fixed grid (`38px minmax(0,1fr) 40px 58px auto`) with fixed-width List/Unlist buttons, so toggling a listing never changes row height. Recentered the dialog and preserved both screen and modal scroll positions across re-renders; Escape and backdrop clicks close dialogs.
 - Build ID `2026-11-05.5`, service-worker shell `dbf-shell-v26`.
 - Verified in Chromium via a temporary 4-manager harness: club chooser and listed view render, offers show incoming/sent/completed sections, listing toggles keep every row at 61px and modal scroll at 200px with no shift, Escape closes the dialog, and there were no console errors. `npm test` was not run because Node/npm are unavailable on this machine.
+
+## 2026-11-05 — Individual awards only, current club shown
+
+- User no longer wanted the full per-club squad-stat tables on the season-results screen. Removed the `season-xi-stats` block from `index.html` and its rendering code in `season.js`; the screen now goes from Final Standings straight to an "Individual Awards" section.
+- Award cards now show the winner's current club under his name. A transferred player is attributed to the club that holds him at the end of the season.
+- Award totals merge a player's spells across clubs. `collectAllPlayerStats` now aggregates records by player id and then overrides the team label from current squad membership, so first-half goals at the old club and second-half goals at the new club count as one total. `buildAwardCandidates` uses the same merged index for the ceremony awards, and the existing `moveStats` transfer hook already carries the record to the new club's map.
+- Build ID `2026-11-05.6`, service-worker shell `dbf-shell-v27`.
+- Verified in Chromium with a temporary 2-club harness using the real transfer window: a striker moved from Alpha FC to Beta FC kept his 18 first-half goals, added 5 after the move, showed 23 goals and Beta FC on the Golden Boot card; the reverse player showed 10 goals and Alpha FC; the squad-stat element is absent; awards render with no console errors. `npm test` was not run because Node/npm are unavailable on this machine.
