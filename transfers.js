@@ -49,7 +49,7 @@
             run: null, onClose: null,
             offers: [], seq: 1, trades: {}, ready: {}, listed: {}, log: [],
             swaps: [], swapSeq: 0, noticeSeq: 0, noticeText: '',
-            acting: null, tab: 'market', filter: 'all', modal: null,
+            acting: null, tab: 'market', filter: 'clubs', posFilter: 'all', modal: null, listing: false,
             appliedSwaps: {}, seenNotice: 0
         };
     }
@@ -275,48 +275,76 @@
         const st = document.createElement('style');
         st.id = 'tw-styles';
         st.textContent = `
-        #screen-transfer-window { overflow-y:auto; padding:18px 14px 104px; color:#e2e8f0; }
-        .tw-wrap { max-width:940px; margin:0 auto; display:flex; flex-direction:column; gap:12px; padding-bottom:78px; }
-        .tw-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px solid #1e293b; }
+        #screen-transfer-window { overflow-y:auto; padding:18px 14px 116px; color:#e2e8f0; }
+        .tw-wrap { width:100%; max-width:960px; margin:0 auto; display:flex; flex-direction:column; gap:12px; padding-bottom:84px; }
+        .tw-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-bottom:12px; border-bottom:1px solid #1e293b; }
         .tw-title { font-size:19px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; color:#34d399; margin:0; }
         .tw-sub { color:#94a3b8; font-size:12px; margin:3px 0 0; }
         .tw-sub b { color:#e2e8f0; }
+        .tw-head__act { display:flex; align-items:center; gap:8px; }
+        .tw-seatbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .tw-seatbar__label { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#64748b; font-weight:900; }
+        .tw-seats { display:flex; gap:6px; flex-wrap:wrap; }
         .tw-note { color:#64748b; font-size:12.5px; padding:14px 10px; text-align:center; border:1px dashed #1e293b; border-radius:12px; }
-        .tw-seats { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+        .tw-help { margin:0; padding:10px 12px; border:1px solid #1e293b; border-radius:10px; background:#0b1220; color:#94a3b8; font-size:12px; line-height:1.55; }
+        .tw-help b { color:#cbd5e1; }
+        .tw-help i { color:#34d399; font-style:normal; font-weight:900; }
         .tw-chip { padding:7px 11px; border-radius:10px; border:1px solid #24344f; background:#0b1220; color:#cbd5e1; font-size:12.5px; font-weight:800; cursor:pointer; text-align:left; line-height:1.25; }
         .tw-chip.on { background:#064e3b; border-color:#34d399; color:#a7f3d0; }
         .tw-chip.tw-static { cursor:default; }
         .tw-chip small { display:block; font-weight:600; color:#64748b; font-size:10.5px; }
         .tw-chip.on small { color:#6ee7b7; }
         .tw-chip i { font-style:normal; color:#34d399; margin-left:5px; }
-        .tw-tabs { display:flex; gap:4px; padding:4px; border-radius:12px; background:#0b1220; border:1px solid #1e293b; }
-        .tw-filters { display:flex; gap:6px; flex-wrap:wrap; }
-        .tw-tab { flex:1; padding:9px 8px; border:0; border-radius:9px; background:transparent; color:#94a3b8; font-weight:800; font-size:13px; cursor:pointer; }
+        .tw-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border-radius:12px; background:#0b1220; border:1px solid #1e293b; }
+        .tw-tab { padding:10px 8px; border:0; border-radius:9px; background:transparent; color:#94a3b8; font-weight:800; font-size:13px; cursor:pointer; }
         .tw-tab.on { background:#064e3b; color:#a7f3d0; }
         .tw-tab span { display:inline-block; margin-left:5px; padding:0 6px; border-radius:999px; background:#334155; color:#e2e8f0; font-size:11px; }
         .tw-tab.on span { background:#34d399; color:#04231a; }
-        .tw-h { font-size:11px; letter-spacing:.10em; text-transform:uppercase; color:#64748b; font-weight:900; margin:6px 2px 5px; }
+        .tw-h { font-size:11px; letter-spacing:.10em; text-transform:uppercase; color:#64748b; font-weight:900; margin:2px; }
         .tw-h span { letter-spacing:0; text-transform:none; font-weight:700; color:#475569; }
-        .tw-card { background:#0b1220; border:1px solid #1e293b; border-radius:14px; padding:2px 10px; margin-bottom:10px; }
-        .tw-pl { display:flex; align-items:center; gap:9px; padding:8px 0; border-bottom:1px solid #162033; }
+        .tw-group { display:flex; flex-direction:column; gap:6px; }
+        .tw-viewbar .tw-h { margin:0; }
+        .tw-clubs { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:8px; }
+        .tw-club { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:12px; border-radius:12px; border:1px solid #1e293b; background:#0b1220; color:#e2e8f0; text-align:left; cursor:pointer; font:inherit; }
+        .tw-club:hover { border-color:#34d399; }
+        .tw-club--listed { grid-column:1/-1; border-color:#134e4a; background:linear-gradient(90deg,#062a24,#0b1220); }
+        .tw-club__name { display:block; font-size:13.5px; font-weight:900; }
+        .tw-club__meta { display:block; margin-top:2px; font-size:11px; color:#64748b; }
+        .tw-club__side { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+        .tw-club__go { color:#34d399; font-size:11.5px; font-weight:900; white-space:nowrap; }
+        .tw-pill { padding:1px 7px; border-radius:999px; background:#064e3b; color:#6ee7b7; font-size:10.5px; font-weight:900; }
+        .tw-viewbar { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+        .tw-viewbar__left { display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; }
+        .tw-back { padding:5px 9px; border-radius:8px; border:1px solid #334155; background:#0b1220; color:#cbd5e1; font-weight:800; font-size:11.5px; cursor:pointer; white-space:nowrap; }
+        .tw-back:hover { border-color:#34d399; }
+        .tw-seg { display:inline-flex; gap:2px; padding:3px; border-radius:10px; background:#0b1220; border:1px solid #1e293b; }
+        .tw-seg button { border:0; background:transparent; color:#94a3b8; font-size:11px; font-weight:800; padding:5px 8px; border-radius:7px; cursor:pointer; }
+        .tw-seg button.on { background:#064e3b; color:#a7f3d0; }
+        .tw-card { background:#0b1220; border:1px solid #1e293b; border-radius:14px; padding:0 10px; }
+        .tw-card--flat { margin:0; }
+        .tw-pl { display:grid; grid-template-columns:38px minmax(0,1fr) 40px 58px auto; align-items:center; gap:9px; min-height:46px; padding:7px 0; border-bottom:1px solid #162033; }
         .tw-pl:last-child { border-bottom:0; }
         .tw-pos { width:36px; flex-shrink:0; text-align:center; padding:3px 0; border-radius:7px; font-size:10px; font-weight:900; letter-spacing:.04em; background:#1e293b; color:#cbd5e1; }
         .tw-pos--gk { background:#2b2109; color:#fcd34d; }
         .tw-pos--def { background:#0f2438; color:#7dd3fc; }
         .tw-pos--mid { background:#0d2b23; color:#6ee7b7; }
         .tw-pos--fwd { background:#2b1220; color:#f9a8d4; }
-        .tw-name { flex:1; min-width:0; font-weight:700; font-size:13.5px; display:flex; align-items:baseline; gap:6px; }
+        .tw-name { min-width:0; display:flex; align-items:baseline; gap:6px; overflow:hidden; }
+        .tw-name b { min-width:0; font-weight:700; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .tw-name em { font-style:normal; font-size:11px; color:#64748b; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .tw-ovr { width:34px; flex-shrink:0; text-align:center; padding:3px 0; border-radius:8px; background:#111c30; border:1px solid #24344f; font-weight:900; font-size:12.5px; }
         .tw-ovr.is-elite { color:#fbbf24; border-color:#78350f; background:#241a06; }
-        .tw-val { width:58px; flex-shrink:0; text-align:right; color:#64748b; font-size:11px; }
-        .tw-tag { flex-shrink:0; font-size:9.5px; font-weight:900; letter-spacing:.06em; padding:2px 6px; border-radius:6px; background:#7c2d12; color:#fdba74; }
-        .tw-btn { padding:7px 12px; border-radius:9px; border:1px solid #334155; background:#111c30; color:#e2e8f0; font-weight:800; font-size:12px; cursor:pointer; flex-shrink:0; }
+        .tw-val { width:58px; text-align:right; color:#64748b; font-size:11px; }
+        .tw-tag { flex-shrink:0; font-size:8.5px; font-weight:900; letter-spacing:.06em; padding:2px 5px; border-radius:6px; background:#7c2d12; color:#fdba74; }
+        .tw-btn { padding:7px 12px; border-radius:9px; border:1px solid #334155; background:#111c30; color:#e2e8f0; font-weight:800; font-size:12px; cursor:pointer; flex-shrink:0; white-space:nowrap; }
         .tw-btn:hover:not(:disabled) { border-color:#34d399; }
         .tw-btn:disabled { opacity:.4; cursor:not-allowed; }
         .tw-btn.go { background:#059669; border-color:#059669; color:#fff; }
         .tw-btn.no { background:#7f1d1d; border-color:#991b1b; color:#fecaca; }
         .tw-btn.sm { padding:4px 9px; font-size:11px; }
+        .tw-btn--squad { background:#0b1220; border-color:#34d399; color:#a7f3d0; }
+        .tw-btn--list { min-width:72px; }
+        .tw-btn--offer { min-width:66px; }
         .tw-offer { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid #162033; }
         .tw-offer:last-child { border-bottom:0; }
         .tw-swap { flex:1; min-width:230px; display:flex; align-items:stretch; gap:8px; }
@@ -329,26 +357,37 @@
         .tw-swap__arrow { align-self:center; color:#34d399; font-weight:900; }
         .tw-offer__act { display:flex; gap:7px; }
         .tw-badge { background:#ef4444; color:#fff; border-radius:999px; font-size:10.5px; font-weight:900; padding:0 6px; margin-left:5px; }
-        .tw-foot { position:fixed; left:0; right:0; bottom:0; padding:11px 14px; background:#060b16f2; border-top:1px solid #1e293b; display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; }
+        .tw-foot { position:fixed; left:0; right:0; bottom:0; padding:11px 14px; background:#060b16f2; border-top:1px solid #1e293b; display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; z-index:30; }
         .tw-foot__hint { font-size:11.5px; color:#64748b; }
-        .tw-modal-bg { position:fixed; inset:0; background:#000c; display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
-        .tw-modal { background:#0b1220; border:1px solid #334155; border-radius:16px; padding:18px; width:100%; max-width:440px; }
-        .tw-modal h3 { margin:0; font-size:16px; font-weight:900; color:#e2e8f0; }
+        .tw-modal-bg { position:fixed; inset:0; background:#000c; display:flex; align-items:center; justify-content:center; z-index:60; padding:14px; }
+        .tw-modal { background:#0b1220; border:1px solid #334155; border-radius:16px; width:100%; max-width:460px; max-height:calc(100vh - 28px); display:flex; flex-direction:column; overflow:hidden; }
+        .tw-modal--list { max-width:520px; }
+        .tw-modal__head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:16px 16px 12px; border-bottom:1px solid #1e293b; }
+        .tw-modal__head h3 { margin:0; font-size:16px; font-weight:900; color:#e2e8f0; }
+        .tw-modal__head p { margin:3px 0 0; color:#94a3b8; font-size:12px; }
+        .tw-modal__x { width:30px; height:30px; flex-shrink:0; border-radius:8px; border:1px solid #334155; background:#111c30; color:#cbd5e1; font-size:18px; line-height:1; cursor:pointer; }
+        .tw-modal__x:hover { border-color:#34d399; }
+        .tw-modal__body { padding:12px 16px; overflow-y:auto; }
         .tw-modal label { display:block; font-size:10.5px; letter-spacing:.10em; text-transform:uppercase; color:#64748b; font-weight:900; margin-top:10px; }
         .tw-modal select, .tw-modal input { width:100%; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:9px; padding:9px; margin-top:5px; font-size:14px; }
         .tw-cashrow { display:flex; gap:6px; margin-top:7px; flex-wrap:wrap; }
         .tw-hintline { font-size:11.5px; color:#94a3b8; margin-top:9px; }
-        .tw-modal__act { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
-        .tw-log { font-size:12px; color:#94a3b8; line-height:1.7; }
+        .tw-modal__act { display:flex; gap:8px; justify-content:flex-end; padding:12px 16px; border-top:1px solid #1e293b; }
+        .tw-log { font-size:12px; color:#94a3b8; line-height:1.7; padding:9px 10px; }
         @media (max-width:640px) {
             .tw-val { display:none; }
-            .tw-name { display:block; font-size:13px; }
-            .tw-name em { display:block; }
+            .tw-pl { grid-template-columns:34px minmax(0,1fr) 36px auto; gap:7px; min-height:44px; }
+            .tw-name { display:flex; }
+            .tw-name em { display:none; }
+            .tw-name b { font-size:13px; }
+            .tw-clubs { grid-template-columns:1fr; }
             .tw-offer { align-items:stretch; }
-            .tw-swap { flex-direction:column; }
+            .tw-swap { flex-direction:column; min-width:0; }
             .tw-swap__arrow { display:none; }
             .tw-offer__act { width:100%; justify-content:flex-end; }
             .tw-foot__hint { display:none; }
+            .tw-head__act { width:100%; }
+            .tw-head__act .tw-btn { width:100%; }
         }
         `;
         document.head.appendChild(st);
@@ -367,18 +406,138 @@
         el.addEventListener('click', onClick);
         el.addEventListener('input', onInput);
         el.addEventListener('change', onInput);
+        el.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && S && (S.modal || S.listing)) {
+                S.modal = null;
+                S.listing = false;
+                render();
+            }
+        });
         return el;
     }
 
-    function playerRow(p, extra) {
+    function playerRow(p, extra, opts) {
+        opts = opts || {};
         const v = Adapter.value(p);
-        const club = [p.team, p.nationality].filter(Boolean).map(esc).join(' · ');
+        const club = opts.club === false
+            ? ''
+            : (typeof opts.club === 'string' ? opts.club : (p.team || p.nationality || ''));
         return `<div class="tw-pl">
             <span class="tw-pos tw-pos--${posGroup(p.mainPos)}">${esc(p.mainPos)}</span>
-            <span class="tw-name">${esc(p.name)}${S.listed[p.id] ? '<span class="tw-tag">LISTED</span>' : ''}${club ? `<em>${club}</em>` : ''}</span>
+            <span class="tw-name"><b>${esc(p.name)}</b>${opts.tag === false || !S.listed[p.id] ? '' : '<span class="tw-tag">LISTED</span>'}${club ? `<em>${esc(club)}</em>` : ''}</span>
             <span class="tw-ovr${p.rating >= 90 ? ' is-elite' : ''}">${esc(p.rating)}</span>
-            ${v != null ? `<span class="tw-val">${esc(Adapter.fmt(v))}</span>` : ''}
+            <span class="tw-val">${v != null ? esc(Adapter.fmt(v)) : ''}</span>
             ${extra || ''}</div>`;
+    }
+
+    const ownListed = m => (m.squad || []).filter(p => S.listed[p.id]).length;
+
+    // Every listed player in the league except the acting club's own men.
+    function listedElsewhere() {
+        const out = [];
+        gameState.managers.forEach(m => {
+            if (String(m.id) === String(S.acting)) return;
+            (m.squad || []).forEach(p => { if (S.listed[p.id]) out.push({ p, m }); });
+        });
+        return out;
+    }
+
+    const matchesPos = p => S.posFilter === 'all' || posGroup(p.mainPos) === S.posFilter;
+
+    function posFilterHTML() {
+        return `<div class="tw-seg" role="group" aria-label="Filter by position">` +
+            [['all', 'All'], ['gk', 'GK'], ['def', 'Def'], ['mid', 'Mid'], ['fwd', 'Att']]
+                .map(([key, label]) => `<button type="button" class="${S.posFilter === key ? 'on' : ''}" data-act="pos" data-id="${key}" aria-pressed="${S.posFilter === key}">${label}</button>`).join('') +
+            '</div>';
+    }
+
+    function viewBar(title, meta) {
+        return `<div class="tw-viewbar">
+            <div class="tw-viewbar__left">
+                <button type="button" class="tw-back" data-act="club" data-id="clubs">← All clubs</button>
+                <span class="tw-h">${esc(title)}${meta ? ` <span>${esc(meta)}</span>` : ''}</span>
+            </div>
+            ${posFilterHTML()}
+        </div>`;
+    }
+
+    function offerButton(me, owner, p) {
+        const already = pendingOffers().some(o => String(o.from) === String(me.id) && String(o.want) === String(p.id));
+        const disabled = tradesLeft(me.id) <= 0 || tradesLeft(owner.id) <= 0 || already;
+        return `<button type="button" class="tw-btn go tw-btn--offer" data-act="request" data-id="${p.id}" ${disabled ? 'disabled' : ''}>${already ? 'Offered' : 'Offer'}</button>`;
+    }
+
+    function clubChooserHTML(me, others, listedTotal) {
+        const cards = others.map(m => {
+            const count = ownListed(m);
+            const left = tradesLeft(m.id);
+            return `<button type="button" class="tw-club" data-act="club" data-id="${m.id}">
+                <span>
+                    <span class="tw-club__name">${esc(m.name)}</span>
+                    <span class="tw-club__meta">${(m.squad || []).length} players · ${left}/${MAX_TRADES} swaps left</span>
+                </span>
+                <span class="tw-club__side">
+                    ${count ? `<span class="tw-pill">${count} listed</span>` : ''}
+                    <span class="tw-club__go">Browse →</span>
+                </span>
+            </button>`;
+        }).join('');
+        return `<p class="tw-help"><b>How it works:</b> pick a club <i>→</i> offer one of your players (+ cash) <i>→</i> they accept or decline. Want offers? Open <b>My squad</b> and list players you would trade.</p>
+            <div class="tw-clubs">
+                <button type="button" class="tw-club tw-club--listed" data-act="club" data-id="listed">
+                    <span>
+                        <span class="tw-club__name">Listed players</span>
+                        <span class="tw-club__meta">Everyone currently on the market</span>
+                    </span>
+                    <span class="tw-club__side"><span class="tw-pill">${listedTotal}</span><span class="tw-club__go">View →</span></span>
+                </button>
+                ${cards}
+            </div>`;
+    }
+
+    function listedViewHTML(me, listed) {
+        const list = listed.filter(entry => matchesPos(entry.p)).sort((a, b) => b.p.rating - a.p.rating);
+        let body;
+        if (!listed.length) {
+            body = '<div class="tw-note">Nobody has listed a player yet. Open “My squad” to put one of yours on the market.</div>';
+        } else if (!list.length) {
+            body = '<div class="tw-note">No listed players in this position.</div>';
+        } else {
+            body = `<div class="tw-card">${list.map(({ p, m }) => playerRow(p, offerButton(me, m, p), { club: m.name, tag: false })).join('')}</div>`;
+        }
+        return `${viewBar('Listed players', `${listed.length} on the market`)}${body}`;
+    }
+
+    function clubViewHTML(me, m) {
+        const players = (m.squad || []).slice().sort((a, b) => b.rating - a.rating);
+        const list = players.filter(matchesPos);
+        const left = tradesLeft(m.id);
+        const head = viewBar(m.name, `${players.length} players · ${left}/${MAX_TRADES} swaps left`);
+        const warning = left <= 0 ? `<p class="tw-help">${esc(m.name)} has used all ${MAX_TRADES} swaps, so no deal can be made here.</p>` : '';
+        const body = list.length
+            ? `<div class="tw-card">${list.map(p => playerRow(p, offerButton(me, m, p))).join('')}</div>`
+            : '<div class="tw-note">No players in this position.</div>';
+        return `${head}${warning}${body}`;
+    }
+
+    function listingHTML(me) {
+        const squad = (me.squad || []).slice().sort((a, b) => b.rating - a.rating);
+        const count = ownListed(me);
+        const rows = squad.length
+            ? squad.map(p => playerRow(p,
+                `<button type="button" class="tw-btn tw-btn--list${S.listed[p.id] ? ' go' : ''}" data-act="list" data-id="${p.id}">${S.listed[p.id] ? 'Unlist' : 'List'}</button>`,
+                { club: false })).join('')
+            : '<div class="tw-note">Your squad is empty.</div>';
+        return `<div class="tw-modal-bg">
+            <div class="tw-modal tw-modal--list" role="dialog" aria-modal="true" aria-label="My squad">
+                <div class="tw-modal__head">
+                    <div><h3>My squad</h3><p>${count} listed · others can offer a player for them.</p></div>
+                    <button type="button" class="tw-modal__x" data-act="list-close" aria-label="Close">×</button>
+                </div>
+                <div class="tw-modal__body"><div class="tw-card tw-card--flat">${rows}</div></div>
+                <div class="tw-modal__act"><button type="button" class="tw-btn go" data-act="list-close">Done</button></div>
+            </div>
+        </div>`;
     }
 
     // One offer, read as "who comes / who goes". `give` always leaves o.from and
@@ -406,7 +565,7 @@
         </div></div>`;
     }
 
-    function render() {
+    function render(resetScroll) {
         const el = document.getElementById('screen-transfer-window');
         if (!el || !S) return;
         if (!gameState.managers || !gameState.managers.length) return;
@@ -419,87 +578,90 @@
         const canTrade = tradesLeft(me.id) > 0;
         const allReady = gameState.managers.every(m => S.ready[m.id]);
         const hostDevice = isHost();
+        const listed = listedElsewhere();
+        const ownCount = ownListed(me);
 
         const seatChips = gameState.managers.map(m => {
             const inc = pendingOffers().filter(o => String(o.to) === String(m.id)).length;
             const used = Math.max(0, MAX_TRADES - tradesLeft(m.id));
             const attrs = (!online() && hostDevice) ? ` data-act="acting" data-id="${m.id}"` : '';
             const cls = `tw-chip ${String(m.id) === String(me.id) ? 'on' : ''}${online() ? ' tw-static' : ''}`;
-            return `<button type="button" class="${cls}"${attrs}>${esc(m.name)}${S.ready[m.id] ? '<i>✓</i>' : ''}${inc ? `<span class="tw-badge">${inc}</span>` : ''}<small>${used}/${MAX_TRADES} swaps${Adapter.hasBudget(m) ? ' · ' + esc(Adapter.fmt(Adapter.getBudget(m))) : ''}</small></button>`;
+            return `<button type="button" class="${cls}"${attrs} aria-pressed="${String(m.id) === String(me.id)}">${esc(m.name)}${S.ready[m.id] ? '<i>✓</i>' : ''}${inc ? `<span class="tw-badge">${inc}</span>` : ''}<small>${used}/${MAX_TRADES} swaps</small></button>`;
         }).join('');
 
         const seats = (!online() && hostDevice)
-            ? `<div class="tw-seats" title="Switch club">${seatChips}</div>`
-            : `<div class="tw-sub">You are <b>${esc(me.name)}</b>${canTrade ? '' : ' · no swaps left'}</div>`;
+            ? `<div class="tw-seatbar"><span class="tw-seatbar__label">Managing</span><div class="tw-seats" title="Switch club">${seatChips}</div></div>`
+            : '';
 
-        const tabs = [['market', 'Market', 0], ['squad', 'My squad', 0], ['inbox', 'Offers', incoming.length]]
-            .map(([k, label, count]) => `<button type="button" class="tw-tab ${S.tab === k ? 'on' : ''}" data-act="tab" data-id="${k}">${label}${count ? `<span>${count}</span>` : ''}</button>`).join('');
+        const sub = online()
+            ? `You are <b>${esc(me.name)}</b> · ${tradesLeft(me.id)}/${MAX_TRADES} swaps left`
+            : `Halfway through the league · ${MAX_TRADES} swaps per club`;
+
+        const tabs = [['market', 'Market', 0], ['offers', 'Offers', incoming.length]]
+            .map(([k, label, count]) => `<button type="button" class="tw-tab ${S.tab === k ? 'on' : ''}" data-act="tab" data-id="${k}" role="tab" aria-selected="${S.tab === k}">${label}${count ? `<span>${count}</span>` : ''}</button>`).join('');
 
         let body = '';
         if (S.tab === 'market') {
             if (!others.length) {
-                body += '<div class="tw-note">No other clubs in this league, so no swaps are possible. Press done to play the second half.</div>';
+                body += '<div class="tw-note">No other clubs in this league, so no swaps are possible. End the window to play the second half.</div>';
             } else {
-                const filters = [`<button type="button" class="tw-chip ${S.filter === 'all' ? 'on' : ''}" data-act="filter" data-id="all">Everyone</button>`,
-                    `<button type="button" class="tw-chip ${S.filter === 'sale' ? 'on' : ''}" data-act="filter" data-id="sale">Listed only</button>`]
-                    .concat(others.map(m => `<button type="button" class="tw-chip ${S.filter === String(m.id) ? 'on' : ''}" data-act="filter" data-id="${m.id}">${esc(m.name)}</button>`)).join('');
-                body += `<div class="tw-filters">${filters}</div>`;
-                let anyCards = false;
-                others.filter(m => S.filter === 'all' || S.filter === 'sale' || S.filter === String(m.id)).forEach(m => {
-                    let list = (m.squad || []).slice().sort((a, b) => (S.listed[b.id] ? 1 : 0) - (S.listed[a.id] ? 1 : 0) || b.rating - a.rating);
-                    if (S.filter === 'sale') list = list.filter(p => S.listed[p.id]);
-                    if (!list.length) return;
-                    anyCards = true;
-                    const left = tradesLeft(m.id);
-                    body += `<div class="tw-h">${esc(m.name)}${left <= 0 ? ' <span>· no swaps left</span>' : ''}</div><div class="tw-card">` +
-                        list.map(p => {
-                            const has = pendingOffers().some(o => String(o.from) === String(me.id) && String(o.want) === String(p.id));
-                            const dis = !canTrade || left <= 0 || has;
-                            return playerRow(p, `<button type="button" class="tw-btn go" data-act="request" data-id="${p.id}" ${dis ? 'disabled' : ''}>${has ? 'Offered' : 'Offer'}</button>`);
-                        }).join('') + '</div>';
-                });
-                if (!anyCards) body += '<div class="tw-note">Nothing listed yet. List a player from “My squad”.</div>';
+                const validClub = S.filter === 'clubs' || S.filter === 'listed'
+                    || others.some(m => String(m.id) === String(S.filter));
+                if (!validClub) { S.filter = 'clubs'; S.posFilter = 'all'; }
+                if (!canTrade) body += `<p class="tw-help">You have used all ${MAX_TRADES} swaps. You can still browse and list players.</p>`;
+                if (S.filter === 'clubs') body += clubChooserHTML(me, others, listed.length);
+                else if (S.filter === 'listed') body += listedViewHTML(me, listed);
+                else body += clubViewHTML(me, others.find(m => String(m.id) === String(S.filter)));
             }
-        } else if (S.tab === 'squad') {
-            body += `<div class="tw-h">${esc(me.name)} <span>· ${esc(String((me.squad || []).length))} players</span></div><div class="tw-card">` +
-                (me.squad || []).slice().sort((a, b) => b.rating - a.rating).map(p => playerRow(p,
-                    `<button type="button" class="tw-btn${S.listed[p.id] ? ' go' : ''}" data-act="list" data-id="${p.id}">${S.listed[p.id] ? 'Withdraw listing' : 'List'}</button>`)).join('') + '</div>' +
-                '<div class="tw-hintline">A listed player can be bought by another club offering one of their own players in return.</div>';
         } else {
-            body += `<div class="tw-h">For you${incoming.length ? ` <span>· ${incoming.length}</span>` : ''}</div>`;
+            body += `<p class="tw-help">Accepting a swap moves both players and uses one trade for each club.</p>`;
+            body += `<div class="tw-group"><div class="tw-h">For you${incoming.length ? ` <span>· ${incoming.length}</span>` : ''}</div>`;
             body += incoming.length ? incoming.map(o => offerHTML(o,
                 `<button type="button" class="tw-btn go" data-act="accept" data-id="${o.id}" ${canTrade && tradesLeft(o.from) > 0 ? '' : 'disabled'}>Accept</button>
                 <button type="button" class="tw-btn no" data-act="decline" data-id="${o.id}">Decline</button>`)).join('')
                 : '<div class="tw-note">No club has asked you for a player.</div>';
-            body += `<div class="tw-h">Sent by you${sent.length ? ` <span>· ${sent.length}</span>` : ''}</div>`;
+            body += '</div>';
+            body += `<div class="tw-group"><div class="tw-h">Sent by you${sent.length ? ` <span>· ${sent.length}</span>` : ''}</div>`;
             body += sent.length ? sent.map(o => offerHTML(o,
                 `<button type="button" class="tw-btn" data-act="withdraw" data-id="${o.id}">Withdraw</button>`)).join('')
                 : '<div class="tw-note">You have not asked anyone for a player yet.</div>';
+            body += '</div>';
         }
 
-        const log = S.log.length
+        const log = (S.tab === 'offers' && S.log.length)
             ? `<div class="tw-h">Completed swaps</div><div class="tw-card tw-log">${S.log.map(esc).join('<br>')}</div>` : '';
-        const modal = S.modal ? modalHTML(me) : '';
+        const modal = S.listing ? listingHTML(me) : (S.modal ? modalHTML(me) : '');
+        const doneCount = gameState.managers.filter(m => S.ready[m.id]).length;
         const closeBtn = hostDevice
             ? `<button type="button" class="tw-btn ${allReady ? 'go' : ''}" data-act="close">${allReady ? 'Play the second half' : 'End window'}</button>`
             : '<button type="button" class="tw-btn" disabled>Waiting for host…</button>';
+
+        const scrollTop = el.scrollTop;
+        const oldModalBody = el.querySelector('.tw-modal__body');
+        const modalScroll = oldModalBody ? oldModalBody.scrollTop : 0;
         el.innerHTML = `<div class="tw-wrap">
             <header class="tw-head">
                 <div>
                     <h2 class="tw-title">Transfer window</h2>
-                    <p class="tw-sub">Halfway through the league · ${MAX_TRADES} swaps per club</p>
+                    <p class="tw-sub">${sub}</p>
                 </div>
-                ${seats}
+                <div class="tw-head__act">
+                    <button type="button" class="tw-btn tw-btn--squad" data-act="list-open" aria-haspopup="dialog">My squad${ownCount ? ` · ${ownCount} listed` : ''}</button>
+                </div>
             </header>
-            <nav class="tw-tabs">${tabs}</nav>
+            ${seats}
+            <nav class="tw-tabs" role="tablist">${tabs}</nav>
             ${body}
             ${log}
         </div>
         <div class="tw-foot">
-            <button type="button" class="tw-btn ${S.ready[me.id] ? '' : 'go'}" data-act="ready">${S.ready[me.id] ? 'I still want to trade' : "I'm done"}</button>
-            <span class="tw-foot__hint">${gameState.managers.filter(m => S.ready[m.id]).length}/${gameState.managers.length} clubs done</span>
+            <button type="button" class="tw-btn ${S.ready[me.id] ? '' : 'go'}" data-act="ready" aria-pressed="${!!S.ready[me.id]}">${S.ready[me.id] ? 'Keep trading' : 'Done trading'}</button>
+            <span class="tw-foot__hint">${doneCount}/${gameState.managers.length} clubs done</span>
             ${closeBtn}
         </div>${modal}`;
+        el.scrollTop = resetScroll ? 0 : scrollTop;
+        const newModalBody = el.querySelector('.tw-modal__body');
+        if (newModalBody) newModalBody.scrollTop = resetScroll ? 0 : modalScroll;
     }
 
     function modalHTML(me) {
@@ -508,9 +670,14 @@
         if (!want) { S.modal = null; return ''; }
         const mine = (me.squad || []).filter(p => isGK(p) === isGK(want)).sort((a, b) => b.rating - a.rating);
         if (!mine.length) {
-            return `<div class="tw-modal-bg"><div class="tw-modal">
-                <h3>No ${isGK(want) ? 'goalkeeper' : 'outfield player'} to swap</h3>
-                <div class="tw-hintline">Goalkeepers only trade for goalkeepers. ${esc(B.name)} wants ${esc(want.name)}, and you have nobody at ${esc(want.mainPos)} to send back.</div>
+            return `<div class="tw-modal-bg"><div class="tw-modal" role="dialog" aria-modal="true" aria-label="No swap available">
+                <div class="tw-modal__head">
+                    <div><h3>No ${isGK(want) ? 'goalkeeper' : 'outfield player'} to swap</h3></div>
+                    <button type="button" class="tw-modal__x" data-act="modal-cancel" aria-label="Close">×</button>
+                </div>
+                <div class="tw-modal__body">
+                    <p class="tw-hintline">Goalkeepers only trade for goalkeepers. ${esc(B.name)} wants ${esc(want.name)}, and you have nobody at ${esc(want.mainPos)} to send back.</p>
+                </div>
                 <div class="tw-modal__act"><button type="button" class="tw-btn" data-act="modal-cancel">Close</button></div>
             </div></div>`;
         }
@@ -532,17 +699,25 @@
             ? `You are asking for a player ${diff} higher — cash usually tempts ${esc(B.name)}.`
             : diff < 0 ? `You are offering ${-diff} higher, so they may take this without cash.`
             : 'Even ratings — cash is what tips the deal.';
-        return `<div class="tw-modal-bg"><div class="tw-modal">
-            <h3>Offer for ${esc(want.name)}</h3>
-            <div class="tw-hintline">${esc(want.mainPos)} ${esc(want.rating)} · ${esc(B.name)}</div>
-            <label>You give</label>
-            <select data-field="give">${mine.map(p => `<option value="${p.id}" ${String(p.id) === String(S.modal.give) ? 'selected' : ''}>${esc(p.mainPos)} ${esc(p.rating)} · ${esc(p.name)}</option>`).join('')}</select>
-            ${cashRow}
-            <div class="tw-hintline">${hint}</div>
+        return `<div class="tw-modal-bg"><div class="tw-modal" role="dialog" aria-modal="true" aria-label="Make an offer">
+            <div class="tw-modal__head">
+                <div>
+                    <h3>Offer for ${esc(want.name)}</h3>
+                    <p>${esc(B.name)} · ${esc(want.mainPos)} ${esc(want.rating)}${want.team ? ' · ' + esc(want.team) : ''}</p>
+                </div>
+                <button type="button" class="tw-modal__x" data-act="modal-cancel" aria-label="Close">×</button>
+            </div>
+            <div class="tw-modal__body">
+                <label>You give</label>
+                <select data-field="give">${mine.map(p => `<option value="${p.id}" ${String(p.id) === String(S.modal.give) ? 'selected' : ''}>${esc(p.mainPos)} ${esc(p.rating)} · ${esc(p.name)}</option>`).join('')}</select>
+                ${cashRow}
+                <div class="tw-hintline">${hint}</div>
+            </div>
             <div class="tw-modal__act">
                 <button type="button" class="tw-btn" data-act="modal-cancel">Cancel</button>
                 <button type="button" class="tw-btn go" data-act="modal-send">Send offer</button>
-            </div></div></div>`;
+            </div>
+        </div></div>`;
     }
 
     // The number field is the fiddly control on a phone, so the offer dialog also
@@ -594,9 +769,12 @@
     function guestAction(act, id, raw) {
         switch (act) {
             case 'acting': return;
-            case 'tab': S.tab = raw; break;
-            case 'filter': S.filter = raw; break;
-            case 'request': S.modal = { want: id, give: null, cash: 0 }; break;
+            case 'tab': S.tab = raw; S.modal = null; S.listing = false; break;
+            case 'club': S.filter = raw; S.posFilter = 'all'; break;
+            case 'pos': S.posFilter = raw; break;
+            case 'list-open': S.listing = true; S.modal = null; break;
+            case 'list-close': S.listing = false; break;
+            case 'request': S.listing = false; S.modal = { want: id, give: null, cash: 0 }; break;
             case 'modal-cancel': S.modal = null; break;
             case 'cash': return adjustCash(raw);
             case 'modal-send': {
@@ -618,12 +796,21 @@
             case 'ready': S.ready[S.acting] = !S.ready[S.acting]; sendCommand({ action: 'ready' }); break;
             case 'close': return;
         }
-        render();
+        render(act === 'tab' || act === 'club');
     }
 
     function onClick(e) {
+        if (!S) return;
         const btn = e.target.closest && e.target.closest('[data-act]');
-        if (!btn || !S || btn.disabled) return;
+        if (!btn) {
+            if (e.target.classList && e.target.classList.contains('tw-modal-bg')) {
+                S.modal = null;
+                S.listing = false;
+                render();
+            }
+            return;
+        }
+        if (btn.disabled) return;
         const act = btn.getAttribute('data-act');
         const raw = btn.getAttribute('data-id');
         const id = resolveId(act, raw);
@@ -631,10 +818,13 @@
         if (online() && !Net.isHost) return guestAction(act, id, raw);
 
         switch (act) {
-            case 'acting': S.acting = id; S.modal = null; break;
-            case 'tab': S.tab = raw; break;
-            case 'filter': S.filter = raw; break;
-            case 'request': S.modal = { want: id, give: null, cash: 0 }; break;
+            case 'acting': S.acting = id; S.modal = null; S.listing = false; S.filter = 'clubs'; S.posFilter = 'all'; break;
+            case 'tab': S.tab = raw; S.modal = null; S.listing = false; break;
+            case 'club': S.filter = raw; S.posFilter = 'all'; break;
+            case 'pos': S.posFilter = raw; break;
+            case 'list-open': S.listing = true; S.modal = null; break;
+            case 'list-close': S.listing = false; break;
+            case 'request': S.listing = false; S.modal = { want: id, give: null, cash: 0 }; break;
             case 'modal-cancel': S.modal = null; break;
             case 'cash': return adjustCash(raw);
             case 'modal-send': return sendOffer(S.acting, S.modal.want, S.modal.give, S.modal.cash);
@@ -645,7 +835,7 @@
             case 'ready': return toggleReady(S.acting);
             case 'close': return closeWindow();
         }
-        render();
+        render(act === 'tab' || act === 'club' || act === 'acting');
     }
 
     // Host side of a guest command. `managerId` is the seat the room says sent it.

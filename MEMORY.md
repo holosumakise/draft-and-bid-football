@@ -99,3 +99,18 @@
 - Verified: 55 tests across the six `test/*.test.js` suites pass (no `npm` on this machine — suites were executed through the Qoder node kernel with the real CommonJS loader). Playwright + Edge screenshots at 1440px and 390px of the pitch, market, squad, offers, offer modal and a completed swap; offer labels and cash signs matched the underlying state in both directions; no page or console errors.
 - Scratch browser driver and screenshots: `C:\Users\GIGABYTE\Documents\Qoder\2026-11-04\94bde722\uicheck` (outside this project).
 - In progress: none. Next: nothing pending; online multi-device smoke test of the new window markup was not exercised.
+
+## 2026-11-05 — Formation switch no longer auto-fills
+
+- User asked to remove the auto-fill that happened when changing formation presets. `changeFormation` now rebuilds the chosen shape and re-seats only the players the manager had already placed on the pitch (closest new slot); empty slots stay empty and the bench is left untouched. The Auto-fill Best XI button is unchanged.
+- Switch toast now reports `X/11 starters kept` instead of placed. Added a regression case to `test/formations.test.js` covering manual placements and bench preservation.
+- Build ID `2026-11-05.4`, service-worker shell `dbf-shell-v25`.
+- Verified in Chromium through a temporary local harness using the real config/engine/players/match-engine/ui sources: a full XI survives a switch, a manually placed two-man XI stays at two, an empty pitch stays empty, the bench is unchanged, Auto-fill still seats 11, and there were no console errors. `npm test` was not run because Node/npm are unavailable on this machine.
+
+## 2026-11-05 — Transfer window made simpler and stable
+
+- User found the halfway transfer window still unfriendly: too many tabs, every player shown at once, and the squad panel jumping when a player was listed. Redesigned only the `transfers.js` UI; trade rules, limits and the online host/guest command flow are untouched.
+- Two tabs now: **Market** and **Offers**. Market opens on a club chooser (Listed Players plus one card per opponent) and drills into a single club's squad, so no combined all-player list. All/GK/Def/Mid/Att filters, clear "How it works" copy and empty states were added.
+- Listing moved out of the tab strip into a **My squad** dialog opened from the header. Player rows use a fixed grid (`38px minmax(0,1fr) 40px 58px auto`) with fixed-width List/Unlist buttons, so toggling a listing never changes row height. Recentered the dialog and preserved both screen and modal scroll positions across re-renders; Escape and backdrop clicks close dialogs.
+- Build ID `2026-11-05.5`, service-worker shell `dbf-shell-v26`.
+- Verified in Chromium via a temporary 4-manager harness: club chooser and listed view render, offers show incoming/sent/completed sections, listing toggles keep every row at 61px and modal scroll at 200px with no shift, Escape closes the dialog, and there were no console errors. `npm test` was not run because Node/npm are unavailable on this machine.

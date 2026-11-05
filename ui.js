@@ -1195,8 +1195,9 @@ function fillBenchFromSquad(m, used) {
     });
 }
 
-// A new shape seats the club's best XI for that shape, with a nudge toward the men
-// already on the pitch: 4-4-2 to 4-3-3 should move a line, not drop half a squad.
+// A new shape rearranges the men already on the pitch into their closest new
+// slots. Empty slots stay empty and the bench is left alone — filling the team
+// is what Auto-fill Best XI is for.
 function changeFormation(mId, key) {
     const m = gameState.managers.find(x => x.id === mId);
     if (!m) return;
@@ -1214,20 +1215,21 @@ function changeFormation(mId, key) {
     }
 
     const onPitch = new Set(m.formation.map(node => node.assignedPlayerId).filter(Boolean));
+    const keptPlayers = m.squad.filter(p => onPitch.has(p.id));
     m.formationPreset = key;
     m.formation = buildFormationFromPreset(key);
-    const used = new Set();
-    let filled = 0;
-    optimalLineupAssignment(m.formation, m.squad, p => onPitch.has(p.id) ? 0.5 : 0).forEach((player, index) => {
-        m.formation[index].assignedPlayerId = player ? player.id : null;
-        if (player) { used.add(player.id); filled++; }
-    });
-    fillBenchFromSquad(m, used);
+    let kept = 0;
+    if (keptPlayers.length) {
+        optimalLineupAssignment(m.formation, keptPlayers).forEach((player, index) => {
+            m.formation[index].assignedPlayerId = player ? player.id : null;
+            if (player) kept++;
+        });
+    }
 
     renderPitchNodes(mId); renderBenchNodes(mId); updateTeamOVR(mId); updateDashboard(mId);
     Net.publishOwn(mId);
     if (typeof SaveGame !== 'undefined') SaveGame.schedule();
-    showToast(`${FORMATION_PRESETS[key].label}: ${filled}/${STARTERS} starters placed.`);
+    showToast(`${FORMATION_PRESETS[key].label}: ${kept}/${STARTERS} starters kept.`);
 }
 
 let pendingTacticsManagerId = null;
