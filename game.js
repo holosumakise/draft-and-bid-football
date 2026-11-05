@@ -202,6 +202,7 @@ function managerNamesForGame(count) {
 function initGame() {
     clearAuctionTimer();
     if (typeof SaveGame !== 'undefined') SaveGame.resetFinished();
+    if (typeof hideMatchReportPanels === 'function') hideMatchReportPanels();
     if (Net.ownsGame()) initializePlayerDB();
     gameState.matchQueue = [];
     gameState.currentMatchData = null;
@@ -222,6 +223,9 @@ function initGame() {
         gameState.managers.push({
             id: i, name,
             balance: INITIAL_BALANCE, squad: [], formationLocked: false,
+            investment: { medical: 0, stadium: 0 },
+            fans: MATCHDAY_FINANCE.INITIAL_FANS,
+            ticketRevenue: 0,
             bench: Array.from({length: BENCH_SLOTS}, (_, idx) => ({ id: `b${idx}`, pos: 'SUB', assignedPlayerId: null }))
         });
     }

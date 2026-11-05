@@ -5,6 +5,331 @@ const BENCH_SLOTS = 6;
 const MAX_SQUAD_SIZE = STARTERS + BENCH_SLOTS;
 const MAX_SUBS = 5;
 
+// --- Squad Investment ---
+// Leftover auction money can be spent on the club once drafting is done.
+// Training is permanent and follows the player; medical lasts the season.
+// Stadium upgrades raise gate receipts and fan growth for the rest of the save.
+const INVESTMENT = Object.freeze({
+    TRAINING_MAX: 3,
+    // Only players at this rating or below may take a training level. A player
+    // who trains up past the line keeps what he has earned but cannot train again.
+    TRAINING_MAX_RATING: 97,
+    // Base costs by training level; actual price is scaled down for lower OVR.
+    TRAINING_COSTS: Object.freeze([50, 100, 175]),
+    TRAINING_OVR_GAIN: 1,
+    TRAINING_STAT_GAIN: 1,
+    TRAINING_COST_MIN: 12,
+    MEDICAL_COSTS: Object.freeze([90, 180]),
+    MEDICAL_INJURY_REDUCTION: Object.freeze([0.15, 0.30]),
+    MEDICAL_STAMINA_REDUCTION: Object.freeze([0.10, 0.20]),
+    MEDICAL_CONDITIONING: Object.freeze([0, 0.4, 0.8]),
+    // Stadium upgrades (legacy saves may still carry `scouting`).
+    STADIUM_COSTS: Object.freeze([60, 140]),
+    // Multipliers on gate receipts by stadium tier (0 / 1 / 2).
+    STADIUM_TICKET_MULT: Object.freeze([1, 1.15, 1.32]),
+    // Extra share of positive fan growth kept on wins; losses are unchanged.
+    STADIUM_FAN_GAIN_MULT: Object.freeze([1, 1.30, 1.55]),
+    // Back-compat alias so older callers that still read SCOUTING_COSTS keep working.
+    SCOUTING_COSTS: Object.freeze([60, 140])
+});
+
+// Training price falls with the player's current rating. A lower-rated prospect
+// pays less than a 97 at the same camp level; the curve is gentle so the top end
+// stays meaningful.
+function trainingCostFor(player, level) {
+    const base = INVESTMENT.TRAINING_COSTS[level];
+    if (base == null) return 0;
+    const rating = Math.max(1, Number(player && player.rating) || 70);
+    const cap = INVESTMENT.TRAINING_MAX_RATING || 97;
+    const scale = Math.pow(Math.min(1, rating / cap), 1.15);
+    return Math.max(INVESTMENT.TRAINING_COST_MIN || 12, Math.round(base * scale));
+}
+
+function stadiumTierOf(manager) {
+    if (!manager) return 0;
+    const inv = investmentOf(manager);
+    const max = (INVESTMENT.STADIUM_COSTS || INVESTMENT.SCOUTING_COSTS || []).length;
+    return Math.max(0, Math.min(max, Math.round(Number(inv.stadium) || 0)));
+}
+
+// Lazy accessor: older saves and rooms created before investments existed have
+// no field, and a manager should never be charged for a missing object.
+function investmentOf(manager) {
+    if (!manager) return { medical: 0, stadium: 0 };
+    if (!manager.investment || typeof manager.investment !== 'object' || Array.isArray(manager.investment)) {
+        manager.investment = { medical: 0, stadium: 0 };
+    }
+    const medicalMax = INVESTMENT.MEDICAL_COSTS.length;
+    const stadiumMax = (INVESTMENT.STADIUM_COSTS || INVESTMENT.SCOUTING_COSTS || []).length;
+    manager.investment.medical = Math.max(0, Math.min(medicalMax, Math.round(Number(manager.investment.medical) || 0)));
+    // Migrate legacy `scouting` into `stadium` once, then keep a mirror so any
+    // leftover scouting UI still reads the same tier.
+    let stadium = Number(manager.investment.stadium);
+    if (!Number.isFinite(stadium) || stadium < 0) {
+        stadium = Number(manager.investment.scouting) || 0;
+    }
+    stadium = Math.max(0, Math.min(stadiumMax, Math.round(stadium)));
+    manager.investment.stadium = stadium;
+    manager.investment.scouting = stadium;
+    return manager.investment;
+}
+
+
+function medicalTierOf(entity) {
+    if (!entity) return 0;
+    const max = INVESTMENT.MEDICAL_COSTS.length;
+    if (typeof entity.medicalTier === 'number' && Number.isFinite(entity.medicalTier)) {
+        return Math.max(0, Math.min(max, Math.round(entity.medicalTier)));
+    }
+    const inv = entity.investment;
+    return inv && Number.isFinite(inv.medical)
+        ? Math.max(0, Math.min(max, Math.round(inv.medical)))
+        : 0;
+}
+
+function medicalInjuryFactor(entity) {
+    const tier = medicalTierOf(entity);
+    return 1 - (INVESTMENT.MEDICAL_INJURY_REDUCTION[tier - 1] || 0);
+}
+
+function medicalStaminaFactor(entity) {
+    const tier = medicalTierOf(entity);
+    return 1 - (INVESTMENT.MEDICAL_STAMINA_REDUCTION[tier - 1] || 0);
+}
+
+function medicalConditioningBoost(entity) {
+    return INVESTMENT.MEDICAL_CONDITIONING[medicalTierOf(entity)] || 0;
+}
+
+// ============================================================
+// MATCH AVAILABILITY — suspensions and injuries.
+//
+// A player carries two optional fields:
+//   outMatches: how many of his club's next matches he must miss
+//   outReason:  'suspension' | 'injury'
+//
+// The count is ticked once after every match the club plays, then new events
+// are applied, so a one-match ban means he misses exactly the next fixture.
+// ============================================================
+const MATCH_AVAILABILITY = Object.freeze({
+    INJURY_MIN: 1,
+    INJURY_MAX: 8,
+    SUSPENSION_MIN: 1,
+    SUSPENSION_MAX: 3
+});
+
+function playerOutMatches(player) {
+    if (!player) return 0;
+    const value = Math.round(Number(player.outMatches) || 0);
+    return value > 0 ? value : 0;
+}
+
+function playerIsUnavailable(player) {
+    return playerOutMatches(player) > 0;
+}
+
+function playerAvailability(player) {
+    const matches = playerOutMatches(player);
+    if (!matches) return null;
+    const reason = player.outReason === 'suspension' ? 'suspension' : 'injury';
+    return {
+        matches,
+        reason,
+        code: reason === 'suspension' ? 'SUS' : 'INJ',
+        label: `${reason === 'suspension' ? 'Suspended' : 'Injured'} · ${matches} match${matches === 1 ? '' : 'es'}`
+    };
+}
+
+function clearPlayerAbsence(player) {
+    if (!player) return;
+    delete player.outMatches;
+    delete player.outReason;
+}
+
+function markPlayerOut(player, matches, reason) {
+    if (!player) return null;
+    const length = Math.max(1, Math.round(Number(matches) || 1));
+    const kind = reason === 'suspension' ? 'suspension' : 'injury';
+    const current = playerOutMatches(player);
+    // Keep the longer absence. If they are equal, a suspension is the more
+    // serious booking and wins the label.
+    if (length > current || (length === current && kind === 'suspension')) {
+        player.outMatches = length;
+        player.outReason = kind;
+    }
+    return playerAvailability(player);
+}
+
+// Deduct one fixture for every player who was already unavailable. Call this
+// once per club per match, after the result and before the new events land.
+function tickPlayerAbsences(squad) {
+    (squad || []).forEach(player => {
+        if (!player) return;
+        const remaining = playerOutMatches(player) - 1;
+        if (remaining > 0) player.outMatches = remaining;
+        else clearPlayerAbsence(player);
+    });
+}
+
+// A red card is rarely a fixed one-match ban: the enforcer and the hot head are
+// more likely to pick up an extra charge. The result is 1-3 matches.
+function suspensionLengthFor(player) {
+    const risk = typeof specialityBookingRateFor === 'function' ? specialityBookingRateFor(player) : 1;
+    let matches = 1;
+    if (Math.random() < Math.max(0.04, Math.min(0.45, 0.20 * risk))) matches++;
+    if (Math.random() < Math.max(0.01, Math.min(0.12, 0.045 * risk))) matches++;
+    return Math.max(MATCH_AVAILABILITY.SUSPENSION_MIN, Math.min(MATCH_AVAILABILITY.SUSPENSION_MAX, matches));
+}
+
+// Injury length follows the player's own durability and the club's medical
+// programme. Most knocks are one or two matches; fragile players occasionally
+// pick up a long-term problem.
+function injuryLengthFor(player, team) {
+    const fragility = (typeof specialityInjuryRate === 'function' ? specialityInjuryRate(player) : 1)
+        * (typeof medicalInjuryFactor === 'function' ? medicalInjuryFactor(team) : 1);
+    const roll = Math.random();
+    let matches;
+    if (roll < 0.55) matches = 1;
+    else if (roll < 0.82) matches = 2;
+    else if (roll < 0.93) matches = 3 + Math.floor(Math.random() * 2);
+    else matches = 5 + Math.floor(Math.random() * 4);
+    // A fragile body can add a match or two to any knock.
+    if (Math.random() < Math.max(0, (fragility - 0.8) * 0.45)) matches += 1 + Math.floor(Math.random() * 2);
+    return Math.max(MATCH_AVAILABILITY.INJURY_MIN, Math.min(MATCH_AVAILABILITY.INJURY_MAX, matches));
+}
+
+// ============================================================
+// AVAILABLE XI — replace unavailable starters from the bench/reserves.
+// The manager's saved XI is never mutated; each match state gets a fresh copy.
+// ============================================================
+function positionUnitOf(pos) {
+    if (pos === 'GK') return 'GK';
+    if (['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(pos)) return 'DEF';
+    if (['CDM', 'CM', 'CAM', 'LM', 'RM'].includes(pos)) return 'MID';
+    return 'ATT';
+}
+
+function pickAvailableReplacement(pos, pool, used) {
+    const available = (pool || []).filter(player =>
+        player && !playerIsUnavailable(player) && !used.has(player.id));
+    if (!available.length) return null;
+    const isGK = pos === 'GK';
+    // Never put an outfield player in goal, and never use a second keeper outfield.
+    const legal = available.filter(player => isGK ? player.mainPos === 'GK' : player.mainPos !== 'GK');
+    if (!legal.length) return null;
+    const samePos = legal.filter(player =>
+        player.mainPos === pos || (Array.isArray(player.subPos) && player.subPos.includes(pos)));
+    const sameUnit = legal.filter(player => positionUnitOf(player.mainPos) === positionUnitOf(pos));
+    const shortlist = samePos.length ? samePos : (sameUnit.length ? sameUnit : legal);
+    return shortlist[Math.floor(Math.random() * shortlist.length)];
+}
+
+function fillAvailableTeamSlots(lineup, bench, reserves) {
+    const rawBench = (bench || []).filter(Boolean);
+    const rawReserves = (reserves || []).filter(Boolean);
+    const pool = [...rawBench, ...rawReserves];
+    const used = new Set();
+    const filledLineup = [];
+
+    (lineup || []).forEach(slot => {
+        if (!slot || !slot.player) return;
+        if (!playerIsUnavailable(slot.player)) {
+            filledLineup.push({ ...slot, player: slot.player });
+            used.add(slot.player.id);
+            return;
+        }
+        const replacement = pickAvailableReplacement(slot.pos, pool, used);
+        if (!replacement) return;
+        used.add(replacement.id);
+        // `autoFor` records who was replaced so the broadcast can tell the story.
+        filledLineup.push({ ...slot, player: replacement, autoFor: slot.player.id });
+    });
+
+    const freshBench = rawBench.filter(player => !playerIsUnavailable(player) && !used.has(player.id));
+    const freshReserves = rawReserves.filter(player => !playerIsUnavailable(player) && !used.has(player.id));
+    return { lineup: filledLineup, bench: freshBench, reserves: freshReserves };
+}
+
+// ============================================================
+// MATCHDAY FINANCE — every manager starts with the same fanbase.
+//
+// Each match pays gate receipts from the current fan count. The result then
+// moves the fanbase: wins (especially by a margin) grow it, losses shrink it.
+// The next gate is therefore worth more or less, and the money lands directly
+// in the balance. Ghost clubs own no balance, so only human managers settle.
+// ============================================================
+const MATCHDAY_FINANCE = Object.freeze({
+    INITIAL_FANS: 25000,
+    MIN_FANS: 4000,
+    MAX_FANS: 120000,
+    // €M per fan at the gate. 25,000 fans ≈ €1.5M per match.
+    TICKET_PRICE: 0.00006,
+    WIN_FAN_PCT: 0.020,
+    DRAW_FAN_PCT: -0.004,
+    LOSS_FAN_PCT: -0.020,
+    MARGIN_FAN_PCT: 0.005,
+    MAX_FAN_SWING: 0.06
+});
+
+function clampFanCount(value) {
+    return Math.max(MATCHDAY_FINANCE.MIN_FANS, Math.min(MATCHDAY_FINANCE.MAX_FANS, Math.round(value)));
+}
+
+function fansOf(manager) {
+    if (!manager) return MATCHDAY_FINANCE.INITIAL_FANS;
+    const value = Number(manager.fans);
+    if (!Number.isFinite(value) || value <= 0) manager.fans = MATCHDAY_FINANCE.INITIAL_FANS;
+    else manager.fans = clampFanCount(value);
+    return manager.fans;
+}
+
+function ticketRevenueFor(fans) {
+    const safe = Math.max(0, Number(fans) || 0);
+    return Math.max(0.1, Math.round(safe * MATCHDAY_FINANCE.TICKET_PRICE * 10) / 10);
+}
+
+function fanReactionFor(result, goalDiff) {
+    const margin = Math.abs(Number(goalDiff) || 0);
+    const swing = MATCHDAY_FINANCE.MARGIN_FAN_PCT * margin;
+    const max = MATCHDAY_FINANCE.MAX_FAN_SWING;
+    if (result === 'W') return Math.max(-max, Math.min(max, MATCHDAY_FINANCE.WIN_FAN_PCT + swing));
+    if (result === 'L') return Math.max(-max, Math.min(max, MATCHDAY_FINANCE.LOSS_FAN_PCT - swing));
+    return MATCHDAY_FINANCE.DRAW_FAN_PCT;
+}
+
+function formatFanCount(value) {
+    const fans = Math.max(0, Math.round(Number(value) || 0));
+    if (fans >= 1000000) return `${(fans / 1000000).toFixed(1)}M`;
+    if (fans >= 1000) return `${(fans / 1000).toFixed(1)}K`;
+    return String(fans);
+}
+
+function awardMatchdayFinance(manager, result, goalsFor, goalsAgainst) {
+    if (!manager) return null;
+    const before = fansOf(manager);
+    const tier = typeof stadiumTierOf === 'function' ? stadiumTierOf(manager) : 0;
+    const ticketMult = (INVESTMENT.STADIUM_TICKET_MULT && INVESTMENT.STADIUM_TICKET_MULT[tier]) || 1;
+    const fanGainMult = (INVESTMENT.STADIUM_FAN_GAIN_MULT && INVESTMENT.STADIUM_FAN_GAIN_MULT[tier]) || 1;
+    const baseRevenue = ticketRevenueFor(before);
+    const revenue = Math.round(baseRevenue * ticketMult * 10) / 10;
+    const balance = Number(manager.balance) || 0;
+    manager.balance = Math.round((balance + revenue) * 10) / 10;
+    // Cumulative gate receipts for the season report. Balance also holds the
+    // unspent auction money, so it cannot be used to infer ticket income.
+    manager.ticketRevenue = Math.round(((Number(manager.ticketRevenue) || 0) + revenue) * 10) / 10;
+    let pct = fanReactionFor(result, (Number(goalsFor) || 0) - (Number(goalsAgainst) || 0));
+    // Better facilities accelerate growth on good results; they do not soften losses.
+    if (pct > 0) pct *= fanGainMult;
+    const after = clampFanCount(before * (1 + pct));
+    manager.fans = after;
+    manager.lastGate = revenue;
+    manager.lastFanDelta = after - before;
+    manager.lastResult = result;
+    return { revenue, fansBefore: before, fansAfter: after, fanDelta: after - before, pct, stadiumTier: tier };
+}
+
+
+
 // --- Chemistry ---
 // Players in the starting XI link through a shared nation or a shared club.
 // The bonus follows how many linked players the XI carries: 2 = +1, 3-5 = +2,
@@ -52,7 +377,7 @@ const DRAFT_OVR_MIN_WEIGHT = 0.25;
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // a room older than this is treated as expired and deleted when someone touches it
 // Bump on every deploy. A room records the build that created it and refuses guests
 // running a different one, so host and guests never simulate with different rules.
-const BUILD_ID = '2026-11-05.6';
+const BUILD_ID = '2026-11-05.19';
 
 // Once the room's skips are gone, an unwanted player is handed to one club picked at
 // random. The wheel spins this long, then pauses before the sale is announced.
@@ -443,8 +768,8 @@ const TACTICS_TRANSITION = Object.freeze({
     }
 });
 
-// --- Playstyles ---
-// Every player has one role identity, legal only for the positions of its group.
+// --- Archetypes ---
+// Every player has one positional Archetype, legal only for the positions of its group.
 // A style does two things: it nudges the player's effective rating depending on
 // how the role suits the match plan on both sides (fit), and it decides which
 // kind of chance the player is asked to take (weights).
@@ -459,123 +784,230 @@ const TACTICS_TRANSITION = Object.freeze({
 // the pitch suits it and costs when it does not, against an average of zero.
 const PLAYSTYLE_FIT_CLAMP = 3;
 const PLAYSTYLES = Object.freeze({
+    // --- Goalkeepers ---
     pitch_sentry: {
-        name: 'The Pitch Sentry', group: 'GK',
+        name: 'Sweeper Keeper', group: 'GK',
         fit: { own: { defense: { high: 1.2, man: 0.4, low: -1.6 } },
                opp: { possession: { direct: 1.4, positional: -0.7, central: -0.7 } } }
     },
     citadel: {
-        name: 'The Citadel', group: 'GK',
+        name: 'Goalkeeper', group: 'GK',
         fit: { own: { defense: { low: 1.2, zonal: 0.4, high: -1.0, man: -0.6 } },
                opp: { possession: { overload: 1.0, spatial: 0.4, positional: -0.7, direct: -0.7 } } }
     },
+    // --- Centre-backs ---
     deep_architect: {
-        name: 'The Deep Architect', group: 'CB',
+        name: 'Ball-Playing Defender', group: 'CB',
         fit: { own: { possession: { positional: 1.0, lavolpiana: 0.8, spatial: -0.6, central: -0.4, direct: -0.8 } },
                opp: { defense: { high: 0.9, man: 0.3, low: -1.2 } } },
         weights: { assist: 1.15 }
     },
     wrecker: {
-        name: 'The Wrecker', group: 'CB',
+        name: 'No-Nonsense Defender', group: 'CB',
         fit: { own: { defense: { man: 1.1, low: 0.7, high: -1.2, zonal: -0.6 } },
                opp: { possession: { direct: 0.9, positional: -0.5, central: -0.4 } } },
         weights: { score: 0.85, assist: 0.85, setPiece: 1.2, workload: { def: 1.25, key: 0.7 } }
     },
+    central_defender: {
+        name: 'Central Defender', group: 'CB',
+        fit: { own: { defense: { zonal: 0.9, mid: 0.5, high: -0.6, man: -0.8 } },
+               opp: { possession: { positional: 0.7, central: 0.4, direct: -0.6, overload: -0.5 } } },
+        weights: { score: 0.8, assist: 0.85, setPiece: 1.15, workload: { def: 1.2, key: 0.75 } }
+    },
+    libero: {
+        name: 'Libero', group: 'CB',
+        fit: { own: { possession: { positional: 0.9, lavolpiana: 0.7, direct: -0.9, overload: -0.7 },
+                      defense: { high: 0.6, mid: 0.2, low: -0.8 } },
+               opp: { transition: { gegenpress: 0.7, counter: -0.4, restDefense: -0.3 } } },
+        weights: { assist: 1.25, score: 0.9, workload: { def: 1.05, key: 1.15 } }
+    },
+    wide_center_back: {
+        name: 'Wide Centre-Back', group: 'CB',
+        fit: { own: { possession: { overload: 0.9, spatial: 0.6, central: -0.7, positional: -0.8 },
+                      defense: { high: 0.5, man: 0.3, low: -0.8 } },
+               opp: { possession: { direct: 0.6, positional: -0.3, central: -0.3 } } },
+        weights: { score: 0.95, assist: 1.1, setPiece: 1.1, workload: { def: 1.1, key: 1.0 } }
+    },
+    // --- Full-backs / wing-backs ---
     phantom_pivot: {
-        name: 'The Phantom Pivot', group: 'FB',
+        name: 'Inverted Wing-Back', group: 'FB',
         fit: { own: { possession: { positional: 1.0, central: 0.8, direct: -1.1, overload: -0.7 } },
                opp: { transition: { gegenpress: 0.9, counter: -0.5, tacticalFoul: -0.4 } } },
         weights: { score: 0.85, assist: 1.2, workload: { def: 1.1, key: 1.1 } }
     },
     flank_railgun: {
-        name: 'The Flank Railgun', group: 'FB',
+        name: 'Complete Wing-Back', group: 'FB',
         fit: { own: { possession: { overload: 1.2, direct: 0.4, central: -0.8, positional: -0.8 } },
                opp: { defense: { low: 1.0, man: -0.5, zonal: -0.5 } } },
         weights: { score: 1.05, assist: 1.35, setPiece: 1.1, workload: { def: 0.9, key: 1.3 } }
     },
+    wing_back: {
+        name: 'Wing-Back', group: 'FB',
+        fit: { own: { possession: { overload: 0.9, spatial: 0.6, direct: 0.3, positional: -0.9, central: -0.9 },
+                      transition: { counter: 0.5, restAttack: 0.3, restDefense: -0.8 } },
+               opp: { defense: { high: 0.7, low: -0.4, man: -0.3 } } },
+        weights: { score: 1.0, assist: 1.3, workload: { def: 0.95, key: 1.2 } }
+    },
+    no_nonsense_fullback: {
+        name: 'No-Nonsense Full-Back', group: 'FB',
+        fit: { own: { defense: { low: 1.0, man: 0.6, high: -0.9, zonal: -0.7 },
+                      possession: { direct: 0.4, positional: -0.4 } },
+               opp: { possession: { direct: 0.9, overload: 0.3, positional: -0.6, central: -0.6 } } },
+        weights: { score: 0.75, assist: 0.9, setPiece: 1.05, workload: { def: 1.3, key: 0.7 } }
+    },
+    // --- Midfield ---
     puppeteer: {
-        name: 'The Puppeteer', group: 'MID',
+        name: 'Deep-Lying Playmaker', group: 'MID',
         fit: { own: { possession: { positional: 0.9, lavolpiana: 0.9, direct: -1.1, spatial: -0.7 } },
                opp: { transition: { restAttack: 0.5, counter: 0.5, gegenpress: -1.0 } } },
         weights: { score: 0.85, assist: 1.35, setPiece: 1.1, workload: { def: 0.85, key: 1.35 } }
     },
     apex_engine: {
-        name: 'The Apex Engine', group: 'MID',
+        name: 'Box-to-Box Midfielder', group: 'MID',
         fit: { own: { defense: { high: 0.8, man: 0.4, low: -1.2 },
                       transition: { gegenpress: 0.9, restAttack: 0.3, restDefense: -0.7, balanced: -0.5 } },
                opp: { possession: { positional: 0.5, direct: -0.5 } } },
         weights: { score: 1.2, assist: 1.1, workload: { def: 1.15, key: 1.15 } }
     },
     reaper: {
-        name: 'The Reaper', group: 'MID',
-        fit: { own: { defense: { man: 1.1, high: 0.5, low: -0.9, zonal: -0.7 } },
-               opp: { possession: { positional: 0.8, central: 0.6, lavolpiana: -0.7, direct: -0.7 } } },
-        weights: { score: 0.7, assist: 0.85, workload: { def: 1.5, key: 0.8 } }
+        name: 'Ball-Winning Midfielder', group: 'MID',
+        fit: { own: { defense: { man: 1.0, high: 0.6, low: -0.9, zonal: -0.7 },
+                      transition: { gegenpress: 0.7, tacticalFoul: 0.4, restDefense: -0.6, counter: -0.5 } },
+               opp: { possession: { positional: 0.6, central: 0.3, direct: -0.5, overload: -0.4 } } },
+        weights: { score: 0.9, assist: 0.95, workload: { def: 1.35, key: 0.8 } }
     },
     infiltrator: {
-        name: 'The Infiltrator', group: 'MID',
+        name: 'Roaming Playmaker', group: 'MID',
         fit: { own: { possession: { spatial: 1.1, overload: 0.5, positional: 0.3, direct: -0.9, central: -0.5, lavolpiana: -0.5 } },
                opp: { defense: { zonal: 0.6, man: 0.3, low: -0.9 } } },
         weights: { score: 1.2, assist: 1.15, workload: { def: 0.95, key: 1.2 } }
     },
     codebreaker: {
-        name: 'The Codebreaker', group: 'MID',
+        name: 'Advanced Playmaker', group: 'MID',
         fit: { own: { possession: { positional: 0.7, central: 0.5, direct: -1.2 } },
                opp: { defense: { low: 1.2, zonal: 0.5, man: -0.9, high: -0.8 } } },
         weights: { score: 1.1, assist: 1.45, setPiece: 1.2, workload: { def: 0.7, key: 1.5 } }
     },
+    mezzala: {
+        name: 'Mezzala', group: 'MID',
+        fit: { own: { possession: { spatial: 0.9, overload: 0.7, central: 0.3, positional: -0.8, direct: -0.6, lavolpiana: -0.5 } },
+               opp: { defense: { zonal: 0.7, low: 0.4, man: -0.6, high: -0.5 } } },
+        weights: { score: 1.15, assist: 1.2, setPiece: 1.05, workload: { def: 0.9, key: 1.25 } }
+    },
+    carrilero: {
+        name: 'Carrilero', group: 'MID',
+        fit: { own: { possession: { positional: 0.6, spatial: 0.5, overload: 0.3, direct: -0.7, central: -0.7 },
+                      defense: { mid: 0.5, high: 0.3, low: -0.8 } },
+               opp: { transition: { counter: 0.5, gegenpress: 0.3, restAttack: -0.4, restDefense: -0.4 } } },
+        weights: { score: 0.9, assist: 1.15, workload: { def: 1.15, key: 1.1 } }
+    },
+    anchor_man: {
+        name: 'Anchor Man', group: 'MID',
+        fit: { own: { defense: { low: 1.0, man: 0.6, high: -0.9, zonal: -0.7 },
+                      possession: { positional: 0.5, lavolpiana: 0.4, direct: -0.5, overload: -0.4 } },
+               opp: { possession: { direct: 0.8, overload: 0.4, positional: -0.6, central: -0.6 } } },
+        weights: { score: 0.7, assist: 0.95, setPiece: 1.1, workload: { def: 1.4, key: 0.75 } }
+    },
+    half_back: {
+        name: 'Half-Back', group: 'MID',
+        fit: { own: { possession: { lavolpiana: 1.0, positional: 0.7, direct: -0.9, spatial: -0.8 },
+                      defense: { mid: 0.5, low: 0.3, high: -0.8 } },
+               opp: { defense: { high: 0.7, man: 0.3, low: -1.0 } } },
+        weights: { score: 0.75, assist: 1.2, setPiece: 1.05, workload: { def: 1.2, key: 1.1 } }
+    },
+    trequartista: {
+        name: 'Trequartista', group: 'MID',
+        fit: { own: { possession: { central: 1.1, positional: 0.6, spatial: 0.3, direct: -1.0, overload: -1.0 } },
+               opp: { defense: { zonal: 0.9, low: 0.5, man: -0.8, high: -0.6 } } },
+        weights: { score: 1.25, assist: 1.35, setPiece: 1.15, workload: { def: 0.55, key: 1.45 } }
+    },
+    // --- Wingers ---
     cutback_assassin: {
-        name: 'The Cutback Assassin', group: 'WING',
+        name: 'Inside Forward', group: 'WING',
         fit: { own: { possession: { central: 0.9, spatial: 0.8, direct: -1.7 } },
                opp: { defense: { low: 0.8, man: -0.4, zonal: -0.4 } } },
         weights: { score: 1.35, assist: 1.1, setPiece: 1.1, workload: { def: 0.85, key: 1.25 } }
     },
     touchline_demon: {
-        name: 'The Touchline Demon', group: 'WING',
+        name: 'Classic Winger', group: 'WING',
         fit: { own: { possession: { direct: 1.0, overload: 0.6, positional: -0.8, central: -0.8 } },
                opp: { defense: { high: 1.2, man: -0.8, zonal: -0.4 } } },
         weights: { score: 0.95, assist: 1.35, workload: { def: 0.9, key: 1.3 } }
     },
     shadow_maestro: {
-        name: 'The Shadow Maestro', group: 'WING',
+        name: 'Inverted Winger', group: 'WING',
         fit: { own: { possession: { positional: 0.9, central: 0.8, overload: -0.6, direct: -1.1 } },
                opp: { defense: { high: 0.9, low: -0.9 } } },
         weights: { score: 1.05, assist: 1.3, setPiece: 1.15, workload: { def: 0.9, key: 1.4 } }
     },
+    wide_target_man: {
+        name: 'Wide Target Man', group: 'WING',
+        fit: { own: { possession: { direct: 1.1, overload: 0.7, spatial: 0.2, positional: -1.0, central: -1.0 } },
+               opp: { defense: { high: 0.8, man: 0.3, low: -0.6, zonal: -0.5 } } },
+        weights: { score: 1.2, assist: 1.15, setPiece: 1.35, counter: 1.1, workload: { def: 0.85, key: 1.0 } }
+    },
+    // --- Forwards ---
     juggernaut: {
-        name: 'The Juggernaut', group: 'FWD',
+        name: 'Target Forward', group: 'FWD',
         fit: { own: { possession: { direct: 1.6, overload: 0.4, positional: -1.1, central: -0.9 } },
                opp: { defense: { high: 0.6, low: 0.4, man: -1.0 } } },
         weights: { score: 1.15, assist: 1.05, setPiece: 1.5, counter: 1.1, workload: { def: 0.8, key: 0.9 } }
     },
     box_assassin: {
-        name: 'The Box Assassin', group: 'FWD',
+        name: 'Poacher', group: 'FWD',
         fit: { own: { possession: { direct: 0.8, overload: 0.5, positional: -0.8, central: -0.5 } },
                opp: { defense: { high: 1.2, man: 0.5, low: -1.7 } } },
         weights: { score: 1.55, assist: 0.6, setPiece: 1.25, workload: { def: 0.6, key: 0.6 } }
     },
     illusionist: {
-        name: 'The Illusionist', group: 'FWD',
+        name: 'False 9', group: 'FWD',
         fit: { own: { possession: { central: 1.2, positional: 0.7, direct: -1.2, spatial: -0.7 } },
                opp: { defense: { zonal: 0.6, high: 0.3, man: -0.9 } } },
         weights: { score: 1.05, assist: 1.25, workload: { def: 1.0, key: 1.2 } }
     },
     dimension_walker: {
-        name: 'The Dimension Walker', group: 'FWD',
+        name: 'Raumdeuter', group: 'FWD',
         fit: { own: { possession: { spatial: 0.9, overload: 0.6, positional: -0.8, direct: -0.7 } },
                opp: { defense: { zonal: 1.1, low: 0.3, man: -0.9, high: -0.5 } } },
         weights: { score: 1.4, assist: 0.7, setPiece: 1.15, workload: { def: 0.7, key: 0.8 } }
     },
     apex_predator: {
-        name: 'The Apex Predator', group: 'FWD',
+        name: 'Complete Forward', group: 'FWD',
         // Small swings on purpose: this role is never badly placed rather than
         // great in any one spot, which is what makes it worth its rating.
         fit: { own: { possession: { positional: 0.4, spatial: 0.3, overload: 0.3, direct: -0.5, central: -0.5 } },
                opp: { defense: { high: 0.4, man: 0.3, low: -0.7 } } },
         weights: { score: 1.25, assist: 1.15, setPiece: 1.1, workload: { def: 0.9, key: 1.1 } }
     },
+    advanced_forward: {
+        name: 'Advanced Forward', group: 'FWD',
+        fit: { own: { possession: { spatial: 0.8, overload: 0.7, direct: 0.4, positional: -0.9, central: -1.0 },
+                      transition: { counter: 0.6, restAttack: 0.3, restDefense: -0.9 } },
+               opp: { defense: { high: 1.0, man: 0.4, low: -0.8, zonal: -0.6 } } },
+        weights: { score: 1.4, assist: 1.05, counter: 1.2, workload: { def: 0.85, key: 1.0 } }
+    },
+    deep_lying_forward: {
+        name: 'Deep-Lying Forward', group: 'FWD',
+        fit: { own: { possession: { positional: 0.9, central: 0.8, lavolpiana: 0.3, direct: -1.0, overload: -1.0 } },
+               opp: { defense: { zonal: 0.7, high: 0.4, man: -0.6, low: -0.5 } } },
+        weights: { score: 1.0, assist: 1.4, setPiece: 1.1, workload: { def: 0.9, key: 1.35 } }
+    },
+    pressing_forward: {
+        name: 'Pressing Forward', group: 'FWD',
+        fit: { own: { defense: { high: 1.1, man: 0.5, low: -1.0, zonal: -0.6 },
+                      transition: { gegenpress: 1.0, counter: 0.3, restDefense: -0.7, balanced: -0.6 } },
+               opp: { possession: { positional: 0.6, central: 0.4, direct: -0.5, overload: -0.5 } } },
+        weights: { score: 1.15, assist: 1.05, workload: { def: 1.25, key: 0.95 } }
+    },
+    shadow_striker: {
+        name: 'Shadow Striker', group: 'FWD',
+        fit: { own: { possession: { central: 0.9, spatial: 0.7, positional: 0.3, direct: -0.9, overload: -1.0 } },
+               opp: { defense: { zonal: 1.0, man: 0.3, high: -0.5, low: -0.8 } } },
+        weights: { score: 1.45, assist: 0.95, setPiece: 1.05, workload: { def: 0.75, key: 1.1 } }
+    },
+    // --- Any position ---
     wildcard: {
-        name: 'The Tactical Wildcard', group: 'ANY',
+        name: 'Wildcard', group: 'ANY',
         // The wildcard is bought with the out-of-position cap, not with raw fit.
         fit: { own: { possession: { positional: 0.4, central: 0.4, direct: -0.8 },
                       transition: { restDefense: 0.4, gegenpress: -0.4 } },
@@ -664,12 +1096,12 @@ function playstyleWeights(player) {
 }
 
 // ============================================================
-// SPECIALITIES — the habits a scout writes next to the role.
+// PLAYSTYLES (SPECIALITIES) — secondary habits layered on the Archetype.
 //
-// A playstyle answers "what job does this player do on the pitch", a speciality
-// answers "what does he do when the ball is dead, the game is tight, or his legs
-// go". The two are independent: a Box Assassin who is also a Penalty Specialist
-// is a poacher you must not foul inside the box.
+// A playstyle answers "what job does this player do on the pitch"; a speciality
+// is the secondary myth-tag for dead balls, clutch moments, durability and
+// technical habits. Same zero-sum fit rules as PLAYSTYLES. Example: Loki
+// (poacher) + Theseus (penalties) is a box threat you must not foul.
 //
 // Same authoring rules as PLAYSTYLES:
 //   1. every `fit` phase is zero-sum, so a speciality is never a hidden stat boost;
@@ -692,24 +1124,24 @@ const SP_STRIKER = ['CF', 'ST'];
 const SPECIALITIES = Object.freeze({
     // --- Dead-ball & tactical specialists ---
     captain: {
-        name: 'Captain', group: 'Dead-Ball & Tactical Specialist', positions: SP_ALL,
+        name: 'Odin', group: 'Dead Ball', positions: SP_ALL,
         lead: 1, card: 0.9,
         fit: { own: { defense: { high: 0.4, man: 0.3, low: -0.7 } },
                opp: { transition: { gegenpress: 0.5, counter: -0.5 } } }
     },
     set_piece_specialist: {
-        name: 'Set-Piece Specialist', group: 'Dead-Ball & Tactical Specialist',
+        name: 'Athena', group: 'Dead Ball',
         positions: ['CAM', 'CM', 'CDM', 'LM', 'RM'].concat(SP_WING, SP_FB, SP_STRIKER),
         setPiece: 1.45, delivery: 1.85, pen: 0.02, taker: true,
         fit: { own: { possession: { positional: 0.6, central: 0.4, direct: -1.0 } } }
     },
     penalty_specialist: {
-        name: 'Penalty Specialist', group: 'Dead-Ball & Tactical Specialist', positions: SP_OUT,
+        name: 'Achilles', group: 'Dead Ball', positions: SP_OUT,
         pen: 0.09, taker: true, setPiece: 1.1,
         fit: { own: { possession: { central: 0.5, direct: -0.5 } } }
     },
     long_throw_specialist: {
-        name: 'Long-Throw Specialist', group: 'Dead-Ball & Tactical Specialist',
+        name: 'Atlas', group: 'Dead Ball',
         positions: SP_FB.concat(['CB']),
         delivery: 1.6, aerial: 1.3, extraSetPieces: 0.03,
         fit: { own: { possession: { overload: 0.5, direct: 0.4, positional: -0.9 } } }
@@ -717,33 +1149,33 @@ const SPECIALITIES = Object.freeze({
 
     // --- Leadership & mental modifiers ---
     vice_captain: {
-        name: 'Vice-Captain', group: 'Leadership & Mental Modifier', positions: SP_ALL,
+        name: 'Apollo', group: 'Mind', positions: SP_ALL,
         lead: 0.5, card: 0.95
     },
     vocal_organizer: {
-        name: 'Vocal Organizer', group: 'Leadership & Mental Modifier', positions: SP_ALL,
+        name: 'Heimdall', group: 'Mind', positions: SP_ALL,
         lead: 0.25, card: 0.8, fouls: 0.9,
         fit: { own: { defense: { zonal: 0.5, man: -0.5 } } }
     },
     big_game_player: {
-        name: 'Big Game Player', group: 'Leadership & Mental Modifier', positions: SP_OUT,
+        name: 'Zeus', group: 'Mind', positions: SP_OUT,
         clutch: 1.35, card: 0.9,
         fit: { own: { defense: { high: 0.5, man: 0.3, low: -0.8 } },
                opp: { possession: { direct: 0.6, positional: -0.6 } } }
     },
     super_sub: {
-        name: 'Super-Sub', group: 'Leadership & Mental Modifier',
+        name: 'Hermes', group: 'Mind',
         positions: SP_WING.concat(SP_STRIKER, ['CAM', 'CM']),
         sub: 1.5,
         fit: { own: { possession: { direct: 0.5, spatial: 0.4, positional: -0.9 } } }
     },
     enforcer: {
-        name: 'Enforcer', group: 'Leadership & Mental Modifier', positions: SP_DEF,
+        name: 'Ares', group: 'Mind', positions: SP_DEF,
         card: 1.45, fouls: 1.15, aerial: 1.25, workload: { def: 1.2, key: 0.9 },
         fit: { own: { defense: { man: 0.6, low: 0.4, high: -1.0 } } }
     },
     hot_head: {
-        name: 'Hot-Head', group: 'Leadership & Mental Modifier', positions: SP_OUT,
+        name: 'Fenrir', group: 'Mind', positions: SP_OUT,
         card: 1.7, fouls: 1.18, workload: { def: 1.1, key: 1 },
         fit: { own: { defense: { high: 0.5, man: 0.4, low: -0.9 },
                       transition: { gegenpress: 0.6, restDefense: -0.6 } } }
@@ -751,28 +1183,28 @@ const SPECIALITIES = Object.freeze({
 
     // --- Physical & durability tags ---
     iron_man: {
-        name: 'Iron Man', group: 'Physical & Durability Tag', positions: SP_ALL,
+        name: 'Talos', group: 'Body', positions: SP_ALL,
         stamina: 0.72, injury: 0.55, workload: { def: 1.08, key: 1.05 }
     },
     injury_prone: {
-        name: 'Injury Prone', group: 'Physical & Durability Tag', positions: SP_ALL,
+        name: 'Prometheus', group: 'Body', positions: SP_ALL,
         injury: 2.1, stamina: 1.25
     },
     workhorse: {
-        name: 'Workhorse', group: 'Physical & Durability Tag', positions: SP_OUT,
+        name: 'Heracles', group: 'Body', positions: SP_OUT,
         stamina: 0.85, workload: { def: 1.25, key: 1.15 },
         fit: { own: { defense: { high: 0.5, zonal: 0.3, low: -0.8 },
                       transition: { gegenpress: 0.4, balanced: -0.4 } } }
     },
     speedster: {
-        name: 'Speedster', group: 'Physical & Durability Tag',
+        name: 'Boreas', group: 'Body',
         positions: SP_FB.concat(SP_WING, SP_ATT),
         counter: 1.35,
         fit: { own: { possession: { direct: 0.7, overload: 0.4, positional: -1.1 } },
                opp: { defense: { high: 1.0, low: -1.0 } } }
     },
     aerial_threat: {
-        name: 'Aerial Threat', group: 'Physical & Durability Tag',
+        name: 'Ymir', group: 'Body',
         positions: ['CB', 'CDM', 'CM', 'LB', 'RB'].concat(SP_STRIKER),
         aerial: 1.7, setPiece: 1.2,
         fit: { own: { possession: { central: 0.4, spatial: -0.4 } },
@@ -781,26 +1213,26 @@ const SPECIALITIES = Object.freeze({
 
     // --- Technical & behavioural tendencies ---
     distance_shooter: {
-        name: 'Distance Shooter', group: 'Technical & Behavioural Tendency',
+        name: 'Artemis', group: 'Craft',
         positions: ['CM', 'CAM', 'CDM', 'LM', 'RM'].concat(SP_WING, SP_STRIKER),
         longShot: 1.6,
         fit: { own: { possession: { central: 0.6, spatial: 0.4, positional: -1.0 } } }
     },
     trickster: {
-        name: 'Flair / Trickster', group: 'Technical & Behavioural Tendency',
+        name: 'Loki', group: 'Craft',
         positions: ['CAM', 'CM'].concat(SP_WING, SP_STRIKER),
         flair: 1.3, card: 0.9, fouls: 0.92,
         fit: { own: { possession: { spatial: 0.7, positional: 0.3, direct: -1.0 } },
                opp: { defense: { man: 0.6, zonal: -0.6 } } }
     },
     dives_into_tackles: {
-        name: 'Dives Into Tackles', group: 'Technical & Behavioural Tendency',
+        name: 'Thor', group: 'Craft',
         positions: SP_DEF.concat(['CM']),
         card: 1.5, fouls: 1.2, workload: { def: 1.18, key: 0.95 },
         fit: { own: { defense: { man: 0.7, high: 0.4, low: -1.1 } } }
     },
     stays_on_feet: {
-        name: 'Stays on Feet', group: 'Technical & Behavioural Tendency', positions: SP_OUT,
+        name: 'Perseus', group: 'Craft', positions: SP_OUT,
         card: 0.7, fouls: 0.8,
         fit: { own: { defense: { zonal: 0.5, low: 0.3, man: -0.8 } } }
     }
@@ -808,10 +1240,10 @@ const SPECIALITIES = Object.freeze({
 
 // The four families the tags come from, in the order a scout reads them.
 const SPECIALITY_GROUPS = Object.freeze({
-    'Dead-Ball & Tactical Specialist': ['captain', 'set_piece_specialist', 'penalty_specialist', 'long_throw_specialist'],
-    'Leadership & Mental Modifier': ['vice_captain', 'vocal_organizer', 'big_game_player', 'super_sub', 'enforcer', 'hot_head'],
-    'Physical & Durability Tag': ['iron_man', 'injury_prone', 'workhorse', 'speedster', 'aerial_threat'],
-    'Technical & Behavioural Tendency': ['distance_shooter', 'trickster', 'dives_into_tackles', 'stays_on_feet']
+    'Dead Ball': ['captain', 'set_piece_specialist', 'penalty_specialist', 'long_throw_specialist'],
+    'Mind': ['vice_captain', 'vocal_organizer', 'big_game_player', 'super_sub', 'enforcer', 'hot_head'],
+    'Body': ['iron_man', 'injury_prone', 'workhorse', 'speedster', 'aerial_threat'],
+    'Craft': ['distance_shooter', 'trickster', 'dives_into_tackles', 'stays_on_feet']
 });
 
 function specialityPositions(key) {
@@ -923,7 +1355,9 @@ function specialityInjuryRisk(team) {
     if (!slots.length) return 1;
     const avg = slots.reduce((sum, slot) => sum + specialityEffects(slot.player).injury, 0) / slots.length;
     const worst = slots.reduce((max, slot) => Math.max(max, specialityEffects(slot.player).injury), 1);
-    return Math.max(0.6, Math.min(1.7, (avg * 0.5 + worst * 0.5) / SPECIALITY_INJURY_TEAM_CENTRE));
+    // A medical programme keeps fragile bodies on the pitch.
+    const fit = medicalInjuryFactor(team);
+    return Math.max(0.4, Math.min(1.7, ((avg * 0.5 + worst * 0.5) / SPECIALITY_INJURY_TEAM_CENTRE) * fit));
 }
 
 // One player's own injury appetite, on the same centre as the team figure.
@@ -1111,21 +1545,36 @@ const SPECIALITY_PLAYSTYLE_PRIOR = Object.freeze({
     citadel: { captain: 0.5, iron_man: 0.5 },
     deep_architect: { captain: 0.5, set_piece_specialist: 0.6 },
     wrecker: { dives_into_tackles: 0.7, enforcer: 0.6 },
+    central_defender: { iron_man: 0.6, stays_on_feet: 0.4 },
+    libero: { captain: 0.5, set_piece_specialist: 0.5, stays_on_feet: 0.4 },
+    wide_center_back: { long_throw_specialist: 0.5, aerial_threat: 0.5, speedster: 0.3 },
     phantom_pivot: { workhorse: 0.6, speedster: 0.5 },
     flank_railgun: { speedster: 0.7, set_piece_specialist: 0.5, long_throw_specialist: 0.5 },
+    wing_back: { speedster: 0.7, workhorse: 0.5 },
+    no_nonsense_fullback: { dives_into_tackles: 0.7, enforcer: 0.5, iron_man: 0.4 },
     puppeteer: { set_piece_specialist: 0.8, trickster: 0.4 },
     apex_engine: { workhorse: 0.6, distance_shooter: 0.5 },
     reaper: { enforcer: 0.7, dives_into_tackles: 0.5 },
     infiltrator: { speedster: 0.6, big_game_player: 0.4 },
     codebreaker: { set_piece_specialist: 0.7, trickster: 0.5 },
+    mezzala: { distance_shooter: 0.5, trickster: 0.5, workhorse: 0.4 },
+    carrilero: { workhorse: 0.7, stays_on_feet: 0.4 },
+    anchor_man: { enforcer: 0.5, stays_on_feet: 0.5, iron_man: 0.4 },
+    half_back: { captain: 0.4, set_piece_specialist: 0.5, stays_on_feet: 0.5 },
+    trequartista: { trickster: 0.7, set_piece_specialist: 0.5, penalty_specialist: 0.3 },
     cutback_assassin: { trickster: 0.6, distance_shooter: 0.4 },
     touchline_demon: { speedster: 0.7, super_sub: 0.4 },
     shadow_maestro: { set_piece_specialist: 0.6, trickster: 0.5 },
+    wide_target_man: { aerial_threat: 0.7, long_throw_specialist: 0.4 },
     juggernaut: { aerial_threat: 0.7, big_game_player: 0.4 },
     box_assassin: { aerial_threat: 0.5, penalty_specialist: 0.5 },
     illusionist: { trickster: 0.8, stays_on_feet: 0.4 },
     dimension_walker: { big_game_player: 0.5, aerial_threat: 0.4 },
     apex_predator: { big_game_player: 0.6, penalty_specialist: 0.5 },
+    advanced_forward: { speedster: 0.6, big_game_player: 0.5 },
+    deep_lying_forward: { set_piece_specialist: 0.5, trickster: 0.5 },
+    pressing_forward: { workhorse: 0.7, hot_head: 0.3 },
+    shadow_striker: { big_game_player: 0.5, speedster: 0.4 },
     wildcard: { workhorse: 0.4 }
 });
 

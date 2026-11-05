@@ -91,17 +91,27 @@ function pickRand(arr) {
 }
 
 function createTeamState(m) {
-    const lineup = m.formation
+    const rawLineup = m.formation
         .filter(node => node.assignedPlayerId)
         .map(node => ({ player: m.squad.find(player => player.id === node.assignedPlayerId), pos: node.pos, yel: 0 }))
         .filter(slot => slot.player);
-    const bench = m.bench
+    const rawBench = m.bench
         .filter(slot => slot.assignedPlayerId)
         .map(slot => m.squad.find(player => player.id === slot.assignedPlayerId))
         .filter(Boolean);
-    const assignedIds = new Set([...lineup, ...bench].map(slot => slot.player ? slot.player.id : slot.id));
-    const reserves = m.squad.filter(player => !assignedIds.has(player.id));
-    return { id: m.id, name: m.name, lineup, bench, reserves, subs: 0, tactics: normalizeTactics(m.tactics) };
+    const assignedIds = new Set([...rawLineup, ...rawBench].map(slot => slot.player ? slot.player.id : slot.id));
+    const rawReserves = m.squad.filter(player => !assignedIds.has(player.id));
+    // Suspended/injured starters are replaced from the bench and reserves for
+    // this match only. The manager's saved XI is untouched.
+    const available = typeof fillAvailableTeamSlots === 'function'
+        ? fillAvailableTeamSlots(rawLineup, rawBench, rawReserves)
+        : { lineup: rawLineup, bench: rawBench, reserves: rawReserves };
+    return {
+        id: m.id, name: m.name,
+        lineup: available.lineup, bench: available.bench, reserves: available.reserves, subs: 0,
+        tactics: normalizeTactics(m.tactics),
+        medicalTier: medicalTierOf(m)
+    };
 }
 
 // Split strength into attack / midfield / defence (engine-core.js) so a
@@ -124,15 +134,29 @@ function getStrengthBreakdown(team, oppTactics) {
     }));
     const breakdown = EngineCore.strengthBreakdown(entries);
     const missingPlayersPenalty = Math.max(0, STARTERS - valid.length) * 3.5;
-    if (!missingPlayersPenalty) return applyLeadership(breakdown, team);
+    if (!missingPlayersPenalty) return applyLeadership(applyConditioning(breakdown, team), team);
 
-    return applyLeadership({
+    return applyLeadership(applyConditioning({
         overall: breakdown.overall - missingPlayersPenalty,
         att: breakdown.att - missingPlayersPenalty,
         mid: breakdown.mid - missingPlayersPenalty,
         def: breakdown.def - missingPlayersPenalty,
         count: breakdown.count
-    }, team);
+    }, team), team);
+}
+
+// A fitter squad closes games a little better: the medical programme is not a
+// star signing, just a small edge on every line.
+function applyConditioning(breakdown, team) {
+    const fit = medicalConditioningBoost(team);
+    if (!fit) return breakdown;
+    return {
+        ...breakdown,
+        overall: breakdown.overall + fit,
+        att: breakdown.att + fit,
+        mid: breakdown.mid + fit,
+        def: breakdown.def + fit
+    };
 }
 
 // Leadership is a calm-at-the-back bonus, not a goal machine: the armband holds
@@ -758,10 +782,9 @@ function simulateMinute(sim, displayTime, isOT) {
 // set by their body; the bench is only used when fresh legs really beat that fade, and
 // which position gets refreshed follows the scoreline rather than the ratings alone.
 const SUB_WINDOW_START = 57;
-const SUB_FIRST_CHECK = 63;
 const SUB_MIN_GAIN = 0.5;      // below this the swap is noise, so leave the starter on
 
-function getStaminaFade(slot, tactics) {
+function getStaminaFade(slot, tactics, team) {
     const played = (slot.min || 0) - SUB_WINDOW_START;
     if (played <= 0) return 0;
     const stats = (slot.player && slot.player.stats) || {};
@@ -769,11 +792,13 @@ function getStaminaFade(slot, tactics) {
     const running = getTacticsProfileFor(tactics).stamina;
     // An iron man runs the same plan for longer; a fragile body goes earlier.
     const chassis = specialityEffects(slot.player).stamina;
-    return Math.min(0.18, played * 0.005 * running * chassis / Math.max(0.6, engine));
+    // The medical programme buys back some of the late-game fade.
+    const fitness = medicalStaminaFactor(team);
+    return Math.min(0.18, played * 0.005 * running * chassis * fitness / Math.max(0.6, engine));
 }
 
-function getLiveOVR(slot, tactics) {
-    return getDynamicOVR(slot.player, slot.pos) * (1 - getStaminaFade(slot, tactics));
+function getLiveOVR(slot, tactics, team) {
+    return getDynamicOVR(slot.player, slot.pos) * (1 - getStaminaFade(slot, tactics, team));
 }
 
 function pitchUnit(pos) {
@@ -794,7 +819,7 @@ function pickAutoSub(sim, tm, tn, forced = false, early = false) {
 
     let best = null;
     onPitch.forEach(out => {
-        const live = getLiveOVR(out, tm.tactics);
+        const live = getLiveOVR(out, tm.tactics, tm);
         bench.forEach(inn => {
             const naturalFit = inn.mainPos === out.pos || (inn.subPos || []).includes(out.pos) ? 0.8 : 0;
             // Early changes are injuries / knocks, so who goes off follows the body:
@@ -811,7 +836,7 @@ function pickAutoSub(sim, tm, tn, forced = false, early = false) {
     // A gassed player is a liability even when the bench cannot offer an upgrade, so
     // fatigue on its own can force the change.
     // Planned changes (see buildSubPlan) always happen; only unplanned ones need a real upgrade.
-    if (!forced && best.gain < SUB_MIN_GAIN && getStaminaFade(best.out, tm.tactics) < 0.12) return null;
+    if (!forced && best.gain < SUB_MIN_GAIN && getStaminaFade(best.out, tm.tactics, tm) < 0.12) return null;
     return best;
 }
 
@@ -874,10 +899,17 @@ function applyAutomaticSub(sim, tm, tn, events) {
         if (!choice) continue;
 
         const outName = choice.out.player.name;
+        const outId = choice.out.player.id;
         tm.bench = tm.bench.filter(x => x.id !== choice.inn.id);
         choice.out.player = choice.inn;
         choice.out.min = 0;
         choice.out.yel = 0;
+        // Early changes are knocks. Remember who came off so the post-match
+        // settlement can give him a real injury length.
+        if (planned.early) {
+            sim.injuryOuts = sim.injuryOuts || [];
+            sim.injuryOuts.push({ t: tn, id: outId, name: outName });
+        }
         // The slot remembers that it is now filled from the bench, which is what a
         // Super-Sub's finishing bonus hangs on.
         choice.out.cameOn = minute;
@@ -1127,9 +1159,91 @@ function startPenaltyShootout(sim) {
     sim.timelineTimer = setTimeout(kick, matchDelay(PEN_KICK_DELAY));
 }
 
+// Applies the human consequences of a live match: suspensions for red cards,
+// injuries for early knocks, the gate receipt and the fan reaction. A guest
+// never owns this state, so it is settled on the host only.
+function settleLiveMatch(sim) {
+    if (!sim || sim.settled) return;
+    sim.settled = true;
+    if (typeof Net !== 'undefined' && Net.online && !Net.ownsGame()) return;
+
+    const pen = sim.penRes;
+    const sides = [
+        { t: 1, team: sim.t1, gf: sim.s1, ga: sim.s2 },
+        { t: 2, team: sim.t2, gf: sim.s2, ga: sim.s1 }
+    ];
+    let changed = false;
+    const reports = [];
+
+    sides.forEach(side => {
+        const manager = (gameState.managers || []).find(m =>
+            side.team && String(m.id) === String(side.team.id));
+        if (!manager) return;
+
+        let result = side.gf > side.ga ? 'W' : side.gf === side.ga ? 'D' : 'L';
+        if (pen) result = (side.t === 1 ? pen.p1 > pen.p2 : pen.p2 > pen.p1) ? 'W' : 'L';
+        const pens = pen ? (side.t === 1 ? `${pen.p1}–${pen.p2}` : `${pen.p2}–${pen.p1}`) : null;
+
+        // First clear the fixture a previously banned/injured man has just missed,
+        // then add anything that happened in this match.
+        if (typeof tickPlayerAbsences === 'function') tickPlayerAbsences(manager.squad);
+
+        const suspensions = [];
+        const injuries = [];
+        let yellows = 0;
+        Object.values(sim.ratings || {}).forEach(entry => {
+            if (!entry || entry.team !== side.t || !entry.player) return;
+            if (entry.yellow) yellows += Number(entry.yellow) || 0;
+            if (!entry.red) return;
+            const player = (manager.squad || []).find(p => p.id === entry.player.id);
+            if (!player) return;
+            const out = markPlayerOut(player, suspensionLengthFor(player), 'suspension');
+            suspensions.push({ name: player.name, matches: out ? out.matches : 1 });
+            changed = true;
+        });
+
+        (sim.injuryOuts || []).filter(entry => entry.t === side.t).forEach(entry => {
+            const player = (manager.squad || []).find(p => p.id === entry.id);
+            if (!player) return;
+            const out = markPlayerOut(player, injuryLengthFor(player, side.team), 'injury');
+            injuries.push({ name: player.name, matches: out ? out.matches : 1 });
+            changed = true;
+        });
+
+        const finance = awardMatchdayFinance(manager, result, side.gf, side.ga);
+        reports.push({
+            managerId: manager.id,
+            name: manager.name,
+            result, goalsFor: side.gf, goalsAgainst: side.ga, pens,
+            revenue: finance ? finance.revenue : 0,
+            fansBefore: finance ? finance.fansBefore : fansOf(manager),
+            fansAfter: finance ? finance.fansAfter : fansOf(manager),
+            fanDelta: finance ? finance.fanDelta : 0,
+            totalRevenue: Number(manager.ticketRevenue) || 0,
+            yellows, injuries, suspensions
+        });
+        changed = true;
+    });
+
+    // European ties settle the same consequences but never pop the report up.
+    if (!sim.isEurope && typeof showMatchdayReportPanels === 'function' && reports.length) {
+        showMatchdayReportPanels(reports, { title: pen ? 'Full time · penalties' : 'Full time' });
+    }
+
+    if (!changed) return;
+    if (typeof updateDashboard === 'function') {
+        gameState.managers.forEach(manager => updateDashboard(manager.id));
+    }
+    if (typeof Net !== 'undefined' && Net.online && Net.isHost && typeof Net.publishManagers === 'function') {
+        Net.publishManagers();
+    }
+    if (typeof SaveGame !== 'undefined') SaveGame.schedule();
+}
+
 function finishMatchSimulation(sim) {
     if (sim.finished) return; // never record a result twice
     sim.finished = true;
+    settleLiveMatch(sim);
     clearTimeout(sim.timelineTimer);
     finishVisuals(sim);
 }

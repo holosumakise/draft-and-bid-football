@@ -2,6 +2,11 @@
 function showScreen(screenId) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(screenId).classList.add('active');
+    // Matchday panels belong to the season chart and the full-time screen only.
+    const keepReports = screenId === 'screen-season'
+        || screenId === 'screen-match'
+        || screenId === 'screen-h2h-result';
+    if (!keepReports && typeof hideMatchReportPanels === 'function') hideMatchReportPanels();
     // While an online game is running the host's screen is everyone's screen.
     if (Net.online && Net.isHost && Online.gameLive) Net.publishScreen(screenId);
 }
@@ -360,12 +365,6 @@ function playDraftDiscardAnimation(onComplete) {
 
 
 function formatBalance(amount) { return amount >= 1000 ? `€${(amount / 1000).toFixed(2)}B` : `€${amount}M`; }
-function formatPositions(player) {
-    if (!player) return "";
-    const main = typeof player.mainPos === "string" ? player.mainPos : "";
-    const subs = Array.isArray(player.subPos) ? player.subPos.filter(p => typeof p === "string") : [];
-    return [main, ...subs].filter(Boolean).join("/");
-}
 function escapeHTML(str) { return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function shortName(name) {
@@ -424,6 +423,11 @@ function renderDOMForManagers() {
                         <small>Balance</small>
                     </div>
                 </div>
+
+                <button type="button" id="m${m.id}-invest-btn" class="club-invest" onclick="openInvestment(${m.id})">
+                    <span>Club Investment</span>
+                    <small id="m${m.id}-invest-summary">Training · Medical · Scouting</small>
+                </button>
 
                 <div id="m${m.id}-budget" class="budget-track hidden">
                     <div class="budget-track__labels">
@@ -506,11 +510,9 @@ function updateDashboard(id) {
     const balWrap = document.getElementById(`m${id}-balance-wrap`);
     const isSolo = gameState.managers.length === 1;
 
-    if (balWrap) {
-        if (isSolo) balWrap.classList.add('hidden');
-        else balWrap.classList.remove('hidden');
-    }
-    if (balEl && !isSolo) balEl.innerText = formatBalance(m.balance);
+    // Money now buys squad investment, so a solo manager still needs to see it.
+    if (balWrap) balWrap.classList.remove('hidden');
+    if (balEl) balEl.innerText = formatBalance(m.balance);
 
     updateConnectionBadge(id);
 
@@ -526,6 +528,109 @@ function updateDashboard(id) {
 
     updateBudgetTracker(id);
     updateChemistryDisplay(id);
+    if (typeof updateInvestmentEntry === 'function') updateInvestmentEntry(id);
+}
+
+// ============================================================
+// MATCHDAY PANELS
+//
+// A small stack of cards, one per human manager: under the league chart when a
+// matchday has an injury or a ban, and floating at full time in a live match. Each card names the club,
+// its result, the gate receipt, the fan movement, and any cards or injuries.
+// ============================================================
+const MATCH_REPORT_COLORS = ['#34d399', '#60a5fa', '#f472b6', '#fbbf24'];
+
+function reportManagerColor(managerId) {
+    const index = (gameState.managers || []).findIndex(m => String(m.id) === String(managerId));
+    return MATCH_REPORT_COLORS[(index >= 0 ? index : 0) % MATCH_REPORT_COLORS.length];
+}
+
+function reportMatchPlural(n, one, many) {
+    return `${n} ${n === 1 ? one : many}`;
+}
+
+// One card per human club: result, gate, fans and any cards or injuries.
+function matchReportCardsHTML(list) {
+    return list.map(report => {
+        const delta = Number(report.fanDelta) || 0;
+        const deltaText = delta === 0
+            ? '<em>—</em>'
+            : `<em class="${delta < 0 ? 'down' : ''}">${delta > 0 ? '▲ +' : '▼ −'}${formatFanCount(Math.abs(delta))}</em>`;
+
+        const injuries = (report.injuries || []).map(item => `
+            <div class="match-report__event match-report__event--injury">🚑 <span><b>${escapeHTML(item.name)}</b> · out ${reportMatchPlural(item.matches, 'match', 'matches')}</span></div>`).join('');
+        const suspensions = (report.suspensions || []).map(item => `
+            <div class="match-report__event match-report__event--suspension">🟥 <span><b>${escapeHTML(item.name)}</b> · ${reportMatchPlural(item.matches, 'match', 'matches')} ban</span></div>`).join('');
+        const yellows = Number(report.yellows) > 0
+            ? `<div class="match-report__event match-report__event--yellow">🟨 ${reportMatchPlural(report.yellows, 'yellow card', 'yellow cards')}</div>`
+            : '';
+        const noEvents = !injuries && !suspensions && !yellows
+            ? '<div class="match-report__empty">No new cards or injuries.</div>'
+            : '';
+
+        return `<div class="match-report" style="--report-accent:${reportManagerColor(report.managerId)}">
+            <div class="match-report__head">
+                <span class="match-report__name">${escapeHTML(report.name || 'Club')}</span>
+                <span class="match-report__score match-report__score--${report.result}">${report.result} ${report.goalsFor}–${report.goalsAgainst}</span>
+            </div>
+            <div class="match-report__row"><span>Gate</span><b>+${formatBalance(report.revenue || 0)}</b></div>
+            <div class="match-report__row"><span>Fans</span>${deltaText}</div>
+            ${report.pens ? `<div class="match-report__row"><span>Penalties</span><b>${escapeHTML(report.pens)}</b></div>` : ''}
+            ${injuries}${suspensions}${yellows}${noEvents}
+        </div>`;
+    }).join('');
+}
+
+// Floating full-time card for a live (non-European) match.
+function showMatchdayReportPanels(reports, meta = {}) {
+    const layer = document.getElementById('match-report-layer');
+    if (!layer) return;
+    const list = (reports || []).filter(Boolean);
+    if (!list.length) return hideMatchReportPanels();
+
+    const heading = meta.matchday ? `Matchday ${meta.matchday}` : (meta.title || 'Match update');
+    layer.innerHTML = `<div class="match-report__title"><span>${escapeHTML(heading)}</span><button type="button" class="match-report__close" onclick="hideMatchReportPanels()" aria-label="Dismiss match updates">×</button></div>` + matchReportCardsHTML(list);
+    layer.classList.remove('hidden');
+}
+
+function hideMatchReportPanels() {
+    const layer = document.getElementById('match-report-layer');
+    if (layer) {
+        layer.classList.add('hidden');
+        layer.innerHTML = '';
+    }
+    hideSeasonEventPanel();
+}
+
+// League replay: when a matchday brings an injury or a ban, the replay stops and the
+// updates for every club sit under the chart until the manager presses Continue.
+// Returns false (and shows nothing) when there is nowhere to show the panel, so the
+// caller can carry on instead of waiting for a button that does not exist.
+function showSeasonEventPanel(reports, matchday, onContinue) {
+    const panel = document.getElementById('season-event-panel');
+    const list = (reports || []).filter(Boolean);
+    if (!panel || !list.length) return false;
+    panel.innerHTML = `
+        <div class="season-event__head">Matchday ${matchday} · Updates</div>
+        <div class="season-event__cards">${matchReportCardsHTML(list)}</div>
+        <div class="season-event__foot"><button type="button" id="season-event-continue" class="season-event__btn">Continue</button></div>`;
+    panel.classList.remove('hidden');
+    const button = document.getElementById('season-event-continue');
+    button.onclick = () => {
+        if (button.disabled) return;
+        button.disabled = true;
+        hideSeasonEventPanel();
+        if (typeof onContinue === 'function') onContinue();
+    };
+    try { panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); button.focus({ preventScroll: true }); } catch (err) { /* cosmetic */ }
+    return true;
+}
+
+function hideSeasonEventPanel() {
+    const panel = document.getElementById('season-event-panel');
+    if (!panel) return;
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
 }
 
 function updateBudgetTracker(id) {

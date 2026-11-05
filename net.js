@@ -609,7 +609,13 @@ function serializePlayer(p) {
 
 // Host-authored: what the auction and the wallet decide.
 function serializeManagerHost(m) {
-    return { id: m.id, name: m.name, balance: m.balance, squad: (m.squad || []).map(serializePlayer) };
+    return {
+        id: m.id, name: m.name, balance: m.balance,
+        fans: typeof fansOf === 'function' ? fansOf(m) : (Number(m.fans) || 0),
+        ticketRevenue: Math.round((Number(m.ticketRevenue) || 0) * 10) / 10,
+        squad: (m.squad || []).map(serializePlayer),
+        investment: { medical: medicalTierOf(m), scouting: Number(m.investment && m.investment.scouting) || 0 }
+    };
 }
 
 // Player-authored: the shape, the XI, the bench and the match plan.
@@ -685,7 +691,12 @@ function serializeSeason(season) {
     if (!season) return null;
     return {
         finalTable: (season.finalTable || []).map(r => ({ ...r })),
-        humanSeries: (season.humanSeries || []).map(s => ({ id: s.id, name: s.name, managerId: s.managerId, color: s.color, positions: s.positions.slice(), results: s.results.slice() })),
+        humanSeries: (season.humanSeries || []).map(s => ({
+            id: s.id, name: s.name, managerId: s.managerId, color: s.color,
+            positions: s.positions.slice(), results: s.results.slice(),
+            fans: (s.fans || []).slice()
+        })),
+        matchdayReports: season.matchdayReports || {},
         leagueSize: season.leagueSize,
         midSeason: !!season.midSeason,
         awards: season.awards || null,

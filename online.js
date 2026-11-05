@@ -188,6 +188,15 @@ const Online = {
                 TransferWindow.hostAction(seat, payload.action, payload);
             }
         }
+        if (type === 'invest') {
+            // A club may only spend its own money.
+            const claimed = Number(payload && payload.managerId);
+            const seat = Number(slot);
+            if (!Number.isFinite(claimed) || claimed !== seat) return;
+            if (typeof Investment !== 'undefined' && Investment.hostAction) {
+                Investment.hostAction(seat, payload.action, payload);
+            }
+        }
     },
 
     // --- Client: host state arriving as snapshots ---
@@ -272,7 +281,15 @@ const Online = {
             const own = node.own || {};
             if (Array.isArray(host.squad)) m.squad = host.squad.filter(Boolean);
             if (typeof host.balance === 'number') m.balance = host.balance;
+            if (typeof host.fans === 'number') m.fans = host.fans;
+            if (typeof host.ticketRevenue === 'number') m.ticketRevenue = host.ticketRevenue;
             if (host.name) m.name = host.name;
+            if (host.investment) {
+                m.investment = {
+                    medical: Number(host.investment.medical) || 0,
+                    scouting: Number(host.investment.scouting) || 0
+                };
+            }
             if (!Net.canControl(id) || (this.restoreOwnPending && Array.isArray(own.formation))) {
                 if (Array.isArray(own.formation)) m.formation = own.formation.map(fillNode);
                 if (Array.isArray(own.bench)) m.bench = own.bench.map(fillBenchNode);
@@ -305,6 +322,11 @@ const Online = {
             checkMatchReady();
         }
         renderDraftBoard();
+        // A remote guest may have just bought training or a programme; keep an
+        // open investment panel in step with the host's snapshot.
+        if (typeof Investment !== 'undefined' && Investment.onManagersUpdated) {
+            Investment.onManagersUpdated();
+        }
     },
 
     applyDraft(draft) {
@@ -515,6 +537,10 @@ function fillBenchNode(n) {
 function showScreenLocal(screenId) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(screenId)?.classList.add('active');
+    const keepReports = screenId === 'screen-season'
+        || screenId === 'screen-match'
+        || screenId === 'screen-h2h-result';
+    if (!keepReports && typeof hideMatchReportPanels === 'function') hideMatchReportPanels();
 }
 
 Online.install();

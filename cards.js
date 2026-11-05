@@ -491,6 +491,10 @@ function renderSquadRow(player, opts = {}) {
     const tier = cardTierOf(player);
     const price = opts.price;
     const click = opts.managerId != null ? ` onclick="openPlayerCard(${player.id}, ${opts.managerId})"` : '';
+    const availability = typeof playerAvailability === 'function' ? playerAvailability(player) : null;
+    const status = availability
+        ? `<span class="squad-row__status squad-row__status--${availability.reason}" title="${cardEscape(availability.label)}">${availability.code} ${availability.matches}</span>`
+        : '';
     return `
         <li class="squad-row squad-row--${tier}"${click} tabindex="0"
             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPlayerCard(${player.id}, ${opts.managerId != null ? opts.managerId : 'null'})}">
@@ -502,6 +506,7 @@ function renderSquadRow(player, opts = {}) {
                 <b>${cardEscape(player.name)}</b>
                 <small>${cardEscape(cardPositions(player))}${player.team ? ` · ${cardEscape(player.team)}` : ''}</small>
             </span>
+            ${status}
             ${price != null ? `<span class="squad-row__price">€${price}M</span>` : ''}
         </li>`;
 }
@@ -539,11 +544,21 @@ function chemistryLinkInfo(manager, player) {
     });
     return best;
 }
-
-// The role name only — the style is a label, not a manual.
+// Display name for the player's assigned Archetype.
+// Uses the stored key directly so draft/scout info still shows GK roles
+// (Sweeper Keeper / Goalkeeper) even if a position check would null them out.
 function playstyleName(player) {
-    const key = typeof playstyleOf === 'function' ? playstyleOf(player) : null;
-    return key && typeof PLAYSTYLES !== 'undefined' && PLAYSTYLES[key] ? PLAYSTYLES[key].name : '';
+    if (!player || typeof PLAYSTYLES === 'undefined') return '';
+    let key = player.playstyle;
+    if (!key || !PLAYSTYLES[key]) {
+        if (typeof playstyleOf === 'function') key = playstyleOf(player);
+    }
+    if (!key || !PLAYSTYLES[key]) {
+        if (typeof playstyleForName === 'function' && player.mainPos) {
+            key = playstyleForName(player.mainPos, player.name);
+        }
+    }
+    return key && PLAYSTYLES[key] ? PLAYSTYLES[key].name : '';
 }
 
 function renderScoutStrip(player, managerId) {
@@ -559,12 +574,12 @@ function renderScoutStrip(player, managerId) {
         <div class="scout-strip">
             ${style ? `
                 <div class="scout-chip">
-                    <span>Playstyle</span>
+                    <span>Archetype</span>
                     <b class="scout-style">${cardEscape(style)}</b>
                 </div>` : ''}
             ${habit ? `
                 <div class="scout-chip">
-                    <span>Speciality</span>
+                    <span>Playstyle</span>
                     <b class="scout-habit">${cardEscape(habit)}</b>
                 </div>` : ''}
             <div class="scout-chip">

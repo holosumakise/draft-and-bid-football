@@ -49,50 +49,6 @@
         .six-yard-top { position: absolute; top: 0; left: 50%; width: 25%; height: 5%; border: 2px solid white; border-top: none; transform: translateX(-50%); }
         .six-yard-bottom { position: absolute; bottom: 0; left: 50%; width: 25%; height: 5%; border: 2px solid white; border-bottom: none; transform: translateX(-50%); }
 
-        /* Player Nodes */
-        .pitch-node {
-            position: absolute;
-            transform: translate(-50%, -50%);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            z-index: 10;
-        }
-        .pitch-node:active { z-index: 50; }
-        .pitch-node-circle {
-            width: 42px;
-            height: 42px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 2px solid white;
-            color: white;
-            font-size: 12px;
-            font-weight: bold;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
-            cursor: grab;
-            touch-action: none;
-            transition: transform 0.1s;
-            position: relative;
-        }
-        .pitch-node-circle:active { cursor: grabbing; transform: scale(1.1); }
-        .pitch-node-circle.locked { cursor: not-allowed; background-color: #475569 !important; }
-        .pitch-node-circle.locked.gk-fixed { background-color: #ca8a04 !important; }
-        .pitch-node-circle.gk-fixed { cursor: default; }
-        .pitch-node-circle.gk-fixed:active { transform: none; }
-        .pitch-node-label {
-            font-size: 11px;
-            background: rgba(0,0,0,0.85);
-            color: white;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-top: 4px;
-            white-space: nowrap;
-            pointer-events: none;
-            font-weight: bold;
-        }
-
         /* Bench Nodes */
         .bench-area { display: flex; gap: 10px; justify-content: center; margin-top: 15px; flex-wrap: wrap; max-width: 400px; }
         .bench-node { width: 46px; display: flex; flex-direction: column; align-items: center; position: relative; cursor: grab; touch-action: none; }
@@ -825,6 +781,17 @@
         .manager-card__meta b { color: var(--text); }
         .manager-card__balance { margin-left: auto; font-family: var(--font-display); font-size: 22px; color: var(--emerald); line-height: 1; white-space: nowrap; }
         .manager-card__balance small { display: block; margin-top: 3px; font-family: var(--font-body); font-size: 8px; letter-spacing: 0.16em; color: var(--dim); text-align: right; }
+        .club-invest {
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            width: 100%; padding: 8px 10px; border-radius: 10px; cursor: pointer;
+            border: 1px solid color-mix(in srgb, var(--team-accent, #34d399) 35%, transparent);
+            background: color-mix(in srgb, var(--team-accent, #34d399) 10%, transparent);
+            color: var(--text); font-family: var(--font-body);
+            font-size: 9px; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase;
+            transition: border-color .15s ease, background .15s ease;
+        }
+        .club-invest:hover { border-color: var(--team-accent, #34d399); background: color-mix(in srgb, var(--team-accent, #34d399) 16%, transparent); }
+        .club-invest small { font-size: 9px; font-weight: 700; letter-spacing: 0.02em; text-transform: none; color: var(--muted); text-align: right; }
         .budget-track { display: flex; flex-direction: column; gap: 5px; }
         .budget-track__labels { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; font-weight: 800; color: var(--muted); }
         .budget-track__labels b { color: var(--emerald); }
@@ -853,6 +820,65 @@
         .squad-row__body b { font-size: 11px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .squad-row__body small { font-size: 8px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .squad-row__price { font-size: 9px; color: var(--emerald); font-weight: 900; white-space: nowrap; }
+        .squad-row__status { font-size: 8px; font-weight: 900; letter-spacing: 0.04em; padding: 2px 5px; border-radius: 5px; white-space: nowrap; }
+        .squad-row__status--injury { color: #fca5a5; background: rgba(127, 29, 29, 0.45); border: 1px solid rgba(248, 113, 113, 0.45); }
+        .squad-row__status--suspension { color: #fcd34d; background: rgba(120, 53, 15, 0.45); border: 1px solid rgba(251, 191, 36, 0.45); }
+
+        /* Matchday panels: one card per manager, shown while the season animates. */
+        .match-report-layer {
+            position: fixed; right: 14px; bottom: 14px; z-index: 78;
+            width: min(350px, calc(100vw - 24px)); max-height: min(68vh, 560px);
+            overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+            padding: 2px; pointer-events: none;
+        }
+        .match-report-layer.hidden { display: none; }
+        .match-report {
+            pointer-events: auto; padding: 8px 10px; border-radius: 10px;
+            border: 1px solid #334155; border-left: 3px solid var(--report-accent, #34d399);
+            background: rgba(2, 6, 23, 0.96); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+            animation: report-pop 0.28s ease-out;
+        }
+        @keyframes report-pop {
+            from { opacity: 0; transform: translateY(10px) scale(0.98); }
+            to { opacity: 1; transform: none; }
+        }
+        .match-report__title { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; font-size: 9px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; color: #94a3b8; pointer-events: auto; }
+        .match-report__close { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid #334155; background: rgba(15, 23, 42, 0.9); color: #cbd5e1; font-size: 12px; line-height: 1; cursor: pointer; }
+        .match-report__close:hover { color: #fff; border-color: #64748b; }
+        .match-report__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+        .match-report__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase; color: #f8fafc; }
+        .match-report__score { flex: 0 0 auto; padding: 2px 6px; border-radius: 999px; font-size: 10px; font-weight: 900; white-space: nowrap; }
+        .match-report__score--W { color: #052e16; background: #34d399; }
+        .match-report__score--D { color: #0f172a; background: #94a3b8; }
+        .match-report__score--L { color: #450a0a; background: #f87171; }
+        .match-report__row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 1px 0; font-size: 10px; color: #94a3b8; }
+        .match-report__row b { color: #e2e8f0; font-weight: 800; }
+        .match-report__row em { font-style: normal; font-weight: 800; color: #34d399; }
+        .match-report__row em.down { color: #f87171; }
+        .match-report__event { display: flex; gap: 5px; margin-top: 3px; font-size: 10px; line-height: 1.35; color: #fca5a5; }
+        .match-report__event b { color: #fecaca; }
+        .match-report__event--suspension { color: #fcd34d; }
+        .match-report__event--suspension b { color: #fde68a; }
+        .match-report__event--yellow { color: #fde68a; }
+        .match-report__empty { margin-top: 3px; font-size: 9px; color: #64748b; }
+        .season-finance-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+        .season-finance-row { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border: 1px solid #1e293b; border-radius: 10px; background: rgba(15, 23, 42, 0.65); }
+        .season-finance-row__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
+        .season-finance-row__stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: #94a3b8; }
+        .season-finance-row__stats b { color: #e2e8f0; }
+        .season-finance-row__fans b { color: #60a5fa; }
+        @media (max-width: 640px) {
+            .match-report-layer { right: 8px; left: 8px; bottom: 8px; width: auto; max-height: 52vh; }
+        }
+        /* League replay pause: update panel under the chart. */
+        .season-event { margin-top: 12px; padding: 10px; border: 1px solid #334155; border-radius: 12px; background: rgba(2, 6, 23, 0.7); flex-shrink: 0; }
+        .season-event.hidden { display: none; }
+        .season-event__head { margin-bottom: 8px; font-size: 10px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; color: #94a3b8; }
+        .season-event__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+        .season-event__foot { display: flex; justify-content: center; margin-top: 10px; }
+        .season-event__btn { padding: 8px 32px; border-radius: 999px; background: #10b981; color: #022c22; font-size: 14px; font-weight: 900; cursor: pointer; transition: background 0.12s ease; }
+        .season-event__btn:hover { background: #34d399; }
+        .season-event__btn:disabled { opacity: 0.6; cursor: default; }
         .squad-empty { padding: 14px 8px; text-align: center; font-size: 10px; color: var(--dim); font-style: italic; }
 
         /* ---------- Pitch ---------- */
@@ -889,6 +915,7 @@
         .pitch-node:active { z-index: 50; }
         .pitch-node-circle {
             width: 44px; height: 44px; border-radius: 50%;
+            font-size: 12px; font-weight: 700;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             border: 2px solid rgba(255, 255, 255, 0.85);
             color: #fff; background: linear-gradient(160deg, #334155, #0f172a);
@@ -905,8 +932,9 @@
         .pitch-node-circle.locked.gk-fixed { background: #b45309 !important; }
         .pitch-node-circle.gk-fixed { cursor: default; }
         .pitch-node-circle.gk-fixed:active { transform: none; }
-        .pitch-node-label { margin-top: 4px; max-width: 72px; padding: 2px 5px; border-radius: 5px; background: rgba(3, 7, 18, 0.82); border: 1px solid rgba(255, 255, 255, 0.10); font-size: 9px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 3px; align-items: center; pointer-events: none; }
-        .pitch-node-label i { font-style: normal; color: var(--emerald); font-size: 8px; }
+        .pitch-node-label { margin-top: 4px; max-width: 72px; box-sizing: border-box; padding: 2px 5px; border-radius: 5px; background: rgba(3, 7, 18, 0.82); border: 1px solid rgba(255, 255, 255, 0.10); font-size: 9px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 3px; align-items: center; pointer-events: none; }
+        .pitch-node-label > span { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pitch-node-label i { font-style: normal; color: var(--emerald); font-size: 8px; flex: none; }
         .chem-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
         .chem-line { fill: none; stroke: rgba(52, 211, 153, 0.40); stroke-width: 1.5; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
         .chem-line.is-strong { stroke: rgba(52, 211, 153, 0.78); stroke-width: 2; }
@@ -1373,7 +1401,7 @@
 
     <!-- Screen 4a: League Season Simulation -->
     <div id="screen-season" class="screen p-3 md:p-6 bg-slate-950 items-center justify-center relative">
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 md:p-5 shadow-2xl w-full max-w-4xl flex flex-col max-h-[96vh]">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 md:p-5 shadow-2xl w-full max-w-4xl flex flex-col max-h-[96vh] overflow-y-auto">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 border-b border-slate-800 pb-3 shrink-0">
                 <h2 class="text-lg md:text-2xl font-black text-emerald-400 uppercase tracking-wider">League · Season</h2>
                 <div class="flex items-center gap-3">
@@ -1390,6 +1418,9 @@
             <div class="relative w-full bg-slate-950/80 border border-slate-700 rounded-xl overflow-hidden" style="height:min(42vh,320px)">
                 <canvas id="season-chart" class="w-full h-full block"></canvas>
             </div>
+
+            <!-- Injury / ban updates: the replay stops here until Continue is pressed -->
+            <div id="season-event-panel" class="season-event hidden" aria-live="polite"></div>
 
             <div id="season-legend" class="flex flex-wrap gap-3 justify-center mt-3 text-xs font-bold shrink-0"></div>
             <div id="season-next-wrap" class="hidden justify-center mt-4 shrink-0">
@@ -1424,6 +1455,11 @@
             <div class="mb-8">
                 <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Individual Awards</h3>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="season-awards"></div>
+            </div>
+
+            <div class="mb-8">
+                <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Club Finances</h3>
+                <div id="season-finances" class="season-finance-list"></div>
             </div>
 
             <div class="flex justify-center">
@@ -1550,6 +1586,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Matchday panels: fans, gate money, injuries and cards per manager -->
+    <div id="match-report-layer" class="match-report-layer hidden" aria-live="polite" aria-label="Match updates"></div>
 
     <!-- Notification Toast -->
     <div id="toast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-slate-800 border border-slate-600 text-white px-6 py-3 rounded-xl shadow-2xl opacity-0 transition-opacity duration-300 pointer-events-none z-50">
@@ -1687,6 +1726,10 @@
                         <div class="text-[10px] font-black uppercase tracking-wider text-sky-400 mb-1">8 · Online</div>
                         <p class="text-xs text-slate-300 leading-relaxed">Pick a mode, then <strong>Create Room</strong> for a code or <strong>Join Room</strong> with one. The host sets squad size and difficulty and runs the game; every manager bids, picks their XI and sets tactics on their own device.</p>
                     </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
+                        <div class="text-[10px] font-black uppercase tracking-wider text-emerald-400 mb-1">9 · Invest</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Leftover cash buys <strong>Club Investment</strong>: a permanent training camp for one player, a season-long medical programme that cuts injury and fatigue risk, or a scouting network that reveals hidden positional fit and rival match plans. Open it from a club card or the transfer window.</p>
+                    </div>
                 </div>
                 <p class="text-[11px] text-slate-500 mt-3 text-center">Press <kbd class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-200 font-bold">Esc</kbd> to close any modal.</p>
             </div>
@@ -1711,6 +1754,7 @@
     <script src="match-engine.js"></script>
     <script src="season.js"></script>
     <script src="transfers.js"></script>
+    <script src="investment.js"></script>
     <script src="save.js"></script>
     <script>
         // Menu showcase — Cristiano Ronaldo's card, for appreciation.

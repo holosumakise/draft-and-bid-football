@@ -86,8 +86,16 @@ function enrichPlayer(p, rankIndex = 99) {
 
     // Curated role identity when the pool declares one; otherwise the style is
     // drawn from the name so the same player always gets the same role.
-    const style = (typeof playerPlaystyles !== 'undefined' && playerPlaystyles[p.name])
+    // Keepers must always land on a GK-group archetype (Sweeper Keeper / Goalkeeper).
+    let style = (typeof playerPlaystyles !== 'undefined' && playerPlaystyles[p.name])
         || (typeof playstyleForName === 'function' ? playstyleForName(mainPos, p.name) : null);
+    if (mainPos === 'GK' && typeof PLAYSTYLES !== 'undefined') {
+        const legalGk = style && PLAYSTYLES[style] && PLAYSTYLES[style].group === 'GK';
+        if (!legalGk) {
+            style = (typeof playstyleForName === 'function' ? playstyleForName('GK', p.name) : null)
+                || 'citadel';
+        }
+    }
 
     // The habit is curated for the players whose reputation is the habit, and read
     // off the shape of the body for everyone else — but that reading needs the whole

@@ -192,7 +192,12 @@ function sofaScoreMatchRating({ goals, assists, isGK, isDEF, cleanSheet, goalsCo
 }
 
 function selectActiveLineup(team) {
-    return (team.lineup || [])
+    // Suspended/injured starters are replaced from the bench and reserves for
+    // this fixture only. The saved XI on the manager card is left alone.
+    const available = typeof fillAvailableTeamSlots === 'function'
+        ? fillAvailableTeamSlots(team.lineup, team.bench, team.reserves)
+        : { lineup: team.lineup || [] };
+    return (available.lineup || [])
         .filter(slot => slot?.player)
         .map(slot => ({ ...slot, yel: 0, cameOn: 0 }));
 }
@@ -202,7 +207,9 @@ function selectActiveLineup(team) {
 // Without this, only the XI ever appears on the season team-stats board.
 function planLeagueAppearances(team) {
     const starters = selectActiveLineup(team);
-    const bench = (team.bench || []).filter(Boolean).slice();
+    const bench = (team.bench || [])
+        .filter(player => player && (typeof playerIsUnavailable !== 'function' || !playerIsUnavailable(player)))
+        .slice();
     // Prefer like-for-like, then same unit, then anyone (never a second GK for an outfield slot).
     const unitOf = pos => {
         if (pos === 'GK') return 'GK';
@@ -223,10 +230,13 @@ function planLeagueAppearances(team) {
         return shortlist[Math.floor(Math.random() * shortlist.length)];
     };
 
-    const usedBench = new Set();
+    const usedBench = new Set(starters.map(slot => slot.player.id));
     let subsMade = 0;
     const maxSubs = typeof MAX_SUBS === 'number' ? MAX_SUBS : 5;
     const appearances = [];
+    // The medical programme also cuts the chance of an early knock in the
+    // abstract league sim, where injuries are represented as early changes.
+    const injuryFactor = medicalInjuryFactor(team);
 
     // Shuffle so the 5-sub cap isn't always eaten by the GK/defenders listed first.
     const order = starters.slice().sort(() => Math.random() - 0.5);
@@ -234,6 +244,7 @@ function planLeagueAppearances(team) {
         let minutes = 90;
         let yellow = false;
         let red = false;
+        let injury = false;
         // A habit decides how the same body behaves over a season: the enforcer and
         // the hot head collect bookings, the captain and the technician do not.
         const booking = specialityBookingRateFor(slot.player);
@@ -253,13 +264,14 @@ function planLeagueAppearances(team) {
             const unit = unitOf(slot.pos);
             const lateChance  = unit === 'GK' ? 0.005 : unit === 'DEF' ? 0.20 : unit === 'MID' ? 0.30 : 0.36;
             // A fragile body is the one a manager takes off early; an iron man plays on.
-            const earlyChance = unit === 'GK' ? 0 : 0.05 * specialityInjuryRate(slot.player);
+            const earlyChance = unit === 'GK' ? 0 : 0.05 * specialityInjuryRate(slot.player) * injuryFactor;
             if (Math.random() < lateChance) {
                 minutes = 58 + Math.floor(Math.random() * 28); // 58–85
                 subOff = true;
             } else if (Math.random() < earlyChance) {
                 minutes = 40 + Math.floor(Math.random() * 20); // 40–59 (injury / tactical)
                 subOff = true;
+                injury = true; // an early knock, not a planned rest
             }
             if (subOff) {
                 const inn = pickBench(slot.pos, usedBench);
@@ -268,7 +280,7 @@ function planLeagueAppearances(team) {
                     subsMade++;
                     const rest = Math.max(1, 90 - minutes);
                     appearances.push({
-                        player: slot.player, pos: slot.pos, minutes, yellow, red, fromStart: true
+                        player: slot.player, pos: slot.pos, minutes, yellow, red, injury, fromStart: true
                     });
                     appearances.push({
                         player: inn, pos: slot.pos, minutes: rest, yellow: false, red: false, fromStart: false, replaces: slot.player.id
@@ -286,7 +298,7 @@ function planLeagueAppearances(team) {
                 subsMade++;
                 const rest = Math.max(1, 90 - minutes);
                 appearances.push({
-                    player: slot.player, pos: slot.pos, minutes, yellow, red, fromStart: true
+                    player: slot.player, pos: slot.pos, minutes, yellow, red, injury, fromStart: true
                 });
                 appearances.push({
                     player: inn, pos: slot.pos, minutes: rest, yellow: false, red: false, fromStart: false, replaces: slot.player.id
@@ -296,7 +308,7 @@ function planLeagueAppearances(team) {
         }
 
         appearances.push({
-            player: slot.player, pos: slot.pos, minutes, yellow, red, fromStart: true
+            player: slot.player, pos: slot.pos, minutes, yellow, red, injury, fromStart: true
         });
     });
 
@@ -304,10 +316,11 @@ function planLeagueAppearances(team) {
 }
 
 function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
-    if (!playerStats) return;
+    if (!playerStats) return [];
     const isDefPos = position => ['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB'].includes(position);
     const cleanSheet = goalsAgainst === 0;
     const appearances = planLeagueAppearances(team);
+    const events = [];
 
     // The scoring model names players from the starting XI. If that starter was replaced,
     // roll a minute for the goal/assist: after he left, the credit goes to his substitute.
@@ -333,8 +346,15 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
         const stats = playerStats[entry.player.id];
         if (!stats) return;
 
-        if (entry.red) stats.reds++;
-        else if (entry.yellow) stats.yellows++;
+        if (entry.red) {
+            stats.reds++;
+            events.push({ player: entry.player, type: 'suspension' });
+        } else if (entry.yellow) {
+            stats.yellows++;
+            events.push({ player: entry.player, type: 'yellow' });
+        }
+        // A booking and a knock can happen to the same player in the same match.
+        if (!entry.red && entry.injury) events.push({ player: entry.player, type: 'injury' });
 
         stats.apps++;
         stats.minutes += entry.minutes;
@@ -373,6 +393,7 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
         stats.ratingSum += Math.max(3, rating);
         stats.ratingCount++;
     });
+    return events;
 }
 
 // A league match is a big one when both sides are chasing the same prize — the top
@@ -391,6 +412,51 @@ function leagueMatchPressure(teamA, teamB) {
     const survival = a._pos >= relegationZone && b._pos >= relegationZone;
     if (!titleRace && !survival) return 0;
     return Math.abs(a.pts - b.pts) <= 3 ? 1 : 0.5;
+}
+
+// Post-match bookkeeping for one club in the abstract league: tick old
+// absences, apply this match's cards/knocks, then bank the gate and move the
+// fanbase. Ghost clubs have no manager and therefore no wallet or fans.
+function settleLeagueTeam(team, result, goalsFor, goalsAgainst, events) {
+    if (!team) return;
+    const manager = (gameState.managers || []).find(m =>
+        String(m.id) === String(team.managerId ?? team.id));
+    if (!manager) return;
+
+    if (typeof tickPlayerAbsences === 'function') tickPlayerAbsences(manager.squad);
+    const injuries = [];
+    const suspensions = [];
+    let yellows = 0;
+    (events || []).forEach(event => {
+        if (!event || !event.player) return;
+        if (event.type === 'yellow') { yellows++; return; }
+        const player = (manager.squad || []).find(p => p.id === event.player.id);
+        if (!player) return;
+        if (event.type === 'suspension') {
+            const out = markPlayerOut(player, suspensionLengthFor(player), 'suspension');
+            suspensions.push({ name: player.name, matches: out ? out.matches : 1 });
+        } else if (event.type === 'injury') {
+            const out = markPlayerOut(player, injuryLengthFor(player, team), 'injury');
+            injuries.push({ name: player.name, matches: out ? out.matches : 1 });
+        }
+    });
+
+    const finance = awardMatchdayFinance(manager, result, goalsFor, goalsAgainst);
+    // Keep a per-match summary for the live panels the season screen shows while
+    // the table animates. Ghost clubs never reach this point.
+    if (_seasonRun && Array.isArray(_seasonRun.currentReports)) {
+        _seasonRun.currentReports.push({
+            managerId: manager.id,
+            name: manager.name,
+            result, goalsFor, goalsAgainst,
+            revenue: finance ? finance.revenue : 0,
+            fansBefore: finance ? finance.fansBefore : fansOf(manager),
+            fansAfter: finance ? finance.fansAfter : fansOf(manager),
+            fanDelta: finance ? finance.fanDelta : 0,
+            totalRevenue: Number(manager.ticketRevenue) || 0,
+            yellows, injuries, suspensions
+        });
+    }
 }
 
 function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
@@ -441,8 +507,10 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
             if (goal.assisterId != null) assistIdsB.push(goal.assisterId);
         }
 
-        applySideMatchEffects(teamA, statsA, goalsForB, { goals: goalIdsA, assists: assistIdsA, result: resultA });
-        applySideMatchEffects(teamB, statsB, goalsForA, { goals: goalIdsB, assists: assistIdsB, result: resultB });
+        const eventsA = applySideMatchEffects(teamA, statsA, goalsForB, { goals: goalIdsA, assists: assistIdsA, result: resultA });
+        const eventsB = applySideMatchEffects(teamB, statsB, goalsForA, { goals: goalIdsB, assists: assistIdsB, result: resultB });
+        settleLeagueTeam(teamA, resultA, goalsForA, goalsForB, eventsA);
+        settleLeagueTeam(teamB, resultB, goalsForB, goalsForA, eventsB);
         return { gf: goalsForA, ga: goalsForB, result: resultA };
     } finally {
         teamA.lineup = originalLineupA;
@@ -544,7 +612,7 @@ function startGhostSeason() {
 
     const humanSeries = {};
     humans.forEach(team => {
-        humanSeries[team.id] = { id: team.id, name: team.name, managerId: team.managerId, positions: [], results: [] };
+        humanSeries[team.id] = { id: team.id, name: team.name, managerId: team.managerId, positions: [], results: [], fans: [] };
     });
 
     _seasonRun = {
@@ -583,6 +651,7 @@ function buildSeasonView(run, midSeason) {
         playerStatsByManager: run.playerStatsByManager,
         ghostStatsById: run.ghostStatsById,
         humanSeries: Object.values(run.humanSeries || {}).map((series, index) => ({ ...series, color: colors[index % colors.length] })),
+        matchdayReports: run.matchdayReports || {},
         leagueSize: run.table.length,
         midSeason: !!midSeason
     };
@@ -620,6 +689,7 @@ function serializeSeasonRun(run) {
         playerStatsByManager: run.playerStatsByManager || {},
         ghostStatsById: run.ghostStatsById || {},
         humanSeries: run.humanSeries || {},
+        matchdayReports: run.matchdayReports || {},
         lastSnapshot: run.lastSnapshot || null
     };
 }
@@ -648,6 +718,7 @@ function restoreSeasonRun(data) {
         playerStatsByManager: data.playerStatsByManager || {},
         ghostStatsById: data.ghostStatsById || {},
         humanSeries: data.humanSeries || {},
+        matchdayReports: data.matchdayReports || {},
         lastSnapshot: data.lastSnapshot || null
     };
 }
@@ -666,7 +737,9 @@ function resumeMidSeasonTransfer(savedWindow, run) {
 
 function playSeasonMatchdays(from, to) {
     const { schedule, table, rowsById, playerStatsByManager, ghostStatsById, humanSeries } = _seasonRun;
+    if (!_seasonRun.matchdayReports) _seasonRun.matchdayReports = {};
     for (let matchday = from; matchday <= to; matchday++) {
+        _seasonRun.currentReports = [];
         for (const [teamA, teamB] of schedule[matchday - 1]) {
             const statsA = getSeasonStatsForTeam(teamA, playerStatsByManager, ghostStatsById);
             const statsB = getSeasonStatsForTeam(teamB, playerStatsByManager, ghostStatsById);
@@ -675,9 +748,21 @@ function playSeasonMatchdays(from, to) {
 
             applyMatchResult(rowsById.get(teamA.id), gf, ga, result);
             applyMatchResult(rowsById.get(teamB.id), ga, gf, resultB);
-            if (humanSeries[teamA.id]) humanSeries[teamA.id].results.push(result);
-            if (humanSeries[teamB.id]) humanSeries[teamB.id].results.push(resultB);
+            if (humanSeries[teamA.id]) {
+                humanSeries[teamA.id].results.push(result);
+                const managerA = gameState.managers.find(m => String(m.id) === String(teamA.managerId ?? teamA.id));
+                if (managerA) humanSeries[teamA.id].fans.push(fansOf(managerA));
+            }
+            if (humanSeries[teamB.id]) {
+                humanSeries[teamB.id].results.push(resultB);
+                const managerB = gameState.managers.find(m => String(m.id) === String(teamB.managerId ?? teamB.id));
+                if (managerB) humanSeries[teamB.id].fans.push(fansOf(managerB));
+            }
         }
+
+        // Freeze this matchday's human-club reports before the next one starts.
+        _seasonRun.matchdayReports[matchday] = (_seasonRun.currentReports || []).slice();
+        _seasonRun.currentReports = null;
 
         const ranked = sortLeagueTable(table);
         ranked.forEach((row, index) => {
@@ -691,6 +776,15 @@ function playSeasonMatchdays(from, to) {
             gf: row.gf, ga: row.ga, gd: row.gd, pts: row.pts, pos: row._pos
         }));
     }
+
+    // Balances and fanbases changed for every human club; push the new wallet
+    // state once and refresh any manager cards still in the DOM.
+    if (typeof Net !== 'undefined' && Net.online && Net.isHost && typeof Net.publishManagers === 'function') {
+        Net.publishManagers();
+    }
+    if (typeof updateDashboard === 'function') {
+        gameState.managers.forEach(manager => updateDashboard(manager.id));
+    }
 }
 
 function finishGhostSeason(startFrom = 0) {
@@ -703,6 +797,7 @@ function finishGhostSeason(startFrom = 0) {
         playerStatsByManager,
         ghostStatsById,
         humanSeries: seriesList,
+        matchdayReports: _seasonRun.matchdayReports || {},
         leagueSize: table.length
     };
 
@@ -735,7 +830,7 @@ function buildSeasonChartChrome() {
         <div class="flex items-center gap-2">
             <span class="text-[11px] font-bold w-20 truncate shrink-0" style="color:${s.color}">${escapeHTML(s.name)}</span>
             <div id="wdl-strip-${s.id}" class="flex-1 flex gap-px overflow-hidden h-5 items-center"></div>
-            <span id="wdl-record-${s.id}" class="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">0-0-0</span>
+            <span id="wdl-record-${s.id}" class="text-[10px] text-slate-400 font-mono w-24 text-right shrink-0" title="W-D-L · fans">0-0-0</span>
         </div>
     `).join('');
 
@@ -822,13 +917,20 @@ function updateWdlStrips(upToMd) {
             if (r === 'D') { d++; return `<span class="inline-block w-1.5 sm:w-2 h-3.5 rounded-sm bg-slate-500" title="D"></span>`; }
             l++; return `<span class="inline-block w-1.5 sm:w-2 h-3.5 rounded-sm bg-red-500" title="L"></span>`;
         }).join('');
-        if (rec) rec.innerText = `${w}-${d}-${l}`;
+        if (rec) {
+            const fanHistory = Array.isArray(s.fans) ? s.fans : [];
+            const shownFans = upToMd > 0 && fanHistory.length
+                ? fanHistory[Math.min(upToMd, fanHistory.length) - 1]
+                : null;
+            rec.innerText = `${w}-${d}-${l}${shownFans != null ? ` · ${formatFanCount(shownFans)}` : ''}`;
+        }
     });
 }
 
 function animateSeasonChart(mdIndex, limit = SEASON_MATCHDAYS, onDone) {
     const total = SEASON_MATCHDAYS;
     if (mdIndex > limit) {
+        if (typeof hideSeasonEventPanel === 'function') hideSeasonEventPanel();
         const label = document.getElementById('season-md-label');
         label.classList.remove('md-pulse');
         const complete = limit >= total;
@@ -846,10 +948,22 @@ function animateSeasonChart(mdIndex, limit = SEASON_MATCHDAYS, onDone) {
     document.getElementById('season-progress-bar').style.width = `${(mdIndex / total) * 100}%`;
     drawSeasonChart(mdIndex);
     updateWdlStrips(mdIndex);
-
     let delay = 85;
     if (mdIndex < 3 || mdIndex > 34) delay = 140;
     if (mdIndex % 5 === 0) delay = 180;
+    // Stale panels from an earlier matchday or a live match never carry over.
+    if (typeof hideMatchReportPanels === 'function') hideMatchReportPanels();
+    const reports = (gameState.season && gameState.season.matchdayReports)
+        ? gameState.season.matchdayReports[mdIndex]
+        : null;
+    // An injury or a ban stops the replay completely: the updates for every club
+    // appear under the chart and nothing moves until Continue is pressed.
+    const hasEvent = (reports || []).some(report =>
+        (report.injuries || []).length || (report.suspensions || []).length);
+    if (hasEvent && typeof showSeasonEventPanel === 'function'
+        && showSeasonEventPanel(reports, mdIndex, () => animateSeasonChart(mdIndex + 1, limit, onDone))) {
+        return;
+    }
     setTimeout(() => animateSeasonChart(mdIndex + 1, limit, onDone), delay);
 }
 
@@ -893,6 +1007,7 @@ function collectAllPlayerStats() {
 }
 
 function showSeasonResults() {
+    if (typeof hideMatchReportPanels === 'function') hideMatchReportPanels();
     const final = gameState.season.finalTable;
     const champion = final[0];
     const soloSeason = gameState.managers.length === 1;
@@ -970,6 +1085,31 @@ function showSeasonResults() {
             <div class="text-xs text-slate-400 mt-1">${a.sub}</div>
         </div>
     `).join('');
+
+    // Final money picture, kept separate from the player awards. The total gate
+    // is tracked on the manager, because the balance also contains auction cash.
+    const financeEl = document.getElementById('season-finances');
+    if (financeEl) {
+        const ordered = [];
+        final.filter(r => r.isHuman).forEach(r => {
+            const m = gameState.managers.find(x => String(x.id) === String(r.managerId ?? r.id));
+            if (m && !ordered.includes(m)) ordered.push(m);
+        });
+        gameState.managers.forEach(m => { if (!ordered.includes(m)) ordered.push(m); });
+        financeEl.innerHTML = ordered.length ? ordered.map(m => {
+            const series = (gameState.season.humanSeries || []).find(s => String(s.managerId) === String(m.id));
+            const color = series ? series.color : '#34d399';
+            const fans = typeof fansOf === 'function' ? fansOf(m) : (Number(m.fans) || 0);
+            const gate = Math.max(0, Number(m.ticketRevenue) || 0);
+            return `<div class="season-finance-row">
+                <div class="season-finance-row__name" style="color:${color}">${escapeHTML(m.name)}</div>
+                <div class="season-finance-row__stats">
+                    <span class="season-finance-row__fans">👥 <b>${formatFanCount(fans)}</b> fans</span>
+                    <span>🎟️ <b>${formatBalance(gate)}</b> ticket revenue</span>
+                </div>
+            </div>`;
+        }).join('') : '<div class="text-sm text-slate-500">No human clubs in this season.</div>';
+    }
 
     const qual = {};
     final.filter(r => r.isHuman).forEach(r => {
@@ -1259,11 +1399,14 @@ function launchEuropeMatch() {
 
 // Fresh per-match copy of a team state so cards/subs in Europe never leak into the saved squad
 function cloneTeamStateForMatch(team) {
+    const fresh = typeof fillAvailableTeamSlots === 'function'
+        ? fillAvailableTeamSlots(team.lineup, team.bench, team.reserves)
+        : { lineup: team.lineup, bench: team.bench, reserves: team.reserves };
     return {
         ...team,
-        lineup: (team.lineup || []).map(slot => ({ ...slot, yel: 0, min: 0, cameOn: 0 })),
-        bench: (team.bench || []).slice(),
-        reserves: (team.reserves || []).slice(),
+        lineup: (fresh.lineup || []).map(slot => ({ ...slot, yel: 0, min: 0, cameOn: 0 })),
+        bench: (fresh.bench || []).slice(),
+        reserves: (fresh.reserves || []).slice(),
         subs: 0,
         nextSubCheckMinute: 0
     };

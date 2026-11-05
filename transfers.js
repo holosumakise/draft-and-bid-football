@@ -343,6 +343,7 @@
         .tw-btn.no { background:#7f1d1d; border-color:#991b1b; color:#fecaca; }
         .tw-btn.sm { padding:4px 9px; font-size:11px; }
         .tw-btn--squad { background:#0b1220; border-color:#34d399; color:#a7f3d0; }
+        .tw-btn--invest { background:#3b2a08; border-color:#b45309; color:#fcd34d; }
         .tw-btn--list { min-width:72px; }
         .tw-btn--offer { min-width:66px; }
         .tw-offer { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid #162033; }
@@ -386,7 +387,7 @@
             .tw-swap__arrow { display:none; }
             .tw-offer__act { width:100%; justify-content:flex-end; }
             .tw-foot__hint { display:none; }
-            .tw-head__act { width:100%; }
+            .tw-head__act { width:100%; flex-direction:column; align-items:stretch; }
             .tw-head__act .tw-btn { width:100%; }
         }
         `;
@@ -646,6 +647,7 @@
                     <p class="tw-sub">${sub}</p>
                 </div>
                 <div class="tw-head__act">
+                    <button type="button" class="tw-btn tw-btn--invest" onclick="openInvestment(${me.id}, true)">Invest</button>
                     <button type="button" class="tw-btn tw-btn--squad" data-act="list-open" aria-haspopup="dialog">My squad${ownCount ? ` · ${ownCount} listed` : ''}</button>
                 </div>
             </header>
