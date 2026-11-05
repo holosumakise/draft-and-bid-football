@@ -74,43 +74,6 @@
             opacity: 0;
         }
 
-        /* Draft acquisition fly animation */
-        #draft-fly-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 90;
-            pointer-events: none;
-            overflow: hidden;
-        }
-        .draft-fly-arrow-line {
-            fill: none;
-            stroke: #34d399;
-            stroke-width: 3;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-            filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.55));
-            opacity: 0;
-        }
-        .draft-fly-arrow-head {
-            fill: #34d399;
-            filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.55));
-            opacity: 0;
-        }
-        .draft-fly-circle {
-            position: fixed;
-            width: 22px;
-            height: 22px;
-            margin: 0;
-            border-radius: 50%;
-            background: #34d399;
-            border: 2px solid #ecfdf5;
-            box-shadow: 0 0 14px rgba(52, 211, 153, 0.75), 0 2px 8px rgba(0,0,0,0.35);
-            z-index: 92;
-            pointer-events: none;
-            opacity: 0;
-            transform: translate(-50%, -50%) scale(0.5);
-        }
-
         /* Fixed SOLD stamp (not a child of the panel — avoids layout glitches) */
         .draft-sold-stamp {
             position: fixed;
@@ -150,59 +113,53 @@
             pointer-events: none;
         }
 
-        /* Gentle dip + smooth darken (no harsh shake steps) */
+        /* Gentle dip + smooth darken, on the player card only */
         @keyframes draftSoldReact {
             0%   { transform: translate3d(0, 0, 0) scale(1); filter: brightness(1) saturate(1); opacity: 1; }
             28%  { transform: translate3d(0, 1px, 0) scale(0.995); filter: brightness(0.96) saturate(0.97); opacity: 0.98; }
             55%  { transform: translate3d(0, 3px, 0) scale(0.985); filter: brightness(0.78) saturate(0.85); opacity: 0.88; }
             100% { transform: translate3d(0, 5px, 0) scale(0.975); filter: brightness(0.55) saturate(0.7); opacity: 0.78; }
         }
-        .draft-panel-sold-react {
+        .draft-card-sold-react {
             animation: draftSoldReact 0.48s cubic-bezier(0.33, 0, 0.2, 1) forwards;
             transform-origin: center center;
         }
 
-        /* Squad receive glow + clean recognizable bounce */
+        /* Squad receive glow — the panel lights up, it never leaves its seat */
         @keyframes draftReceiveGlow {
             0% {
                 box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
                 filter: brightness(1);
-                transform: translate3d(0, 0, 0) scale(1);
             }
             18% {
                 box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.85), 0 0 32px 8px rgba(52, 211, 153, 0.4);
                 filter: brightness(1.14);
-                transform: translate3d(0, -10px, 0) scale(1.045);
             }
             36% {
                 box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.55), 0 0 18px 4px rgba(52, 211, 153, 0.25);
                 filter: brightness(1.08);
-                transform: translate3d(0, 3px, 0) scale(0.985);
-            }
-            54% {
-                transform: translate3d(0, -5px, 0) scale(1.02);
             }
             72% {
                 box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25), 0 0 10px 2px rgba(52, 211, 153, 0.12);
                 filter: brightness(1.03);
-                transform: translate3d(0, 1px, 0) scale(0.995);
             }
             100% {
                 box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
                 filter: brightness(1);
-                transform: translate3d(0, 0, 0) scale(1);
             }
         }
         .draft-target-receive {
-            animation: draftReceiveGlow 0.95s cubic-bezier(0.34, 1.3, 0.64, 1);
-            will-change: transform, box-shadow, filter;
+            animation: draftReceiveGlow 0.95s ease-out;
         }
 
-        /* Slot-machine reels */
+        /* Slot-machine reels. --reel-row/--reel-visible must match REEL.ITEM_H and
+           REEL.VISIBLE in draft.js, which offsets the strip by the same maths. */
         .reel-window {
+            --reel-row: 64px;
+            --reel-visible: 3;
             position: relative;
             width: 100%;
-            height: 108px; /* 3 x 36px */
+            height: calc(var(--reel-row) * var(--reel-visible));
             overflow: hidden;
             border-radius: 0.5rem;
             background: #0f172a;
@@ -226,14 +183,14 @@
             line-height: 1.15;
             word-break: break-word;
         }
-        .reel-pos-text  { font-size: 1.35rem; font-weight: 900; color: #34d399; }
-        .reel-nat-text  { font-size: 0.95rem; font-weight: 700; color: #38bdf8; }
-        /* Club names are long, so they sit smaller and wrap into the 36px reel row. */
-        .reel-club-text { font-size: 0.7rem; font-weight: 800; color: #fbbf24; line-height: 1.05; }
+        .reel-pos-text  { font-size: 1.9rem; font-weight: 900; color: #34d399; }
+        .reel-nat-text  { font-size: 1.25rem; font-weight: 700; color: #38bdf8; }
+        /* Club names are long, so they sit smaller and wrap into the 64px reel row. */
+        .reel-club-text { font-size: 0.95rem; font-weight: 800; color: #fbbf24; line-height: 1.05; }
         .reel-mask-top, .reel-mask-bot {
             position: absolute;
             left: 0; right: 0;
-            height: 36px;
+            height: var(--reel-row);
             pointer-events: none;
             z-index: 2;
         }
@@ -248,8 +205,8 @@
         .reel-highlight {
             position: absolute;
             left: 0; right: 0;
-            top: 36px;
-            height: 36px;
+            top: calc(var(--reel-row) * (var(--reel-visible) - 1) / 2);
+            height: var(--reel-row);
             border-top: 1px solid rgba(52, 211, 153, 0.35);
             border-bottom: 1px solid rgba(52, 211, 153, 0.35);
             background: rgba(52, 211, 153, 0.06);
@@ -433,6 +390,65 @@
         .euro-tie { border: 1px solid #1e293b; background: rgba(15, 23, 42, 0.65); border-radius: 0.75rem; padding: 0.45rem; display: flex; flex-direction: column; gap: 0.3rem; min-height: 94px; justify-content: center; }
         .euro-tie.played { background: rgba(30, 41, 59, 0.8); border-color: #334155; }
 
+        /* European group stage: the draw, the tables and the flight into the last sixteen */
+        .euro-comp-tabs { display: flex; justify-content: center; gap: 6px; margin-bottom: 10px; }
+        .euro-comp-tab { font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; color: #475569; padding: 4px 12px; border-radius: 999px; border: 1px solid #1e293b; transition: color .15s ease, border-color .15s ease; }
+        .euro-comp-tab.on { color: #e2e8f0; border-color: #38bdf8; }
+        .euro-draw { position: relative; display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 12px; padding-bottom: 4px; }
+        .euro-draw > .euro-md { grid-column: 1 / -1; margin: 0; }
+        .euro-pots { display: flex; flex-direction: column; gap: 7px; }
+        .euro-pot { border: 1px solid #1e293b; border-radius: 10px; padding: 5px 7px; background: rgba(15, 23, 42, .55); }
+        .euro-pot__label { font-size: 9px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; color: #64748b; }
+        .euro-pot__balls { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+        .euro-ball { width: 12px; height: 12px; border-radius: 999px; background: #334155; box-shadow: inset 0 -2px 3px rgba(0, 0, 0, .5); transition: opacity .12s ease; }
+        .euro-ball.gone { opacity: .18; }
+        .euro-pot[data-pot="1"] .euro-ball { background: #38bdf8; }
+        .euro-pot[data-pot="2"] .euro-ball { background: #818cf8; }
+        .euro-pot[data-pot="3"] .euro-ball { background: #a78bfa; }
+        .euro-pot[data-pot="4"] .euro-ball { background: #c084fc; }
+        .euro-draw__groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; align-content: start; }
+        .euro-slot { border: 1px dashed #1e293b; border-radius: 10px; padding: 4px 6px; background: rgba(2, 6, 23, .45); }
+        .euro-slot.landing { border-color: #38bdf8; }
+        .euro-slot__head { font-size: 10px; font-weight: 900; color: #94a3b8; }
+        .euro-slot__rows { display: flex; flex-direction: column; gap: 1px; margin-top: 3px; min-height: 46px; }
+        .euro-slot__row { font-size: 9px; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: cardRise .18s ease; }
+        .euro-fly { position: absolute; left: 0; top: 0; z-index: 4; display: flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; background: #0b1220; border: 1px solid #38bdf8; color: #e2e8f0; font-size: 9.5px; font-weight: 800; white-space: nowrap; box-shadow: 0 10px 22px rgba(2, 8, 23, .75); pointer-events: none; will-change: transform; }
+        .euro-md { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; color: #64748b; margin: 2px 0 8px; }
+        .euro-md b { color: #38bdf8; }
+        .euro-skip { background: none; border: 1px solid #334155; border-radius: 999px; color: #94a3b8; font-size: 9px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; padding: 3px 10px; cursor: pointer; transition: color .12s ease, border-color .12s ease; }
+        .euro-skip:hover { color: #e2e8f0; border-color: #64748b; }
+        .euro-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        @media (min-width: 860px) { .euro-groups { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        .euro-group { border: 1px solid #1e293b; border-radius: 12px; background: rgba(15, 23, 42, .6); padding: 6px 7px; }
+        .euro-group__head { font-size: 9px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; color: #64748b; margin-bottom: 3px; }
+        .euro-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) 26px 20px; align-items: center; gap: 4px; font-size: 10px; color: #64748b; padding: 2px 3px; border-radius: 6px; transition: transform 240ms cubic-bezier(.2, .7, .3, 1), opacity .25s ease; }
+        .euro-row__name { color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .euro-row__gd, .euro-row__pts { text-align: right; font-variant-numeric: tabular-nums; }
+        .euro-row__pts { font-weight: 900; color: #e2e8f0; }
+        .euro-row.human .euro-row__name { color: #7dd3fc; font-weight: 700; }
+        .euro-row.zone-in .euro-row__name { color: #34d399; }
+        .euro-row.zone-out { opacity: .42; }
+        .euro-row.landing { animation: euro-tick .38s ease; }
+        @keyframes euro-tick { 0% { transform: translateY(-4px); background: rgba(56, 189, 248, .18); } 100% { transform: none; background: transparent; } }
+        .euro-group__day { font-size: 8.5px; color: #475569; margin-top: 4px; min-height: 10px; display: flex; flex-direction: column; gap: 1px; }
+        .euro-r16 { margin-top: 12px; border-top: 1px solid #1e293b; padding-top: 10px; }
+        .euro-r16__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+        @media (min-width: 860px) { .euro-r16__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        .euro-r16__tie { border: 1px solid #1e293b; border-radius: 9px; padding: 4px 7px; background: rgba(2, 6, 23, .45); font-size: 9.5px; color: #94a3b8; display: flex; flex-direction: column; gap: 2px; }
+        .euro-r16__seat { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 12px; }
+        .euro-r16__seat.filled { color: #e2e8f0; animation: euro-land .3s ease; }
+        .euro-r16__seat.human { color: #7dd3fc; font-weight: 700; }
+        @keyframes euro-land { 0% { transform: translateY(-8px) scale(.94); opacity: 0; } 100% { transform: none; opacity: 1; } }
+        .euro-tie .score-mask { filter: blur(4px); opacity: .35; }
+        .euro-tie .score-live { animation: euro-tick .4s ease; }
+        .euro-tie .seat-land { animation: euro-land .34s ease; }
+        .euro-slot__row.human { color: #7dd3fc; font-weight: 700; }
+        .euro-row.moved { opacity: .3; }
+
+        /* How it works guide: one line per step, keys shown as chips. */
+        .howto-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; font-size: 10px; color: #94a3b8; }
+        .howto-keys kbd { background: #334155; color: #e2e8f0; border-radius: 4px; padding: 1px 5px; font-weight: 700; font-family: inherit; }
+
         /* Accessibility: a visible ring for keyboard users without changing mouse focus. */
         button:focus-visible,
         input:focus-visible,
@@ -483,17 +499,20 @@
         .pass-hold-btn { touch-action: none; -webkit-tap-highlight-color: transparent; }
         .pass-hold-fill {
             position: absolute;
-            left: 0; top: 0; bottom: 0;
-            width: 0;
+            left: 0; right: 0; top: 0; bottom: 0;
             background: rgba(239, 68, 68, 0.75);
             pointer-events: none;
+            /* Scaling a full-width fill reads the same as growing it, but never
+               re-lays the button out on each frame of the hold. */
+            transform-origin: left center;
+            transform: scaleX(0);
         }
         .pass-hold-btn.pass-holding .pass-hold-fill {
             animation: pass-hold-fill 900ms linear forwards;
         }
         @keyframes pass-hold-fill {
-            from { width: 0; }
-            to { width: 100%; }
+            from { transform: scaleX(0); }
+            to { transform: scaleX(1); }
         }
 
         /* ============================================================
@@ -525,11 +544,21 @@
         body {
             font-family: var(--font-body);
             color: var(--text);
+        }
+        /* The viewport-pinned wash lives on its own fixed layer. As a
+           background-attachment: fixed on body it made every scroll frame repaint
+           the whole page; pinned to the viewport here, it looks the same and scrolls
+           for free. */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
             background:
                 radial-gradient(ellipse at 18% -5%, rgba(52, 211, 153, 0.10), transparent 42%),
                 radial-gradient(ellipse at 85% 0%, rgba(56, 189, 248, 0.08), transparent 38%),
                 linear-gradient(180deg, #060a12 0%, #070d18 55%, #05080f 100%);
-            background-attachment: fixed;
         }
         .hidden { display: none !important; }
 
@@ -676,7 +705,7 @@
             filter: drop-shadow(0 26px 60px rgba(0, 0, 0, 0.55));
         }
         .hero-card--player .pcard:hover { transform: none; }
-        .hero-ball { position: absolute; bottom: 12px; right: 6px; width: 84px; height: 84px; border-radius: 50%; background: radial-gradient(circle at 34% 28%, #fff, #cbd5e1 38%, #64748b 68%, #1e293b); box-shadow: 0 18px 32px rgba(0, 0, 0, 0.55), inset -8px -10px 18px rgba(0, 0, 0, 0.35); opacity: 0.9; }
+        .hero-ball { position: absolute; bottom: 12px; right: 6px; width: 84px; height: 84px; opacity: 0.9; filter: drop-shadow(0 18px 26px rgba(0, 0, 0, 0.55)); }
 
         /* ---------- Draft arena ---------- */
         .draft-arena {
@@ -689,26 +718,61 @@
             border-radius: 50%; background: radial-gradient(circle, rgba(52, 211, 153, 0.14), transparent 68%);
             pointer-events: none;
         }
-        .draft-arena__head { position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px 16px; border-bottom: 1px solid var(--line); }
-        .draft-arena__title { font-family: var(--font-display); font-size: 27px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1; margin-top: 5px; }
+        .draft-arena__head { position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding: 18px 24px; border-bottom: 1px solid var(--line); }
+        .draft-arena__ident { display: flex; align-items: center; gap: 12px; }
+        .draft-arena__title { font-family: var(--font-display); font-size: 27px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1; }
         .draft-arena__title span { color: var(--emerald); }
-        .draft-arena__actions { display: flex; align-items: center; gap: 9px; }
+        .draft-arena__tiers { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
         .draft-board { position: relative; z-index: 2; padding: 22px 24px; min-height: 380px; display: flex; align-items: center; justify-content: center; }
-        .draft-arena__foot { position: relative; z-index: 2; display: flex; gap: 7px; flex-wrap: wrap; padding: 0 24px 18px; }
         .tier-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); font-size: 9px; font-weight: 900; letter-spacing: 0.10em; text-transform: uppercase; color: var(--muted); }
         .tier-chip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; font-style: normal; }
         .tier-chip--gold { color: #fcd34d; border-color: rgba(252, 211, 77, 0.30); }
         .tier-chip--elite { color: #93c5fd; border-color: rgba(147, 197, 253, 0.30); }
         .tier-chip--invincible { color: #f0abfc; border-color: rgba(240, 171, 252, 0.30); }
         .tier-chip--goat { color: #fbbf24; border-color: rgba(251, 191, 36, 0.36); }
-        .tier-chip--budget { color: #fbbf24; margin-left: auto; }
         .draft-reveal { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 28px; align-items: center; width: 100%; }
         .draft-reveal__card { display: flex; justify-content: center; }
         .draft-reveal__side { display: flex; flex-direction: column; justify-content: center; gap: 14px; min-width: 0; }
-        .draft-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--muted); text-align: center; padding: 40px 10px; }
+        .draft-empty { display: flex; flex-direction: column; align-items: center; gap: 14px; color: var(--muted); text-align: center; padding: 40px 10px; }
         .draft-empty b { font-family: var(--font-display); font-size: 22px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text); }
-        .draft-empty small { font-size: 11px; max-width: 320px; line-height: 1.5; }
-        .draft-empty__ball { width: 56px; height: 56px; border-radius: 50%; background: radial-gradient(circle at 34% 28%, #fff, #cbd5e1 38%, #64748b 68%, #1e293b); box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4); margin-bottom: 8px; }
+        .draft-empty__ball { width: 58px; height: 58px; filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.45)); }
+        .draft-empty__roll { padding: 15px 44px; font-size: 17px; letter-spacing: 0.08em; }
+
+        /* ---------- Sale recap: contract signing ---------- */
+        .sale-recap {
+            display: flex; flex-direction: column; align-items: center; gap: 15px;
+            width: 100%; max-width: 400px; margin: 0 auto; padding: 18px 18px 20px;
+            border: 1px solid rgba(52, 211, 153, 0.42); border-radius: 18px;
+            background: linear-gradient(160deg, rgba(6, 78, 59, 0.45), rgba(8, 14, 25, 0.72));
+            box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.08), 0 20px 42px rgba(2, 6, 23, 0.55);
+            animation: saleRecapIn 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .sale-recap__doc {
+            position: relative; width: min(330px, 100%); padding: 15px 16px 4px;
+            border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 12px;
+            background: linear-gradient(180deg, #f8fafc, #dbe3ee);
+            box-shadow: 0 18px 34px rgba(2, 6, 23, 0.55);
+            animation: saleDocIn 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .sale-recap__tag { display: block; font-size: 9px; font-weight: 900; letter-spacing: 0.22em; text-transform: uppercase; color: #64748b; }
+        .sale-recap__line { display: block; height: 7px; border-radius: 4px; background: #c3cedd; margin-top: 9px; }
+        .sale-recap__line--short { width: 62%; }
+        .sale-recap__ink { display: block; width: 100%; height: 54px; }
+        .sale-recap__stroke {
+            fill: none; stroke: #16233d; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round;
+            stroke-dasharray: 100; stroke-dashoffset: 100;
+            /* Ends at 2.1s; playDraftAcquisitionAnimation keeps the board frozen
+               past that so the signature is never cut mid-stroke. */
+            animation: saleSignInk 1.65s cubic-bezier(0.4, 0.05, 0.35, 1) 0.45s forwards;
+        }
+        .sale-recap__caption { margin: 0; font-size: 18px; font-weight: 900; line-height: 1.35; text-align: center; color: var(--muted); }
+        .sale-recap__caption b { font-weight: 900; }
+        .sale-recap__buyer { color: var(--emerald); }
+        .sale-recap__player { color: var(--text); }
+        .sale-recap__fee { color: #fbbf24; }
+        @keyframes saleRecapIn { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+        @keyframes saleDocIn { from { transform: translateY(10px) rotate(-1.5deg); opacity: 0; } to { transform: none; opacity: 1; } }
+        @keyframes saleSignInk { to { stroke-dashoffset: 0; } }
 
         /* ---------- Scout strip ---------- */
         .scout-strip { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -730,7 +794,7 @@
         .auction__clock.is-danger { color: var(--red); animation: pulse-md 0.9s ease-in-out infinite; }
 
         .auction__bar { height: 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
-        .auction__bar > div { height: 100%; background: linear-gradient(90deg, #fbbf24, #f97316); transition: width 0.2s linear; }
+        .auction__bar > div { height: 100%; background: linear-gradient(90deg, #fbbf24, #f97316); transform-origin: left center; transition: transform 0.2s linear; }
         .auction__bid { border: 1px solid var(--line); border-radius: 13px; padding: 11px 13px; text-align: center; background: rgba(0, 0, 0, 0.18); }
         .auction__bid.is-live { border-color: rgba(251, 191, 36, 0.40); background: rgba(251, 191, 36, 0.07); }
         .auction__bid-label { font-size: 8px; letter-spacing: 0.20em; text-transform: uppercase; color: var(--muted); font-weight: 900; }
@@ -1091,10 +1155,8 @@
         .pcard--xl { animation: cardRise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
         /* ---------- Draft spin / wheel ---------- */
-        .draft-spin { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; max-width: 520px; margin: 0 auto; }
-        .draft-spin__back { width: 150px; aspect-ratio: 0.72; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.18); background: linear-gradient(155deg, #1e293b, #070d18); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); }
-        .draft-spin__back span { font-family: var(--font-display); font-size: 52px; font-weight: 900; color: rgba(255, 255, 255, 0.18); }
-        .draft-spin__reels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; }
+        .draft-spin { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; max-width: 600px; margin: 0 auto; }
+        .draft-spin__reels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 100%; }
         .reel-window { background: rgba(0, 0, 0, 0.32); border: 1px solid var(--line); }
         .slot-col { background: rgba(255, 255, 255, 0.03); border-color: var(--line); }
         .draft-pickup { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
@@ -1140,11 +1202,10 @@
             .appbar__title { font-size: 14px; }
             .appbar__title small { display: none; }
             .game-main { padding: 14px 12px 44px; gap: 18px; }
-            .draft-arena__head { padding: 16px 16px 12px; }
+            .draft-arena__head { gap: 10px; padding: 14px 16px; }
             .draft-arena__title { font-size: 22px; }
+            .draft-arena__ident { gap: 10px; }
             .draft-board { padding: 16px; min-height: 320px; }
-            .draft-arena__foot { padding: 0 16px 14px; }
-            .tier-chip--budget { margin-left: 0; }
             .pcard--xl { --w: min(272px, 72vw); }
             .manager-card__balance { font-size: 18px; }
             .squad-list { max-height: 170px; }
@@ -1160,6 +1221,54 @@
     </style>
 </head>
 <body class="font-sans antialiased text-slate-100">
+
+    <!-- The match ball, defined once and reused by the menu and the draft board.
+         Panels follow a truncated icosahedron: one pentagon facing the viewer, five
+         more at the rim foreshortened along the same radials, seams running vertex
+         to vertex between them. -->
+    <svg class="absolute" width="0" height="0" aria-hidden="true">
+        <symbol id="soccer-ball" viewBox="0 0 100 100">
+            <defs>
+                <radialGradient id="bb-leather" cx="34%" cy="27%" r="76%">
+                    <stop offset="0" stop-color="#ffffff"/>
+                    <stop offset="52%" stop-color="#e6ecf4"/>
+                    <stop offset="80%" stop-color="#aab6c8"/>
+                    <stop offset="100%" stop-color="#7e8ca1"/>
+                </radialGradient>
+                <radialGradient id="bb-print" cx="34%" cy="27%" r="80%">
+                    <stop offset="0" stop-color="#333f54"/>
+                    <stop offset="58%" stop-color="#141c2b"/>
+                    <stop offset="100%" stop-color="#05080f"/>
+                </radialGradient>
+                <radialGradient id="bb-depth" cx="36%" cy="29%" r="72%">
+                    <stop offset="52%" stop-color="#000" stop-opacity="0"/>
+                    <stop offset="86%" stop-color="#000" stop-opacity="0.24"/>
+                    <stop offset="100%" stop-color="#000" stop-opacity="0.45"/>
+                </radialGradient>
+                <clipPath id="bb-scope"><circle cx="50" cy="50" r="48"/></clipPath>
+            </defs>
+            <circle cx="50" cy="50" r="48" fill="url(#bb-leather)"/>
+            <g clip-path="url(#bb-scope)">
+                <g fill="url(#bb-print)">
+                    <path d="M50 34Q58.7 38.1 65.2 45.1Q65.6 55.6 59.4 62.9Q50 64.7 40.6 62.9Q34.4 55.6 34.8 45.1Q41.3 38.1 50 34Z"/>
+                    <path d="M0 13Q-7.1 9.8 -12.4 4Q-11.5 -3.7 -7.6 -10.5Q0 -12.1 7.6 -10.5Q11.5 -3.7 12.4 4Q7.1 9.8 0 13Z" transform="rotate(0 50 50) translate(50 8) scale(1 0.42)"/>
+                    <path d="M0 13Q-7.1 9.8 -12.4 4Q-11.5 -3.7 -7.6 -10.5Q0 -12.1 7.6 -10.5Q11.5 -3.7 12.4 4Q7.1 9.8 0 13Z" transform="rotate(72 50 50) translate(50 8) scale(1 0.42)"/>
+                    <path d="M0 13Q-7.1 9.8 -12.4 4Q-11.5 -3.7 -7.6 -10.5Q0 -12.1 7.6 -10.5Q11.5 -3.7 12.4 4Q7.1 9.8 0 13Z" transform="rotate(144 50 50) translate(50 8) scale(1 0.42)"/>
+                    <path d="M0 13Q-7.1 9.8 -12.4 4Q-11.5 -3.7 -7.6 -10.5Q0 -12.1 7.6 -10.5Q11.5 -3.7 12.4 4Q7.1 9.8 0 13Z" transform="rotate(216 50 50) translate(50 8) scale(1 0.42)"/>
+                    <path d="M0 13Q-7.1 9.8 -12.4 4Q-11.5 -3.7 -7.6 -10.5Q0 -12.1 7.6 -10.5Q11.5 -3.7 12.4 4Q7.1 9.8 0 13Z" transform="rotate(288 50 50) translate(50 8) scale(1 0.42)"/>
+                </g>
+                <g fill="none" stroke="#151d2c" stroke-opacity="0.6" stroke-width="1.7" stroke-linecap="round">
+                    <path d="M50 34V13.5"/>
+                    <path d="M50 34V13.5" transform="rotate(72 50 50)"/>
+                    <path d="M50 34V13.5" transform="rotate(144 50 50)"/>
+                    <path d="M50 34V13.5" transform="rotate(216 50 50)"/>
+                    <path d="M50 34V13.5" transform="rotate(288 50 50)"/>
+                </g>
+            </g>
+            <circle cx="50" cy="50" r="48" fill="url(#bb-depth)"/>
+            <ellipse cx="35" cy="29" rx="14" ry="8" fill="#fff" opacity="0.22" transform="rotate(-26 35 29)"/>
+        </symbol>
+    </svg>
 
     <!-- Online status line: what a guest device is waiting for -->
     <div id="online-note" class="hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-[80] max-w-[92vw] text-center text-[11px] font-bold px-3 py-1.5 rounded-full bg-slate-800/95 border border-emerald-500/40 text-emerald-200 shadow-lg pointer-events-none"></div>
@@ -1181,7 +1290,7 @@
                         </span>
                         <span class="mode-card__body">
                             <b>Head to Head</b>
-                            <small>2 managers · live auction · local or online</small>
+                            <small>2 Managers · Face against each other</small>
                         </span>
                         <span class="mode-card__arrow">→</span>
                     </button>
@@ -1192,7 +1301,7 @@
                         </span>
                         <span class="mode-card__body">
                             <b>Tournament</b>
-                            <small>1–4 managers · league season · European bracket</small>
+                            <small>1–4 Managers · League season · European Bracket</small>
                         </span>
                         <span class="mode-card__arrow">→</span>
                     </button>
@@ -1210,7 +1319,7 @@
                 <div class="hero-card hero-card--front hero-card--player">
                     <div id="menu-hero-card" class="menu-hero-card"></div>
                 </div>
-                <div class="hero-ball"></div>
+                <svg class="hero-ball" aria-hidden="true"><use href="#soccer-ball"/></svg>
             </div>
         </div>
     </div>
@@ -1354,10 +1463,9 @@
         <header class="appbar">
             <div class="appbar__brand">
                 <span class="appbar__mark">DB</span>
-                <span class="appbar__title">Draft &amp; Bid <small>Football · live draft</small></span>
+                <span class="appbar__title">Draft &amp; Bid <small>Football</small></span>
             </div>
             <div class="appbar__right">
-                <span id="skips-left-label" class="draft-skip">Skips 10</span>
                 <button onclick="openHowTo()" class="icon-btn" aria-label="How it works" title="How it works">?</button>
                 <button onclick="leaveGameToMenu()" id="btn-leave-game" class="leave-ctl btn btn--ghost" style="padding:8px 13px;font-size:11px;">Leave</button>
             </div>
@@ -1366,25 +1474,20 @@
         <main class="game-main">
             <section class="draft-arena">
                 <div class="draft-arena__head">
-                    <div>
-                        <div class="eyebrow">Live Draft</div>
+                    <div class="draft-arena__ident">
                         <h2 class="draft-arena__title">Draft <span>Pool</span></h2>
+                        <span id="skips-left-label" class="draft-skip">Skips: 10</span>
                     </div>
-                    <div class="draft-arena__actions">
-                        <button onclick="rollPlayers()" id="btn-roll" class="btn btn--primary">Roll Draft</button>
+                    <div class="draft-arena__tiers">
+                        <span class="tier-chip tier-chip--gold"><i></i> Gold 85–95</span>
+                        <span class="tier-chip tier-chip--elite"><i></i> Elite 96–100</span>
+                        <span class="tier-chip tier-chip--invincible"><i></i> Invincible 101–105</span>
+                        <span class="tier-chip tier-chip--goat"><i></i> GOAT 106+</span>
                     </div>
                 </div>
 
                 <div class="draft-board" id="draft-board-container">
                     <div id="draft-board" class="w-full"></div>
-                </div>
-
-                <div class="draft-arena__foot">
-                    <span class="tier-chip tier-chip--gold"><i></i> Gold 85–95</span>
-                    <span class="tier-chip tier-chip--elite"><i></i> Elite 96–100</span>
-                    <span class="tier-chip tier-chip--invincible"><i></i> Invincible 101–105</span>
-                    <span class="tier-chip tier-chip--goat"><i></i> GOAT 106+</span>
-                    <span class="tier-chip tier-chip--budget"><i></i> Reserve €10M / empty slot</span>
                 </div>
             </section>
 
@@ -1470,12 +1573,18 @@
         </div>
     </div>
 
-    <!-- Screen 4c-2: European Bracket -->
+    <!-- Screen 4c-2: European group stage and bracket -->
     <div id="screen-euro-bracket" class="screen p-4 md:p-6 bg-slate-950 items-center justify-center relative">
         <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-6 shadow-2xl w-full max-w-5xl flex flex-col max-h-[95vh]">
-            <h2 class="text-xl md:text-2xl font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 mb-1 uppercase tracking-wider">European Bracket</h2>
+            <h2 id="euro-screen-title" class="text-xl md:text-2xl font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 mb-1 uppercase tracking-wider">European Bracket</h2>
             <p class="text-center text-slate-400 text-xs mb-4" id="euro-bracket-sub">&mdash;</p>
-            <div id="euro-bracket-scroll" class="flex-1 overflow-y-auto custom-scrollbar pr-1 min-h-[220px]">
+            <div id="euro-bracket-scroll" class="flex-1 overflow-y-auto custom-scrollbar pr-1 min-h-[220px] relative">
+                <div id="euro-comp-tabs" class="euro-comp-tabs hidden" style="display:none">
+                    <span class="euro-comp-tab" data-comp="UCL">Champions League</span>
+                    <span class="euro-comp-tab" data-comp="UEL">Europa League</span>
+                </div>
+                <div id="euro-draw-stage" class="euro-draw hidden" style="display:none"></div>
+                <div id="euro-groups-stage" class="hidden" style="display:none"></div>
                 <div id="euro-bracket-stage"></div>
             </div>
             <div class="flex justify-center gap-3 mt-4 shrink-0">
@@ -1684,7 +1793,7 @@
 
     <!-- How It Works Guide -->
     <div id="howto-modal" class="fixed inset-0 bg-slate-950/85 hidden justify-center items-center z-[70] opacity-0 transition-opacity duration-200 p-4">
-        <div id="howto-panel" role="dialog" aria-modal="true" aria-labelledby="howto-title" class="bg-slate-800 border border-slate-600 rounded-2xl w-full max-w-2xl shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[92vh]">
+        <div id="howto-panel" role="dialog" aria-modal="true" aria-labelledby="howto-title" class="bg-slate-800 border border-slate-600 rounded-2xl w-full max-w-3xl shadow-2xl transform scale-95 transition-transform duration-200 flex flex-col max-h-[92vh]">
             <div class="p-4 md:p-5 border-b border-slate-700 shrink-0 flex justify-between items-start gap-3">
                 <div>
                     <h3 id="howto-title" class="text-xl md:text-2xl font-black text-white">How it works</h3>
@@ -1693,42 +1802,43 @@
                 <button onclick="closeHowTo()" aria-label="Close guide" class="text-slate-400 hover:text-white transition text-2xl leading-none">&times;</button>
             </div>
             <div class="p-4 md:p-5 overflow-y-auto custom-scrollbar flex-1">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-blue-400 mb-1">1 · Roll</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Press <strong>Roll Draft</strong> to reveal one player from the pool. Everyone sees the same card.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">Press <strong>Roll</strong> to reveal the next player. Every club sees the same card.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-amber-400 mb-1">2 · Bid</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">A <strong>live auction</strong> with rotating turn order and a <strong>9-second shot clock</strong>. On your turn: raise (+1, +5 or a typed amount), or pass. <span class="text-amber-300 font-bold">Keyboard: + to type an amount (Enter to bid), Z is +1, X is +5, hold Space to pass.</span> A leading club can only <strong>buy</strong> or <strong>pass</strong> — never outbid itself. A player is only discarded when <strong>every</strong> club passes, and that spends one of the room's shared skips; once skips run out, a <strong>pickup wheel</strong> assigns unwanted players to a random club at the minimum bid.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">Rotating turns and a <strong>9-second clock</strong>. Raise, buy or pass — the leader never outbids itself. Only a <strong>unanimous pass</strong> discards.</p>
+                        <div class="howto-keys"><kbd>V</kbd><span>bid / buy</span><kbd>Z</kbd><span>+1</span><kbd>X</kbd><span>+5</span><kbd>C</kbd><span>hold to pass</span></div>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-orange-400 mb-1">3 · Reserve</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Keep <strong>10M</strong> for every starting-XI slot you have not filled yet. The tracker shows your maximum bid and what is already reserved.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">Keep <strong>10M</strong> for every starting slot still empty. The tracker shows your ceiling.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-emerald-400 mb-1">4 · Place XI</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Drag players onto the pitch, or <strong>click a player then click a slot</strong>. Auto-fill picks the best fit; the pitch shows how each assignment is rated.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">Drag onto the pitch, or pick a player then a slot. <strong>Auto-fill</strong> sorts the best XI.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-fuchsia-400 mb-1">5 · Chemistry</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Starters who share a <strong>nation</strong> or a <strong>club</strong> link up: 2 linked = +1, 3–5 = +2, 6+ = +3 each. A player takes his best link only, never both.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">Shared nation or club links starters: <strong>2 = +1, 3–5 = +2, 6+ = +3</strong>. Best link only.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-yellow-400 mb-1">6 · Lock</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Fill all 11 starters and the bench, choose your <strong>in-possession, out-of-possession and transition</strong> plan, then <strong>Confirm Formation</strong>. Your plan changes chance creation, control, counters, cards, stamina and set pieces. You cannot bid while your XI is locked — unlock it when you want to spend again.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">Fill XI and bench, set your three plans, then <strong>Confirm</strong>. A locked club cannot bid.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-green-400 mb-1">7 · Match</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Matches play minute by minute with a live timeline, ratings and stats. Fatigue is tracked, so the <strong>bench is used automatically</strong> in the second half. Speed: 1×, 2× or Instant.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">Minute by minute, with live ratings and automatic second-half subs. <strong>1×, 2× or Instant</strong>.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
                         <div class="text-[10px] font-black uppercase tracking-wider text-sky-400 mb-1">8 · Online</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Pick a mode, then <strong>Create Room</strong> for a code or <strong>Join Room</strong> with one. The host sets squad size and difficulty and runs the game; every manager bids, picks their XI and sets tactics on their own device.</p>
+                        <p class="text-xs text-slate-300 leading-relaxed"><strong>Create</strong> a room for a code, or <strong>Join</strong> one. The host runs the game; each club bids on its own device.</p>
                     </div>
                     <div class="bg-slate-900/80 border border-slate-700 rounded-xl p-3">
-                        <div class="text-[10px] font-black uppercase tracking-wider text-emerald-400 mb-1">9 · Invest</div>
-                        <p class="text-xs text-slate-300 leading-relaxed">Leftover cash buys <strong>Club Investment</strong>: a permanent training camp for one player, a season-long medical programme that cuts injury and fatigue risk, or a scouting network that reveals hidden positional fit and rival match plans. Open it from a club card or the transfer window.</p>
+                        <div class="text-[10px] font-black uppercase tracking-wider text-teal-400 mb-1">9 · Invest</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Spare cash buys a <strong>training camp</strong>, <strong>medical programme</strong> or <strong>scouting network</strong>.</p>
                     </div>
                 </div>
                 <p class="text-[11px] text-slate-500 mt-3 text-center">Press <kbd class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-200 font-bold">Esc</kbd> to close any modal.</p>

@@ -25,27 +25,18 @@ function avgPoolOVRByPos() {
 
 
 function makeGhostPlayer(pos, ovr, club, idx) {
-    const variance = () => Math.round((Math.random() * 6) - 3);
-    const stats = {
-        PAC: clamp(ovr + variance(), 45, 105), SHO: clamp(ovr + variance(), 40, 105),
-        PAS: clamp(ovr + variance(), 45, 105), DRI: clamp(ovr + variance(), 45, 105),
-        DEF: clamp(ovr + variance(), 40, 105), PHY: clamp(ovr + variance(), 45, 105)
-    };
-    if (pos === 'GK') {
-        stats.SHO = clamp(stats.SHO - 20, 20, 55);
-        stats.PAC = clamp(stats.PAC - 12, 30, 70);
-        stats.DEF = clamp(stats.DEF + 6, 60, 105);
-    }
     const fi = Math.abs((idx * 17 + pos.charCodeAt(0) * 3) % GHOST_FIRST.length);
     const li = Math.abs((idx * 31 + (club || '').length * 7) % GHOST_LAST.length);
     const name = `${GHOST_FIRST[fi]} ${GHOST_LAST[li]}`;
+    // Ghost roles come from the name and the club's own rating ladder — the same
+    // player is the same player on every machine — and the armband still only
+    // lands on the best man in the side.
+    const archetype = archetypeForName(pos, name);
+    const playstyle = playstyleForName(pos, name, (ovr - 68) / 17);
     return {
         id: 90000 + idx, name, rating: ovr, displayOVR: String(Math.min(99, ovr)),
-        rank: null, stats, mainPos: pos, playstyle: playstyleForName(pos, name),
-        // Ghost habits come from the name and the club's own rating ladder — the same
-        // player is the same player on every machine — and the armband still only
-        // lands on the best man in the side.
-        speciality: specialityForName(pos, name, (ovr - 68) / 17),
+        rank: null, stats: buildRoleStats(ovr, pos, archetype, playstyle),
+        mainPos: pos, archetype, playstyle,
         subPos: [], team: club, nationality: 'World'
     };
 }
@@ -58,11 +49,17 @@ function makeGhostPlayer(pos, ovr, club, idx) {
 // same side on every machine.
 function electGhostLeaders(lineup, clubName) {
     const ranked = lineup.slice().sort((a, b) => b.player.rating - a.player.rating ||
-        specialityHash(b.player.name) - specialityHash(a.player.name));
+        playstyleHash(b.player.name) - playstyleHash(a.player.name));
     const captain = ranked[0];
-    if (captain && specialityHash(`${clubName}|armband`) % 100 < 65) captain.player.speciality = 'captain';
+    if (captain && playstyleHash(`${clubName}|armband`) % 100 < 65) {
+        captain.player.playstyle = 'Odin';
+        refreshRoleStats(captain.player);
+    }
     const deputy = ranked[1];
-    if (deputy && specialityHash(`${clubName}|deputy`) % 100 < 40) deputy.player.speciality = 'vice_captain';
+    if (deputy && playstyleHash(`${clubName}|deputy`) % 100 < 40) {
+        deputy.player.playstyle = 'Apollo';
+        refreshRoleStats(deputy.player);
+    }
 }
 
 function buildGhostTeam(clubName, avgByPos, seed, strengthOffset = -4, tierBiasOverride = null) {
@@ -139,8 +136,8 @@ function samplePoisson(lambda) {
 // destroyer wins balls all afternoon, a poacher hardly tracks back.
 function drawRatingActions(pos, player) {
     const mean = RATING_ACTION_MEAN[pos] || RATING_ACTION_MEAN.CM;
-    const work = playstyleWeights(player).workload;
-    const habit = specialityWeights(player).workload;
+    const work = archetypeWeights(player).workload;
+    const habit = playstyleWeights(player).workload;
     return {
         defActions: samplePoisson(mean.def * work.def * habit.def),
         keyPasses: samplePoisson(mean.key * work.key * habit.key)
@@ -247,7 +244,7 @@ function planLeagueAppearances(team) {
         let injury = false;
         // A habit decides how the same body behaves over a season: the enforcer and
         // the hot head collect bookings, the captain and the technician do not.
-        const booking = specialityBookingRateFor(slot.player);
+        const booking = playstyleBookingRateFor(slot.player);
         const cardRoll = Math.random();
         if (cardRoll < 0.012 * booking) {
             red = true;
@@ -264,7 +261,7 @@ function planLeagueAppearances(team) {
             const unit = unitOf(slot.pos);
             const lateChance  = unit === 'GK' ? 0.005 : unit === 'DEF' ? 0.20 : unit === 'MID' ? 0.30 : 0.36;
             // A fragile body is the one a manager takes off early; an iron man plays on.
-            const earlyChance = unit === 'GK' ? 0 : 0.05 * specialityInjuryRate(slot.player) * injuryFactor;
+            const earlyChance = unit === 'GK' ? 0 : 0.05 * playstyleInjuryRate(slot.player) * injuryFactor;
             if (Math.random() < lateChance) {
                 minutes = 58 + Math.floor(Math.random() * 28); // 58–85
                 subOff = true;
@@ -336,7 +333,7 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
         if (!sub || !st) return id;
         // A Super-Sub is the man a manager sends on for a goal, so the share that
         // lands on him is bigger than the minutes he actually played.
-        const share = clamp((90 - st.minutes) / 90 * specialityEffects(sub.player).sub, 0, 1);
+        const share = clamp((90 - st.minutes) / 90 * playstyleEffects(sub.player).sub, 0, 1);
         return Math.random() < share ? sub.player.id : id;
     };
     const goalCredits = trackScoring.goals.map(creditTo);
@@ -398,7 +395,7 @@ function applySideMatchEffects(team, playerStats, goalsAgainst, trackScoring) {
 
 // A league match is a big one when both sides are chasing the same prize — the top
 // of the table or survival — and they are close enough that the result matters to
-// both. That is the only situation a Big Game Player's nerve is worth anything.
+// both. That is the only situation a Zeus carrier's nerve is worth anything.
 function leagueMatchPressure(teamA, teamB) {
     const run = _seasonRun;
     if (!run || !run.rowsById || !run.table.length) return 0;
@@ -479,12 +476,12 @@ function simulateLeagueMatch(teamA, teamB, statsA, statsB) {
         });
         const tactics = getTacticsMatchupFor(teamA.tactics, teamB.tactics);
         // Habits ride on top of the plan: an XI that suits its own tactics and the
-        // armband on the pitch are worth goals the same way a playstyle is.
+        // armband on the pitch are worth goals the same way a archetype is.
         const pressure = leagueMatchPressure(teamA, teamB);
-        const cohA = playstyleCoherence(teamA, teamB.tactics) * specialityCoherence(teamA, teamB.tactics);
-        const cohB = playstyleCoherence(teamB, teamA.tactics) * specialityCoherence(teamB, teamA.tactics);
-        const nerveA = specialityClutchBoost(teamA, pressure);
-        const nerveB = specialityClutchBoost(teamB, pressure);
+        const cohA = archetypeCoherence(teamA, teamB.tactics) * playstyleCoherence(teamA, teamB.tactics);
+        const cohB = archetypeCoherence(teamB, teamA.tactics) * playstyleCoherence(teamB, teamA.tactics);
+        const nerveA = playstyleClutchBoost(teamA, pressure);
+        const nerveB = playstyleClutchBoost(teamB, pressure);
         const lambdaA = clamp(expected.lambdaA * tactics.a.attack * tactics.b.concede * cohA * nerveA, 0.2, 4.0);
         const lambdaB = clamp(expected.lambdaB * tactics.b.attack * tactics.a.concede * cohB * nerveB, 0.2, 4.0);
 
@@ -917,13 +914,7 @@ function updateWdlStrips(upToMd) {
             if (r === 'D') { d++; return `<span class="inline-block w-1.5 sm:w-2 h-3.5 rounded-sm bg-slate-500" title="D"></span>`; }
             l++; return `<span class="inline-block w-1.5 sm:w-2 h-3.5 rounded-sm bg-red-500" title="L"></span>`;
         }).join('');
-        if (rec) {
-            const fanHistory = Array.isArray(s.fans) ? s.fans : [];
-            const shownFans = upToMd > 0 && fanHistory.length
-                ? fanHistory[Math.min(upToMd, fanHistory.length) - 1]
-                : null;
-            rec.innerText = `${w}-${d}-${l}${shownFans != null ? ` · ${formatFanCount(shownFans)}` : ''}`;
-        }
+        if (rec) rec.innerText = `${w}-${d}-${l}`;
     });
 }
 
@@ -952,18 +943,16 @@ function animateSeasonChart(mdIndex, limit = SEASON_MATCHDAYS, onDone) {
     if (mdIndex < 3 || mdIndex > 34) delay = 140;
     if (mdIndex % 5 === 0) delay = 180;
     // Stale panels from an earlier matchday or a live match never carry over.
-    if (typeof hideMatchReportPanels === 'function') hideMatchReportPanels();
+    if (typeof hideMatchReportLayer === 'function') hideMatchReportLayer();
     const reports = (gameState.season && gameState.season.matchdayReports)
         ? gameState.season.matchdayReports[mdIndex]
         : null;
-    // An injury or a ban stops the replay completely: the updates for every club
-    // appear under the chart and nothing moves until Continue is pressed.
-    const hasEvent = (reports || []).some(report =>
-        (report.injuries || []).length || (report.suspensions || []).length);
-    if (hasEvent && typeof showSeasonEventPanel === 'function'
-        && showSeasonEventPanel(reports, mdIndex, () => animateSeasonChart(mdIndex + 1, limit, onDone))) {
-        return;
-    }
+    // The updates panel tracks the replay on every matchday. Only an injury or a
+    // ban stops it, and then nothing moves until Continue is pressed.
+    const blocked = matchReportHasEvents(reports) && typeof showSeasonEventPanel === 'function'
+        && showSeasonEventPanel(reports, mdIndex, () => animateSeasonChart(mdIndex + 1, limit, onDone));
+    if (blocked) return;
+    if (typeof showSeasonEventPanel === 'function') showSeasonEventPanel(reports, mdIndex, null);
     setTimeout(() => animateSeasonChart(mdIndex + 1, limit, onDone), delay);
 }
 
@@ -1177,6 +1166,9 @@ function buildEuroGhost(comp, roundIdx, uniqueSeed, club) {
 // team state is available), so a tier-1 giant usually beats a tier-5 minnow.
 function ghostTiePower(team) {
     if (!team) return 80;
+    // The group stage already rated every club on the campaign's own ruler, so a
+    // seeded bracket tie reads the same number the table was built from.
+    if (Number.isFinite(team.power)) return team.power;
     if (Array.isArray(team.lineup) && team.lineup.some(slot => slot && slot.player)) {
         return getStrength(team);
     }
@@ -1192,16 +1184,16 @@ function simulateGhostTie(m) {
         base: BASE_EXPECTED_GOALS_PER_TEAM,
         coefficient: 0.05
     });
-    // A knockout tie is the big game every Big Game Player is bought for, and the
+    // A knockout tie is the big game every Zeus is bought for, and the
     // shootout belongs to whoever actually nails penalties under that pressure.
-    const lambdaA = expected.lambdaA * specialityClutchBoost(m.t1, 1);
-    const lambdaB = expected.lambdaB * specialityClutchBoost(m.t2, 1);
+    const lambdaA = expected.lambdaA * playstyleClutchBoost(m.t1, 1);
+    const lambdaB = expected.lambdaB * playstyleClutchBoost(m.t2, 1);
     m.s1 = EngineCore.samplePoisson(lambdaA);
     m.s2 = EngineCore.samplePoisson(lambdaB);
 
     if (m.s1 === m.s2) {
         // Weighted shootout: the stronger side still has to earn it from 12 yards.
-        const nerve = specialityPenaltyEdge(m.t1) - specialityPenaltyEdge(m.t2);
+        const nerve = playstylePenaltyEdge(m.t1) - playstylePenaltyEdge(m.t2);
         const p1Wins = clamp(0.5 + edge * 0.025 + nerve * 1.2, 0.25, 0.75);
         const firstWins = Math.random() < p1Wins;
         const win = 3 + Math.floor(Math.random() * 3);
@@ -1213,6 +1205,539 @@ function simulateGhostTie(m) {
         m.winner = m.s1 > m.s2 ? m.t1 : m.t2;
     }
     m.played = true;
+}
+
+// ============================================================
+// EUROPEAN GROUP STAGE
+// Thirty-two clubs per competition, eight groups of four, home and away.
+// Every tie is simulated — a manager's own group matches included, played
+// by the engine on the eleven they actually picked.
+// ============================================================
+
+const EURO_GROUP_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+// The three ways to split four clubs into two ties, then the same three with
+// the venues reversed: every pairing is met twice and no club plays twice a
+// matchday, so each side gets three home games and three away.
+const EURO_GROUP_PAIRINGS = [
+    [[0, 1], [2, 3]], [[0, 2], [1, 3]], [[0, 3], [1, 2]],
+    [[3, 0], [2, 1]], [[2, 0], [3, 1]], [[1, 0], [3, 2]]
+];
+const EURO_GROUP_MATCHDAYS = 6;
+const EURO_GROUP_SIZE = 4;
+const EURO_GROUP_QUALIFERS = 2;
+
+function euroShuffle(list) {
+    const out = [...list];
+    for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+}
+
+// One ruler for the whole campaign: a manager's club is worth the strength of
+// the XI they picked, an invited club is the human average shifted by its tier.
+function euroNodePower(node, baseline) {
+    const raw = node.isHuman
+        ? getStrength(node.humanRef.teamState)
+        : baseline + (EURO_TIER_DELTA[node.tier] ?? 0) * 2.5;
+    return Math.round(raw * 10) / 10;
+}
+
+// Pots, the draw itself and the six matchdays. `balls` records the draw in the
+// order it happened so the screen can replay it instead of showing a done deal.
+function buildEuroGroupStage(comp, humanNodes, baseline) {
+    const teams = [...humanNodes];
+    const used = new Set(teams.map(t => t.name));
+
+    // Europe's group stage always contains the elite, so they are seeded in
+    // before the weighted draw tops the field up from the lower tiers.
+    euroShuffle((EURO_CLUB_POOL[comp][1] || []).map(name => ({ name, tier: 1 }))).forEach(club => {
+        if (teams.length >= 32 || used.has(club.name)) return;
+        used.add(club.name);
+        teams.push({ name: club.name, isHuman: false, tier: club.tier });
+    });
+    while (teams.length < 32) {
+        const club = drawEuroOpponent(comp, 0, used);
+        used.add(club.name);
+        teams.push({ name: club.name, isHuman: false, tier: club.tier });
+    }
+
+    teams.forEach(t => { t.power = euroNodePower(t, baseline); });
+
+    // Strength seeds the four pots of eight, so the best clubs cannot meet
+    // until the knockout rounds — and one club from each pot lands in each group.
+    const ranked = [...teams].sort((a, b) => b.power - a.power || String(a.name).localeCompare(String(b.name)));
+    const pots = [0, 1, 2, 3].map(p => ranked.slice(p * 8, p * 8 + 8));
+    const groups = EURO_GROUP_LETTERS.map(() => []);
+    const balls = [];
+    pots.forEach((pot, potIdx) => {
+        euroShuffle(pot).forEach((team, seat) => {
+            team.groupIdx = seat;
+            team.groupLetter = EURO_GROUP_LETTERS[seat];
+            team.pot = potIdx + 1;
+            groups[seat].push(team);
+            balls.push({ pot: potIdx + 1, groupIdx: seat, name: team.name, isHuman: !!team.isHuman });
+        });
+    });
+
+    const fixtures = [];
+    for (let md = 0; md < EURO_GROUP_MATCHDAYS; md++) {
+        const day = [];
+        groups.forEach((clubs, gi) => {
+            EURO_GROUP_PAIRINGS[md].forEach((pair, k) => {
+                day.push({ id: `G${gi}_${md}_${k}`, gi, md, t1: clubs[pair[0]], t2: clubs[pair[1]], played: false });
+            });
+        });
+        // The manager's own game is the last one revealed on each matchday.
+        fixtures.push(euroShuffle(day).sort(m => (m.t1.isHuman || m.t2.isHuman) ? 1 : 0));
+    }
+
+    return { teams, pots, groups, balls, fixtures, playedMatchdays: 0 };
+}
+
+function simulateGroupTie(m) {
+    const edge = (m.t1.power ?? 84) - (m.t2.power ?? 84);
+    const expected = EngineCore.expectedGoals({
+        edge,
+        base: EURO_GROUP_GOALS_PER_TEAM,
+        coefficient: 0.05,
+        homeAdvantage: EURO_GROUP_HOME_ADVANTAGE
+    });
+    // Group football is not a knockout night, so the big-game habits carry less
+    // here than they do from the round of 16 onwards.
+    const nerveA = playstyleClutchBoost(m.t1.humanRef?.teamState, 0.4);
+    const nerveB = playstyleClutchBoost(m.t2.humanRef?.teamState, 0.4);
+    m.s1 = EngineCore.samplePoisson(clamp(expected.lambdaA * nerveA, 0.2, 4.0));
+    m.s2 = EngineCore.samplePoisson(clamp(expected.lambdaB * nerveB, 0.2, 4.0));
+    m.played = true;
+}
+
+function runEuroGroupMatchday(mdIndex, onlyComp) {
+    const euro = gameState.europe;
+    if (!euro) return;
+    ['UCL', 'UEL'].forEach(comp => {
+        if (onlyComp && comp !== onlyComp) return;
+        const stage = euro.groups[comp];
+        if (!stage) return;
+        (stage.fixtures[mdIndex] || []).forEach(m => { if (!m.played) simulateGroupTie(m); });
+        stage.playedMatchdays = Math.max(stage.playedMatchdays || 0, mdIndex + 1);
+    });
+}
+
+function runEuroGroupStage() {
+    for (let md = 0; md < EURO_GROUP_MATCHDAYS; md++) runEuroGroupMatchday(md);
+}
+
+function euroGroupMatches(comp, gi) {
+    const stage = gameState.europe?.groups?.[comp];
+    if (!stage) return [];
+    return stage.fixtures.flat().filter(m => m.gi === gi);
+}
+
+// The table is derived from the results rather than stored, so a second device
+// (or a re-render) can never drift away from the first.
+function euroGroupTable(comp, gi) {
+    const stage = gameState.europe?.groups?.[comp];
+    if (!stage) return [];
+    const rows = new Map(stage.groups[gi].map(team => [team, { team, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }]));
+    euroGroupMatches(comp, gi).forEach(m => {
+        if (!m.played) return;
+        const home = rows.get(m.t1), away = rows.get(m.t2);
+        home.p++; away.p++;
+        home.gf += m.s1; home.ga += m.s2;
+        away.gf += m.s2; away.ga += m.s1;
+        if (m.s1 > m.s2) { home.w++; away.l++; home.pts += 3; }
+        else if (m.s1 < m.s2) { away.w++; home.l++; away.pts += 3; }
+        else { home.d++; away.d++; home.pts++; away.pts++; }
+    });
+    return rankGroupRows(comp, gi, [...rows.values()]);
+}
+
+function rankGroupRows(comp, gi, rows) {
+    rows.forEach(r => { r.gd = r.gf - r.ga; });
+    const byOverall = (a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf
+        || (b.team.power ?? 0) - (a.team.power ?? 0)
+        || String(a.team.name).localeCompare(String(b.team.name));
+    rows.sort(byOverall);
+
+    // Level on points, goal difference and goals scored: UEFA settles those
+    // ties on the mini-league between the clubs concerned before reaching
+    // for anything else.
+    let start = 0;
+    while (start < rows.length) {
+        let end = start;
+        while (end + 1 < rows.length
+            && rows[end + 1].pts === rows[start].pts
+            && rows[end + 1].gd === rows[start].gd
+            && rows[end + 1].gf === rows[start].gf) end++;
+        if (end > start) {
+            const cluster = rows.slice(start, end + 1);
+            const mini = new Map(cluster.map(r => [r.team, { pts: 0, gd: 0, gf: 0 }]));
+            euroGroupMatches(comp, gi).forEach(m => {
+                if (!m.played) return;
+                const a = mini.get(m.t1), b = mini.get(m.t2);
+                if (!a || !b) return;
+                a.gf += m.s1; a.gd += m.s1 - m.s2;
+                b.gf += m.s2; b.gd += m.s2 - m.s1;
+                if (m.s1 > m.s2) a.pts += 3;
+                else if (m.s1 < m.s2) b.pts += 3;
+                else { a.pts++; b.pts++; }
+            });
+            cluster.sort((x, y) => {
+                const mx = mini.get(x.team), my = mini.get(y.team);
+                return my.pts - mx.pts || my.gd - mx.gd || my.gf - mx.gf || byOverall(x, y);
+            });
+            rows.splice(start, cluster.length, ...cluster);
+        }
+        start = end + 1;
+    }
+    return rows;
+}
+
+function emptyEuroBracket(teams) {
+    const bracket = [[], [], [], []];
+    for (let i = 0; i < 8; i++) {
+        bracket[0].push({ id: `R0_${i}`, t1: teams[i * 2], t2: teams[i * 2 + 1], played: false });
+    }
+    for (let r = 1; r < 4; r++) {
+        for (let i = 0; i < 8 / Math.pow(2, r); i++) {
+            bracket[r].push({ id: `R${r}_${i}`, t1: null, t2: null, played: false });
+        }
+    }
+    return bracket;
+}
+
+// Two from each group go through, and a group winner may only be drawn
+// against a runner-up from a different group.
+function qualifyEuroKnockout(comp) {
+    const euro = gameState.europe;
+    const stage = euro.groups[comp];
+    if (!stage) return null;
+
+    const winners = [], runners = [];
+    for (let gi = 0; gi < EURO_GROUP_LETTERS.length; gi++) {
+        const rows = euroGroupTable(comp, gi);
+        winners.push(rows[0].team);
+        runners.push(rows[1].team);
+        rows.slice(EURO_GROUP_QUALIFERS).forEach(r => {
+            if (!r.team.isHuman) return;
+            r.team.humanRef.eliminated = true;
+            r.team.humanRef.roundReached = 'Group stage';
+        });
+    }
+
+    let order = euroShuffle(runners);
+    let guard = 0;
+    while (guard++ < 300 && order.some((r, i) => r.groupIdx === winners[i].groupIdx)) order = euroShuffle(runners);
+
+    const teams = [];
+    winners.forEach((w, i) => teams.push(w, order[i]));
+    euro.brackets[comp] = emptyEuroBracket(teams);
+    return teams;
+}
+
+// ============================================================
+// EUROPEAN GROUP STAGE SHOW
+// The draw, the six matchdays and the flight into the last sixteen. Every timer
+// is tagged with a generation, so pressing Skip retires the whole sequence
+// instead of leaving orphaned animations behind.
+// ============================================================
+
+const EURO_BALL_MS = 76;
+const EURO_MD_MS = 1150;
+const EURO_FLY_MS = 300;
+const EURO_SEAT_STAGGER = 70;
+
+const EuroShow = {
+    timers: [],
+    gen: 0,
+    clear() { this.timers.forEach(clearTimeout); this.timers = []; },
+    after(ms, fn) {
+        const gen = this.gen;
+        const id = setTimeout(() => {
+            this.timers = this.timers.filter(t => t !== id);
+            if (gen === this.gen) fn();
+        }, ms);
+        this.timers.push(id);
+    }
+};
+
+function euroEl(id) { return document.getElementById(id); }
+
+// The stages carry their own display rules, so hide them inline as well as with
+// the utility class — whichever stylesheet wins the tie, the stage disappears.
+function euroVis(el, show) {
+    if (!el) return;
+    el.classList.toggle('hidden', !show);
+    el.style.display = show ? '' : 'none';
+}
+
+function euroFly(source, target, label, onLand) {
+    const host = euroEl('euro-bracket-scroll');
+    if (!host || !source || !target) { if (onLand) onLand(); return; }
+    const hostRect = host.getBoundingClientRect();
+    const from = source.getBoundingClientRect();
+    const to = target.getBoundingClientRect();
+    const chip = document.createElement('div');
+    chip.className = 'euro-fly';
+    chip.textContent = label;
+    host.appendChild(chip);
+    const x0 = from.left - hostRect.left + host.scrollLeft;
+    const y0 = from.top - hostRect.top + host.scrollTop;
+    const x1 = to.left - hostRect.left + host.scrollLeft;
+    const y1 = to.top - hostRect.top + host.scrollTop;
+    chip.style.transform = `translate(${x0}px, ${y0}px) scale(.92)`;
+    requestAnimationFrame(() => {
+        chip.style.transition = `transform ${EURO_FLY_MS}ms cubic-bezier(.2,.7,.3,1)`;
+        chip.style.transform = `translate(${x1}px, ${y1}px)`;
+    });
+    EuroShow.after(EURO_FLY_MS + 20, () => {
+        chip.remove();
+        if (onLand) onLand();
+    });
+}
+
+function euroDrawMarkup(comp) {
+    const stage = gameState.europe.groups[comp];
+    const pots = [1, 2, 3, 4].map(p => `
+        <div class="euro-pot" data-pot="${p}">
+            <div class="euro-pot__label">Pot ${p}</div>
+            <div class="euro-pot__balls">${stage.balls.slice((p - 1) * 8, p * 8).map((b, k) =>
+                `<span class="euro-ball" data-seq="${(p - 1) * 8 + k}" title="${escapeHTML(b.name)}"></span>`).join('')}
+            </div>
+        </div>`).join('');
+    const slots = stage.groups.map((clubs, gi) => `
+        <div class="euro-slot" data-gi="${gi}">
+            <div class="euro-slot__head">Group ${EURO_GROUP_LETTERS[gi]}</div>
+            <div class="euro-slot__rows"></div>
+        </div>`).join('');
+    return `<div class="euro-md"><span>Group stage draw</span><button class="euro-skip" type="button">Skip</button></div>
+            <div class="euro-pots">${pots}</div><div class="euro-draw__groups">${slots}</div>`;
+}
+
+// One ball leaves its pot every EURO_BALL_MS; the flights overlap, so the draw
+// reads as a continuous machine rather than thirty-two separate gestures.
+function runEuroDraw(comp, onDone) {
+    const stage = gameState.europe.groups[comp];
+    const drawEl = euroEl('euro-draw-stage');
+    if (!drawEl) { onDone(); return; }
+    drawEl.innerHTML = euroDrawMarkup(comp);
+    euroVis(drawEl, true);
+    drawEl.querySelector('.euro-skip').onclick = skipEuroGroupPresentation;
+    const balls = stage.balls;
+    let seq = 0;
+    const step = () => {
+        if (seq >= balls.length) {
+            EuroShow.after(420, () => { euroVis(drawEl, false); onDone(); });
+            return;
+        }
+        const ball = balls[seq];
+        const chip = drawEl.querySelector(`.euro-ball[data-seq="${seq}"]`);
+        if (chip) chip.classList.add('gone');
+        const slot = drawEl.querySelector(`.euro-slot[data-gi="${ball.groupIdx}"]`);
+        if (slot) slot.classList.add('landing');
+        euroFly(chip, slot && slot.querySelector('.euro-slot__rows'), ball.name, () => {
+            if (!slot) return;
+            const row = document.createElement('div');
+            row.className = 'euro-slot__row' + (ball.isHuman ? ' human' : '');
+            row.textContent = ball.name;
+            slot.querySelector('.euro-slot__rows').appendChild(row);
+            slot.classList.remove('landing');
+        });
+        seq++;
+        EuroShow.after(EURO_BALL_MS, step);
+    };
+    step();
+}
+
+function euroGroupsMarkup(comp, md) {
+    const stage = gameState.europe.groups[comp];
+    const head = md < 0
+        ? '<span>Group stage</span>'
+        : `<span>Matchday <b>${md + 1}</b> / ${EURO_GROUP_MATCHDAYS}</span>`;
+    const cards = stage.groups.map((clubs, gi) => {
+        const rows = euroGroupTable(comp, gi);
+        const decided = md === EURO_GROUP_MATCHDAYS - 1;
+        const body = rows.map((r, i) => {
+            const cls = ['euro-row'];
+            if (r.team.isHuman) cls.push('human');
+            if (decided) cls.push(i < EURO_GROUP_QUALIFERS ? 'zone-in' : 'zone-out');
+            return `<div class="${cls.join(' ')}" data-team="${escapeHTML(r.team.name)}">
+                <span>${i + 1}</span>
+                <span class="euro-row__name">${escapeHTML(r.team.name)}</span>
+                <span class="euro-row__gd">${r.gd > 0 ? `+${r.gd}` : r.gd}</span>
+                <span class="euro-row__pts">${r.pts}</span>
+            </div>`;
+        }).join('');
+        const ties = (stage.fixtures[md] || []).filter(m => m.gi === gi).map(m =>
+            `<div>${escapeHTML(m.t1.name)} ${m.s1}-${m.s2} ${escapeHTML(m.t2.name)}</div>`).join('');
+        return `<div class="euro-group" data-gi="${gi}">
+            <div class="euro-group__head">Group ${EURO_GROUP_LETTERS[gi]}</div>
+            ${body}
+            <div class="euro-group__day">${ties}</div>
+        </div>`;
+    }).join('');
+    return `<div class="euro-md">${head}<button class="euro-skip" type="button">Skip</button></div>
+            <div class="euro-groups">${cards}</div>`;
+}
+
+// Repaints the eight tables, then slides each row from where it was to where it
+// now ranks, so a result visibly moves a club up or down the group.
+function renderEuroTables(comp, md) {
+    const host = euroEl('euro-groups-stage');
+    if (!host) return;
+    const wasTop = new Map();
+    const wasPts = new Map();
+    host.querySelectorAll('.euro-row').forEach(r => {
+        wasTop.set(r.dataset.team, r.getBoundingClientRect().top);
+        wasPts.set(r.dataset.team, r.querySelector('.euro-row__pts').textContent);
+    });
+    host.innerHTML = euroGroupsMarkup(comp, md);
+    host.querySelectorAll('.euro-row').forEach(r => {
+        const old = wasTop.get(r.dataset.team);
+        if (old != null) {
+            const delta = old - r.getBoundingClientRect().top;
+            if (Math.abs(delta) > 1) {
+                r.style.transition = 'none';
+                r.style.transform = `translateY(${delta}px)`;
+                requestAnimationFrame(() => { r.style.transition = ''; r.style.transform = ''; });
+            }
+        }
+        if (wasPts.get(r.dataset.team) !== r.querySelector('.euro-row__pts').textContent) r.classList.add('landing');
+    });
+    const skip = host.querySelector('.euro-skip');
+    if (skip) skip.onclick = skipEuroGroupPresentation;
+}
+
+// The tables start empty and fill one matchday at a time. Results are simulated
+// a matchday ahead of being shown, which is what makes the re-sort meaningful.
+function runEuroMatchdays(comp, onDone) {
+    const host = euroEl('euro-groups-stage');
+    if (!host) { onDone(); return; }
+    renderEuroTables(comp, -1);
+    euroVis(host, true);
+    let md = 0;
+    const step = () => {
+        if (md >= EURO_GROUP_MATCHDAYS) { EuroShow.after(700, onDone); return; }
+        runEuroGroupMatchday(md, comp);
+        renderEuroTables(comp, md);
+        md++;
+        EuroShow.after(EURO_MD_MS, step);
+    };
+    EuroShow.after(650, step);
+}
+
+// The two qualifying clubs from each table fly down into the last sixteen.
+function flyIntoR16(comp, onDone) {
+    const host = euroEl('euro-groups-stage');
+    const bracket = gameState.europe.brackets[comp];
+    if (!host || !bracket || !host.querySelector('.euro-groups')) { onDone(); return; }
+    const rowsByTeam = new Map();
+    host.querySelectorAll('.euro-row').forEach(r => rowsByTeam.set(r.dataset.team, r));
+    host.insertAdjacentHTML('beforeend', `<div class="euro-r16">
+        <div class="euro-group__head">Round of 16</div>
+        <div class="euro-r16__grid">${bracket[0].map(m => `
+            <div class="euro-r16__tie" data-tie="${m.id}">
+                <div class="euro-r16__seat" data-slot="1"></div>
+                <div class="euro-r16__seat" data-slot="2"></div>
+            </div>`).join('')}
+        </div></div>`);
+    const seats = [];
+    bracket[0].forEach(m => {
+        [m.t1, m.t2].forEach((team, k) => {
+            const cell = host.querySelector(`.euro-r16__tie[data-tie="${m.id}"] .euro-r16__seat[data-slot="${k + 1}"]`);
+            if (cell) seats.push({ team, cell });
+        });
+    });
+    let landed = 0;
+    // Bring the landing grid into view without losing the tables it flies from.
+    const scroll = euroEl('euro-bracket-scroll');
+    const grid = host.querySelector('.euro-r16');
+    if (scroll && grid) {
+        const gap = grid.getBoundingClientRect().bottom - scroll.getBoundingClientRect().bottom;
+        if (gap > 0) scroll.scrollTop += gap + 10;
+    }
+    seats.forEach((s, i) => {
+        EuroShow.after(i * EURO_SEAT_STAGGER, () => {
+            const source = rowsByTeam.get(s.team.name);
+            if (source) source.classList.add('moved');
+            euroFly(source, s.cell, s.team.name, () => {
+                s.cell.textContent = s.team.name;
+                s.cell.classList.add('filled');
+                if (s.team.isHuman) s.cell.classList.add('human');
+                if (++landed >= seats.length) EuroShow.after(450, onDone);
+            });
+        });
+    });
+}
+
+// Plays the group stage out for each competition the managers entered, one
+// competition at a time: draw, six matchdays, then the flight into the bracket.
+function presentEuroGroups(onDone) {
+    const comps = ['UCL', 'UEL'].filter(c => gameState.europe.groups[c]);
+    const tabs = euroEl('euro-comp-tabs');
+    const title = euroEl('euro-screen-title');
+    EuroShow.silentPaint = false;
+    euroVis(euroEl('euro-bracket-stage'), false);
+    if (title) title.textContent = 'European Group Stage';
+    const sub = euroEl('euro-bracket-sub');
+    if (sub) sub.textContent = 'The draw, then six matchdays — every tie simulated.';
+    euroVis(euroEl('btn-bracket-next'), false);
+    euroVis(euroEl('btn-bracket-final'), false);
+    // The spectacle is local: a client's screen stays where it was until there is
+    // a real bracket to show it.
+    if (Net.online) showScreenLocal('screen-euro-bracket');
+    else showScreen('screen-euro-bracket');
+    euroVis(tabs, comps.length > 1);
+    let i = 0;
+    const nextComp = () => {
+        if (i >= comps.length) { onDone(); return; }
+        const comp = comps[i++];
+        tabs.querySelectorAll('.euro-comp-tab').forEach(t => t.classList.toggle('on', t.dataset.comp === comp));
+        const scroll = euroEl('euro-bracket-scroll');
+        if (scroll) scroll.scrollTop = 0;
+        runEuroDraw(comp, () => runEuroMatchdays(comp, () => {
+            qualifyEuroKnockout(comp);
+            flyIntoR16(comp, () => EuroShow.after(600, () => {
+                euroVis(euroEl('euro-groups-stage'), false);
+                nextComp();
+            }));
+        }));
+    };
+    nextComp();
+}
+
+// Retires the animation and puts every result on the books in one go.
+function skipEuroGroupPresentation() {
+    EuroShow.clear();
+    EuroShow.gen++;
+    runEuroGroupStage();
+    ['UCL', 'UEL'].forEach(comp => {
+        if (gameState.europe.groups[comp] && !gameState.europe.brackets[comp]) qualifyEuroKnockout(comp);
+    });
+    [euroEl('euro-draw-stage'), euroEl('euro-groups-stage')].forEach(el => {
+        if (!el) return;
+        el.innerHTML = '';
+        euroVis(el, false);
+    });
+    finishEuroGroupStage();
+}
+
+function finishEuroGroupStage() {
+    runEuroGroupStage();
+    ['UCL', 'UEL'].forEach(comp => {
+        if (gameState.europe.groups[comp] && !gameState.europe.brackets[comp]) qualifyEuroKnockout(comp);
+    });
+    const title = euroEl('euro-screen-title');
+    if (title) title.textContent = 'European Bracket';
+    euroVis(euroEl('euro-comp-tabs'), false);
+    // The last sixteen has already been drawn out on screen — the first paint of
+    // the real bracket should not replay it.
+    EuroShow.silentPaint = true;
+    advanceEuroQueue();
+    if (!gameState.europe.queue.length) return showAwardsCeremony();
+    showEuropeBracket();
 }
 
 // Rebuilds the queue of human fixtures for the current round. When nothing is left to play in the
@@ -1304,45 +1829,29 @@ function startEuropeanCampaign() {
     });
 
     gameState.europe = {
-        participants: humans, brackets: {}, queue: [], currentRoundIdx: 0,
+        participants: humans, brackets: {}, groups: {}, queue: [], currentRoundIdx: 0,
         pending: null, seedCounter: 0, bracketPending: false
     };
 
+    // Invited clubs are rated against the average of the managers in the draw, so
+    // a stacked squad and a rebuilt one both land in a group that makes sense.
+    const qualified = humans.filter(h => h.competition);
+    const baseline = qualified.length
+        ? qualified.reduce((sum, h) => sum + getStrength(h.teamState), 0) / qualified.length
+        : 84;
+
+    let anyGroups = false;
     ['UCL', 'UEL'].forEach(comp => {
         const compHumans = humans.filter(h => h.competition === comp);
         if (!compHumans.length) return;
-        
-        const teams = compHumans.map(h => ({ name: h.name, isHuman: true, humanRef: h }));
-        const usedNames = new Set(compHumans.map(h => h.name));
-        
-        while (teams.length < 16) {
-            const club = drawEuroOpponent(comp, 0, usedNames);
-            usedNames.add(club.name);
-            teams.push({ name: club.name, isHuman: false, tier: club.tier });
-        }
-        
-        for (let i = 15; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [teams[i], teams[j]] = [teams[j], teams[i]];
-        }
-        
-        const bracket = [ [], [], [], [] ];
-        for (let i = 0; i < 8; i++) {
-            bracket[0].push({ id: `R0_${i}`, t1: teams[i*2], t2: teams[i*2+1], played: false });
-        }
-        for (let r = 1; r < 4; r++) {
-            for (let i = 0; i < 8 / Math.pow(2, r); i++) {
-                bracket[r].push({ id: `R${r}_${i}`, t1: null, t2: null, played: false });
-            }
-        }
-        gameState.europe.brackets[comp] = bracket;
+        const nodes = compHumans.map(h => ({ name: h.name, isHuman: true, humanRef: h }));
+        gameState.europe.groups[comp] = buildEuroGroupStage(comp, nodes, baseline);
+        anyGroups = true;
     });
-    
-    advanceEuroQueue();
 
-    if (!gameState.europe.queue.length) return showAwardsCeremony();
+    if (!anyGroups) return showAwardsCeremony();
 
-    showEuropeBracket();
+    presentEuroGroups(finishEuroGroupStage);
 }
 
 // Shared reset of the match screen.
@@ -1483,6 +1992,7 @@ function renderEuropeBracketScreen() {
     const stage = document.getElementById('euro-bracket-stage');
     if (!stage) return;
 
+    const before = euroBracketSnapshot(stage);
     const shortRounds = ['R16', 'QF', 'SF', 'Final'];
     stage.innerHTML = ['UCL', 'UEL'].map(comp => {
         const bracket = euro.brackets[comp];
@@ -1502,14 +2012,14 @@ function renderEuropeBracketScreen() {
                 const h2Cls = t2.isHuman ? 'text-blue-300 font-bold' : (win2 ? 'text-slate-200' : 'text-slate-400');
                 
                 return `
-                <div class="euro-tie ${m.played ? 'played' : ''}" style="margin-bottom: 6px; padding: 6px 8px; border: 1px solid #334155; border-radius: 8px; font-size: 11px; background: #0f172a; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
-                    <div class="flex justify-between mb-1 ${win1 ? 'text-emerald-400' : ''}">
+                <div class="euro-tie ${m.played ? 'played' : ''}" data-tie="${comp}_${m.id}" style="margin-bottom: 6px; padding: 6px 8px; border: 1px solid #334155; border-radius: 8px; font-size: 11px; background: #0f172a; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
+                    <div class="flex justify-between mb-1 ${win1 ? 'text-emerald-400' : ''}" data-seat="${comp}_${m.id}_1" data-team="${escapeHTML(m.t1 ? t1.name : '')}">
                         <span class="truncate pr-2 ${h1Cls}">${escapeHTML(t1.name)}</span>
-                        <span class="font-mono font-bold ${win1 ? 'text-emerald-400' : 'text-slate-500'}">${s1}</span>
+                        <span class="font-mono font-bold ${win1 ? 'text-emerald-400' : 'text-slate-500'}" data-score="1">${s1}</span>
                     </div>
-                    <div class="flex justify-between ${win2 ? 'text-emerald-400' : ''}">
+                    <div class="flex justify-between ${win2 ? 'text-emerald-400' : ''}" data-seat="${comp}_${m.id}_2" data-team="${escapeHTML(m.t2 ? t2.name : '')}">
                         <span class="truncate pr-2 ${h2Cls}">${escapeHTML(t2.name)}</span>
-                        <span class="font-mono font-bold ${win2 ? 'text-emerald-400' : 'text-slate-500'}">${s2}</span>
+                        <span class="font-mono font-bold ${win2 ? 'text-emerald-400' : 'text-slate-500'}" data-score="2">${s2}</span>
                     </div>
                 </div>`;
             }).join('');
@@ -1536,6 +2046,70 @@ function renderEuropeBracketScreen() {
         const nextMatch = next ? `${next.t1.name} vs ${next.t2.name}` : 'Tournament Finished';
         sub.innerHTML = `Knockout progress <span class="text-slate-500">· Next: ${escapeHTML(nextMatch)}</span>`;
     }
+
+    animateEuroBracket(stage, before);
+}
+
+// What the screen showed before this repaint — who occupied each seat and which
+// ties already had scores. The animation pass works entirely from that.
+function euroBracketSnapshot(stage) {
+    const seats = new Map();
+    const played = new Set();
+    stage.querySelectorAll('[data-seat]').forEach(el => seats.set(el.dataset.seat, el.dataset.team || ''));
+    stage.querySelectorAll('[data-tie]').forEach(el => { if (el.classList.contains('played')) played.add(el.dataset.tie); });
+    return { seats, played };
+}
+
+// A club that has just appeared in a round moves there from the tie that sent it
+// through, and ties resolved off-screen uncover their scores one after another
+// rather than all at once.
+function animateEuroBracket(stage, before) {
+    const silentSeats = EuroShow.silentPaint;
+    EuroShow.silentPaint = false;
+    EuroShow.clear();
+    EuroShow.gen++;
+
+    const moved = silentSeats ? [] : [...stage.querySelectorAll('[data-seat]')].filter(el =>
+        el.dataset.team && before.seats.get(el.dataset.seat) !== el.dataset.team);
+    if (moved.length) {
+        // Round 0 is filled by the group stage, which has already been animated.
+        const euroSeatKey = /^([A-Z]+)_R(\d)_(\d+)_(\d)$/;
+        const bySeatTeam = new Map();
+        stage.querySelectorAll('[data-seat]').forEach(el => {
+            const m = euroSeatKey.exec(el.dataset.seat);
+            if (m && el.dataset.team) bySeatTeam.set(`${m[1]}|${m[2]}|${el.dataset.team}`, el);
+        });
+        const flights = [];
+        moved.forEach(el => {
+            const m = euroSeatKey.exec(el.dataset.seat);
+            if (!m) return;
+            const from = bySeatTeam.get(`${m[1]}|${Number(m[2]) - 1}|${el.dataset.team}`);
+            if (from) flights.push({ from, to: el, name: el.dataset.team });
+        });
+        const host = euroEl('euro-bracket-scroll');
+        if (host && flights.length) {
+            const hostRect = host.getBoundingClientRect();
+            const targetRect = flights[0].to.getBoundingClientRect();
+            if (targetRect.bottom > hostRect.bottom - 16 || targetRect.top < hostRect.top + 16)
+                host.scrollTop += targetRect.top - hostRect.top - hostRect.height / 3;
+        }
+        flights.forEach((f, i) => {
+            EuroShow.after(i * 90, () => {
+                f.to.classList.add('seat-land');
+                euroFly(f.from, f.to, f.name, () => f.to.classList.remove('seat-land'));
+            });
+        });
+    }
+
+    const fresh = [...stage.querySelectorAll('[data-tie]')].filter(el =>
+        el.classList.contains('played') && !before.played.has(el.dataset.tie));
+    fresh.forEach(el => el.querySelectorAll('[data-score]').forEach(s => s.classList.add('score-mask')));
+    fresh.forEach((el, i) => EuroShow.after(200 + i * 240, () => {
+        el.querySelectorAll('[data-score]').forEach(s => {
+            s.classList.remove('score-mask');
+            s.classList.add('score-live');
+        });
+    }));
 }
 
 function wireEuropeFinishButtons() {
@@ -1551,22 +2125,23 @@ function showEuropeBracket() {
 
     advanceEuroQueue();
     wireEuropeFinishButtons();
-    
+
+    euroVis(euroEl('euro-bracket-stage'), true);
     renderEuropeBracketScreen();
     Net.publishEurope();
-    
+
     const btnNext = document.getElementById('btn-bracket-next');
     const btnFinal = document.getElementById('btn-bracket-final');
-    
+
     if (btnNext) btnNext.onclick = euroBracketNextMatch;
     if (euro.queue.length > 0) {
-        if (btnNext) btnNext.classList.remove('hidden');
-        if (btnFinal) btnFinal.classList.add('hidden');
+        euroVis(btnNext, true);
+        euroVis(btnFinal, false);
     } else {
-        if (btnNext) btnNext.classList.add('hidden');
-        if (btnFinal) btnFinal.classList.remove('hidden');
+        euroVis(btnNext, false);
+        euroVis(btnFinal, true);
     }
-    
+
     showScreen('screen-euro-bracket');
 }
 
@@ -1718,7 +2293,9 @@ function ceremonyChips(c) {
         { k: 'Apps', v: c.apps }, { k: 'Goals', v: c.goals }, { k: 'Assists', v: c.assists },
         { k: 'Avg', v: c.avgRating ? c.avgRating.toFixed(2) : '—' }
     ];
-    chips.push(role === 'GK' || role === 'DEF' ? { k: 'CS', v: c.cleanSheets } : { k: 'Euro G+A', v: c.eGoals + c.eAssists });
+    // Only keepers are judged on a shutout in front of the camera; a back four
+    // gets the same attacking line as everyone else.
+    chips.push(role === 'GK' ? { k: 'CS', v: c.cleanSheets } : { k: 'Euro G+A', v: c.eGoals + c.eAssists });
     return chips;
 }
 

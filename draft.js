@@ -6,10 +6,15 @@
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
-function generateStatsFromRating(baseRating, mainPos) {
+// The six numbers come from three things: the shape of the position (POS_WEIGHTS),
+// the job the Archetype asks him to do, and the habit the Playstyle names him for.
+// Both role tables author their deltas weighted-zero-sum against POS_WEIGHTS, so a
+// role moves points between attributes and never buys rating.
+function generateStatsFromRating(baseRating, mainPos, archetypeKey, playstyleKey) {
     const w = POS_WEIGHTS[mainPos] || POS_WEIGHTS.CM;
     const keys = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
     const maxW = Math.max(...keys.map(k => w[k] ?? 0.05));
+    const tilt = roleAttributeTilt(archetypeKey, playstyleKey);
     // Tight noise so higher-OVR players stay consistently strong without wild spikes
     const noise = () => (Math.random() * 5 - 2.5);
 
@@ -18,19 +23,20 @@ function generateStatsFromRating(baseRating, mainPos) {
         const importance = (w[k] ?? 0.05) / maxW; // 0..1 relative to position's top attribute
         // Primary attributes sit near/above OVR; weak attributes fall well below it
         const offset = importance * 7 - (1 - importance) * 16;
-        stats[k] = Math.round(baseRating + offset + noise());
+        stats[k] = Math.round(baseRating + offset + tilt[k] + noise());
     }
 
     for (const k of keys) stats[k] = clamp(stats[k], 40, 110);
 
     if (mainPos === 'GK') {
-        // Keepers: hands/reflexes/positioning map to DEF/PHY; kicking (SHO) and speed stay low
-        stats.SHO = clamp(Math.round(baseRating * 0.35 + noise()), 20, 55);
-        stats.PAC = clamp(Math.round(baseRating * 0.55 + noise()), 30, 72);
-        stats.PAS = clamp(Math.round(baseRating * 0.72 + noise()), 40, 95);
-        stats.DRI = clamp(Math.round(baseRating * 0.70 + noise()), 40, 95);
-        stats.DEF = clamp(Math.round(baseRating + 4 + noise()), 60, 110);
-        stats.PHY = clamp(Math.round(baseRating + 2 + noise()), 55, 110);
+        // Keepers: hands/reflexes/positioning map to DEF/PHY; kicking (SHO) and speed stay low,
+        // and the role is spent on top of that keeper shape.
+        stats.SHO = clamp(Math.round(baseRating * 0.35 + tilt.SHO + noise()), 20, 55);
+        stats.PAC = clamp(Math.round(baseRating * 0.55 + tilt.PAC + noise()), 30, 72);
+        stats.PAS = clamp(Math.round(baseRating * 0.72 + tilt.PAS + noise()), 40, 95);
+        stats.DRI = clamp(Math.round(baseRating * 0.70 + tilt.DRI + noise()), 40, 95);
+        stats.DEF = clamp(Math.round(baseRating + 4 + tilt.DEF + noise()), 60, 110);
+        stats.PHY = clamp(Math.round(baseRating + 2 + tilt.PHY + noise()), 55, 110);
     }
     return stats;
 }
@@ -52,10 +58,34 @@ function targetOVRForRank(i) {
     return RANK_OVR_TABLE[i] ?? 85;
 }
 
-function enrichPlayer(p, rankIndex = 99) {
-    const ovr = rankIndex < RANK_OVR_TABLE.length ? targetOVRForRank(rankIndex) : 85;
-    const mainPos = typeof p.mainPos === 'string' ? p.mainPos : 'CM';
-    const stats = generateStatsFromRating(ovr, mainPos);
+// Role identity is decided before the attributes, because the attributes follow it.
+function resolveArchetype(mainPos, name) {
+    let style = (typeof playerArchetypes !== 'undefined' && playerArchetypes[name])
+        || (typeof archetypeForName === 'function' ? archetypeForName(mainPos, name) : null);
+    // Keepers must always land on a GK-group archetype (Sweeper Keeper / Goalkeeper).
+    if (mainPos === 'GK' && typeof ARCHETYPES !== 'undefined') {
+        const legalGk = style && ARCHETYPES[style] && ARCHETYPES[style].group === 'GK';
+        if (!legalGk) {
+            style = (typeof archetypeForName === 'function' ? archetypeForName('GK', name) : null)
+                || 'Goalkeeper';
+        }
+    }
+    return style || null;
+}
+
+// The habit is curated for the players whose reputation is the habit. Anyone without a
+// curated entry — a ghost club, or a pool name not yet written — gets the stable
+// name-drawn tag, so the same name is the same player on every machine.
+function resolvePlaystyle(mainPos, name, ovr) {
+    const curated = typeof playerPlaystyles !== 'undefined' ? playerPlaystyles[name] : null;
+    if (curated && typeof PLAYSTYLES !== 'undefined' && PLAYSTYLES[curated]
+        && PLAYSTYLES[curated].positions.includes(mainPos)) return curated;
+    return typeof playstyleForName === 'function'
+        ? playstyleForName(mainPos, name, (ovr - 85) / 22) : null;
+}
+
+function buildRoleStats(ovr, mainPos, archetypeKey, playstyleKey) {
+    const stats = generateStatsFromRating(ovr, mainPos, archetypeKey, playstyleKey);
     const w = POS_WEIGHTS[mainPos] || POS_WEIGHTS.CM;
     const keys = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
 
@@ -68,8 +98,11 @@ function enrichPlayer(p, rankIndex = 99) {
         });
     }
 
-    // Converge toward target OVR by nudging weighted attributes proportionally
-    for (let n = 0; n < 16; n++) {
+    // Converge toward target OVR by nudging weighted attributes proportionally.
+    // A keeper with 70% of his weight in DEF and PHY runs out of ceiling before he
+    // runs out of rating, so the loop needs room to spend the rest on his feet,
+    // his distribution and his hands.
+    for (let n = 0; n < 64; n++) {
         const diff = ovr - calculateOVRFromStats(stats, mainPos);
         if (diff === 0) break;
         const step = diff > 0 ? 1 : -1;
@@ -81,33 +114,31 @@ function enrichPlayer(p, rankIndex = 99) {
             if (ovr === calculateOVRFromStats(stats, mainPos)) break;
         }
     }
+    return stats;
+}
 
+// A club that elects new leaders after the squad was built has changed two men's
+// habits, so their attributes have to be read back off the new role.
+function refreshRoleStats(player) {
+    if (!player) return player;
+    player.stats = buildRoleStats(player.rating, player.mainPos, player.archetype, player.playstyle);
+    return player;
+}
+
+function enrichPlayer(p, rankIndex = 99) {
+    const ovr = rankIndex < RANK_OVR_TABLE.length ? targetOVRForRank(rankIndex) : 85;
+    const mainPos = typeof p.mainPos === 'string' ? p.mainPos : 'CM';
+    const archetype = resolveArchetype(mainPos, p.name);
+    const playstyle = resolvePlaystyle(mainPos, p.name, ovr);
+    const stats = buildRoleStats(ovr, mainPos, archetype, playstyle);
     const rankInfo = getRankInfo(ovr);
-
-    // Curated role identity when the pool declares one; otherwise the style is
-    // drawn from the name so the same player always gets the same role.
-    // Keepers must always land on a GK-group archetype (Sweeper Keeper / Goalkeeper).
-    let style = (typeof playerPlaystyles !== 'undefined' && playerPlaystyles[p.name])
-        || (typeof playstyleForName === 'function' ? playstyleForName(mainPos, p.name) : null);
-    if (mainPos === 'GK' && typeof PLAYSTYLES !== 'undefined') {
-        const legalGk = style && PLAYSTYLES[style] && PLAYSTYLES[style].group === 'GK';
-        if (!legalGk) {
-            style = (typeof playstyleForName === 'function' ? playstyleForName('GK', p.name) : null)
-                || 'citadel';
-        }
-    }
-
-    // The habit is curated for the players whose reputation is the habit, and read
-    // off the shape of the body for everyone else — but that reading needs the whole
-    // position list, so it happens in assignSpecialities once the pool is built.
-    const habit = (typeof playerSpecialities !== 'undefined' && playerSpecialities[p.name]) || null;
 
     return {
         id: nextPlayerId++, name: p.name, rating: ovr, displayOVR: rankInfo.display,
         rank: rankInfo.rank, rankColor: rankInfo.color, rankBadge: rankInfo.badge, stats,
         mainPos,
-        playstyle: style || null,
-        speciality: habit || null,
+        archetype,
+        playstyle,
         subPos: Array.isArray(p.subPos) ? p.subPos.filter(s => typeof s === 'string') : [],
         team: p.team || '',
         nationality: p.nationality || 'World'
@@ -118,7 +149,7 @@ function initializePlayerDB() {
     availablePlayers = [];
     nextPlayerId = 1;
     // A fresh board means the ghost-tag weighting measured off the old one is wrong.
-    specialityBoardWeights = null;
+    playstyleBoardWeights = null;
     const usedNames = new Set();
     const norm = name => name.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -168,7 +199,7 @@ function initializePlayerDB() {
 
     // Every habit is read against the players who share the position, so the whole
     // pool has to exist before a single card can be tagged.
-    if (typeof assignSpecialities === 'function') assignSpecialities(availablePlayers);
+    if (typeof assignPlaystyles === 'function') assignPlaystyles(availablePlayers);
 
     for (let i = availablePlayers.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -290,22 +321,25 @@ function getManagerReserve(manager) {
 
 function getManagerMaxBid(manager) {
     if (!manager) return 0;
-    return Math.max(0, manager.balance - getManagerReserve(manager));
+    return roundMoney(Math.max(0, manager.balance - getManagerReserve(manager)));
 }
 
 // --- Drafting System ---
 function updateRollButton() {
+    // The Roll button only exists in the idle board, so a revealed player has none.
     const btn = document.getElementById('btn-roll');
-    const lockedOut = gameState.managers.every(m => m.formationLocked || m.squad.length >= MAX_SQUAD_SIZE);
-    const spinning = gameState.activeDraft && (gameState.activeDraft.state === 'spinning' || gameState.activeDraft.state === 'picked');
-    const animating = !!gameState.draftAnimating;
-    const auctionOpen = !!gameState.auction;
-    btn.disabled = lockedOut || spinning || animating || auctionOpen || !Net.ownsGame();
-    btn.classList.toggle('opacity-50', btn.disabled); btn.classList.toggle('cursor-not-allowed', btn.disabled);
+    if (btn) {
+        const lockedOut = gameState.managers.every(m => m.formationLocked || m.squad.length >= MAX_SQUAD_SIZE);
+        const spinning = gameState.activeDraft && (gameState.activeDraft.state === 'spinning' || gameState.activeDraft.state === 'picked');
+        const animating = !!gameState.draftAnimating;
+        const auctionOpen = !!gameState.auction;
+        btn.disabled = lockedOut || spinning || animating || auctionOpen || !Net.ownsGame();
+        btn.classList.toggle('opacity-50', btn.disabled); btn.classList.toggle('cursor-not-allowed', btn.disabled);
+    }
     const skipEl = document.getElementById('skips-left-label');
     if (skipEl) {
-        skipEl.innerText = `Skips ${gameState.skipsLeft}`;
-        skipEl.className = `draft-skip${gameState.skipsLeft <= 0 ? ' is-low' : ''}`;
+        setText(skipEl, `Skips: ${gameState.skipsLeft}`);
+        skipEl.classList.toggle('is-low', gameState.skipsLeft <= 0);
     }
     Net.publishInfo();
 }
@@ -462,7 +496,7 @@ function rollPlayers() {
 // reel lands on the rolled player; a guest is not told who it is yet, so its reel
 // simply stops on a random triple and the revealed snapshot brings the real card.
 const REEL = {
-    ITEM_H: 36, VISIBLE: 3, SPIN_ITEMS: 18,
+    ITEM_H: 64, VISIBLE: 3, SPIN_ITEMS: 12,
     NAT_MS: 1400, CLUB_MS: 1800, POS_MS: 2200, GAP_AFTER: 280
 };
 const REEL_POSITIONS = ['GK','CB','LB','RB','LWB','RWB','CDM','CM','CAM','LM','RM','LW','RW','CF','ST'];
@@ -486,7 +520,9 @@ function reelItems(pool, finalValue, rand) {
     const items = [];
     for (let i = 0; i < REEL.SPIN_ITEMS; i++) items.push(pool[Math.floor(pick() * pool.length)]);
     items.push(finalValue);
-    for (let i = 0; i < 2; i++) items.push(pool[Math.floor(pick() * pool.length)]);
+    // The strip ends level with the window, so the rows under the landing one need
+    // filling as well — that count grows with VISIBLE, not with SPIN_ITEMS.
+    for (let i = 0; i < (REEL.VISIBLE - 1) / 2; i++) items.push(pool[Math.floor(pick() * pool.length)]);
     return items;
 }
 
@@ -583,7 +619,7 @@ function renderPickupWheel(board, d) {
         return `<div class="wheel-label" style="transform:rotate(${angle - 90}deg)">${inner}</div>`;
     }).join('');
 
-    board.innerHTML = `
+    setHTML(board, `
         <div data-draft-card="${d.player.id}" class="draft-pickup">
             <div class="eyebrow" style="color:#fbbf24;">Skips gone · Pickup wheel</div>
             <div class="draft-pickup__body">
@@ -595,7 +631,7 @@ function renderPickupWheel(board, d) {
                 </div>
             </div>
             <p class="auction-note">${escapeHTML(d.player.name)} goes to the club the wheel stops on.</p>
-        </div>`;
+        </div>`);
 
     const wheel = document.getElementById('pickup-wheel');
     // A late device shortens its spin so it settles near the host, with a floor so a
@@ -644,10 +680,39 @@ function restoreBidFieldState(state) {
 function draftEmptyStateHtml() {
     return `
         <div class="draft-empty">
-            <div class="draft-empty__ball"></div>
+            <svg class="draft-empty__ball" aria-hidden="true"><use href="#soccer-ball"/></svg>
             <b>Ready to draft</b>
-            <small>Press Roll Draft to reveal the first player from the pool.</small>
+            <button onclick="rollPlayers()" id="btn-roll" class="btn btn--primary draft-empty__roll">Roll</button>
         </div>`;
+}
+
+function saleRecapHtml(player, winnerName, price) {
+    const paid = Number.isFinite(price) && price > 0
+        ? ` for <b class="sale-recap__fee">${formatBalance(price)}</b>`
+        : '';
+    return `
+        <div class="sale-recap">
+            <div class="sale-recap__doc">
+                <span class="sale-recap__tag">Contract</span>
+                <i class="sale-recap__line"></i>
+                <i class="sale-recap__line sale-recap__line--short"></i>
+                <svg class="sale-recap__ink" viewBox="0 0 200 54" aria-hidden="true">
+                    <path class="sale-recap__stroke" pathLength="100" d="M8 42 C 16 14, 28 10, 34 30 C 39 47, 50 46, 57 26 C 63 10, 74 8, 79 27 C 83 44, 93 45, 101 28 C 108 13, 121 11, 126 29 C 130 44, 142 45, 152 30 C 160 18, 172 15, 190 22"/>
+                </svg>
+            </div>
+            <p class="sale-recap__caption"><b class="sale-recap__buyer">${escapeHTML(winnerName)}</b> has bought <b class="sale-recap__player">${escapeHTML(player.name)}</b>${paid}.</p>
+        </div>`;
+}
+
+// The auction panel's place becomes the signing itself; the card keeps the SOLD stamp.
+function showSaleRecap(player, winnerName, price) {
+    const side = document.querySelector('#draft-board .draft-reveal__side');
+    if (!side || !player || !winnerName) return;
+    // Reaching past the board's own render leaves it holding markup the memo never
+    // described, so the next board render has to rebuild rather than compare equal.
+    const board = document.getElementById('draft-board');
+    if (board) board.__markup = null;
+    setHTML(side, saleRecapHtml(player, winnerName, price));
 }
 
 function renderDraftBoard() {
@@ -656,13 +721,12 @@ function renderDraftBoard() {
     if (typeof cancelPassHold === 'function') cancelPassHold();
     const bidFieldState = captureBidFieldState();
     const d = gameState.activeDraft;
-    if (!d) { gameState._renderedPlayerId = null; board.innerHTML = draftEmptyStateHtml(); return; }
+    if (!d) { gameState._renderedPlayerId = null; setHTML(board, draftEmptyStateHtml()); return; }
     const { player, state, result } = d;
 
     if (state === 'spinning') {
-        board.innerHTML = `
+        setHTML(board, `
             <div class="draft-spin">
-                <div class="draft-spin__back"><span>?</span></div>
                 <div class="draft-spin__reels">
                     <div id="col-nat" class="slot-col">
                         <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nation</span>
@@ -677,8 +741,7 @@ function renderDraftBoard() {
                         <div class="reel-window"><div class="reel-track" id="reel-pos"></div><div class="reel-mask-top"></div><div class="reel-mask-bot"></div><div class="reel-highlight"></div></div>
                     </div>
                 </div>
-                <div class="auction-note">The pool is deciding...</div>
-            </div>`;
+            </div>`);
         // Every device that shows a spinning card animates it once per roll, so a
         // guest sees the same reel as the host instead of a frozen window.
         const spinToken = d.nonce || (player && player.id);
@@ -693,15 +756,16 @@ function renderDraftBoard() {
         if (player.sold) {
             const won = !!(result && result.winnerName);
             if (won) {
-                // A sale is told by the SOLD stamp and the arrow flying to the buyer's
-                // panel. Other updates re-render through here, so the board must not be
-                // touched while that is running or the animation is cut short.
-                if (gameState.draftAnimating || document.getElementById('draft-fly-overlay')) return;
+                // A sale is told by the SOLD stamp, the signing recap and the buyer's
+                // panel lighting up. Other updates re-render through here, so the board
+                // must not be touched while that is running or the animation is cut short.
+                if (gameState.draftAnimating) return;
                 const winner = gameState.managers.find(m => m.name === result.winnerName);
                 const cardShowing = board.firstElementChild?.dataset?.draftCard === String(player.id);
                 if (winner && cardShowing) {
-                    // A guest never runs the sale itself: it replays the same fly-over
+                    // A guest never runs the sale itself: it replays the same recap
                     // for the club the host just sold to.
+                    showSaleRecap(player, result.winnerName, result.price);
                     playDraftAcquisitionAnimation(player, winner.id, () => {
                         gameState.activeDraft = null;
                         Net.publishDraftNow();
@@ -712,7 +776,7 @@ function renderDraftBoard() {
                 }
                 gameState.activeDraft = null;
                 Net.publishDraftNow();
-                board.innerHTML = draftEmptyStateHtml();
+                setHTML(board, draftEmptyStateHtml());
                 return;
             }
             // An unsold player needs no recap panel — the DISCARDED stamp on the card
@@ -731,7 +795,7 @@ function renderDraftBoard() {
             }
             gameState.activeDraft = null;
             Net.publishDraftNow();
-            board.innerHTML = draftEmptyStateHtml();
+            setHTML(board, draftEmptyStateHtml());
         } else {
             let actionHtml;
             if (isSolo) {
@@ -753,7 +817,7 @@ function renderDraftBoard() {
             gameState._renderedPlayerId = player.id;
             const focusManager = gameState.managers.find(m => Net.canControl(m.id)) || gameState.managers[0];
             const scoutHtml = renderScoutStrip(player, focusManager ? focusManager.id : null);
-            board.innerHTML = `
+            setHTML(board, `
                 <div data-draft-card="${player.id}" class="draft-reveal ${freshCard ? 'animate-reveal' : ''}">
                     <div class="draft-reveal__card">
                         ${renderPlayerCard(player, { size: 'xl' })}
@@ -762,7 +826,7 @@ function renderDraftBoard() {
                         ${scoutHtml}
                         ${actionHtml}
                     </div>
-                </div>`;
+                </div>`);
             restoreBidFieldState(bidFieldState);
         }
     }
@@ -777,7 +841,8 @@ function soloTakePlayer() {
     const price = 0;
     m.squad.push({ ...d.player, price });
     d.player.sold = true;
-    d.result = { winnerName: m.name };
+    d.result = { winnerName: m.name, price };
+    showSaleRecap(d.player, m.name, price);
     playDraftAcquisitionAnimation(d.player, m.id, () => {
         updateDashboard(m.id);
         gameState.activeDraft = null; // destination known via animation — skip SOLD result panel

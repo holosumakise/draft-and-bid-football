@@ -368,10 +368,9 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) cance
 // --- Keyboard controls ---------------------------------------------------
 // Only ever act for the club whose turn it is on this device, and never steal a
 // key from an input the player is typing in.
-//   +          focus the amount field (type a number, then Enter)
-//   Enter      submit the typed amount
+//   V          press RAISE, or BUY when you hold the high bid
 //   Z / X      raise by +1 / +5
-//   Space      hold to pass (release early to cancel)
+//   C        hold to pass (release early to cancel)
 function auctionKeysActive() {
     const a = getOpenAuction();
     if (!a) return null;
@@ -386,32 +385,36 @@ function isTextEntry(el) {
     return tag === 'input' || tag === 'textarea' || tag === 'select' || !!el.isContentEditable;
 }
 
-function bidEntryField() {
-    return document.getElementById('bid-entry-field');
-}
-
-// Enter is only captured while the amount field itself has focus, so a focused
-// button keeps its normal Enter behaviour.
-function submitTypedBid(event) {
-    const field = bidEntryField();
-    if (!field || event.target !== field) return false;
-    if (!String(field.value || '').replace(/\D/g, '')) return false;
-    event.preventDefault();
-    auctionControl('raise', bidFieldValue());
+// V presses whichever button the panel is actually offering, so the key can
+// never do something the disabled button already forbids.
+function pressAuctionPrimaryButton() {
+    const button = document.getElementById('btn-bid-buy') || document.getElementById('btn-bid-raise');
+    if (!button || button.disabled) return false;
+    button.click();
     return true;
 }
+
+function isPassKey(key) { return key === 'c' || key === 'C'; }
+function isBuyKey(key) { return key === 'v' || key === 'V'; }
 
 document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.altKey || event.metaKey) return;
     const onPassButton = !!(event.target && event.target.closest && event.target.closest('.pass-hold-btn'));
-    if (onPassButton && (event.key === ' ' || event.key === 'Enter')) return;
+    if (onPassButton && isPassKey(event.key)) return;
     if (!auctionKeysActive()) return;
     const typing = isTextEntry(event.target);
 
-    if (event.key === 'Enter') { submitTypedBid(event); return; }
+    if (isBuyKey(event.key)) {
+        // Unlike Enter, V never activates a focused button on its own, so there is no
+        // double-bid to guard against here — only keystrokes typed into a field.
+        if (typing && event.target !== document.getElementById('bid-entry-field')) return;
+        event.preventDefault();
+        pressAuctionPrimaryButton();
+        return;
+    }
 
-    // Space is a hold, never a tap: one stray press must not pass for you.
-    if (event.key === ' ') {
+    // C is a hold, never a tap: one stray press must not pass for you.
+    if (isPassKey(event.key)) {
         if (typing) return;
         event.preventDefault();
         if (event.repeat || passHold) return;
@@ -422,12 +425,6 @@ document.addEventListener('keydown', event => {
 
     if (typing) return;
 
-    if (event.key === '+') {
-        event.preventDefault();
-        const field = bidEntryField();
-        if (field) { field.focus(); field.select(); }
-        return;
-    }
     if (event.key === 'z' || event.key === 'Z') {
         event.preventDefault();
         auctionControl('raise', null, BID_RAISE_STEPS[0]);
@@ -440,7 +437,7 @@ document.addEventListener('keydown', event => {
 });
 
 document.addEventListener('keyup', event => {
-    if (event.key === ' ' && passHold) {
+    if (isPassKey(event.key) && passHold) {
         event.preventDefault();
         cancelPassHold();
     }
@@ -456,10 +453,10 @@ function finishAuctionSold() {
     a.status = 'sold';
     clearAuctionTimer();
 
-    winner.balance -= price;
+    winner.balance = roundMoney(winner.balance - price);
     winner.squad.push({ ...draft.player, price });
     draft.player.sold = true;
-    draft.result = { winnerName: winner.name };
+    draft.result = { winnerName: winner.name, price };
     if (typeof SaveGame !== 'undefined') SaveGame.schedule();
 
     gameState.auction = null;
@@ -469,6 +466,7 @@ function finishAuctionSold() {
     Net.publishAuctionNow();
     Net.publishDraftNow();
     Net.publishManagers(winner.id);
+    showSaleRecap(draft.player, winner.name, price);
     playDraftAcquisitionAnimation(draft.player, winner.id, () => {
         updateDashboard(winner.id);
         gameState.activeDraft = null;
@@ -520,14 +518,15 @@ function settleRandomPickup() {
     draft.pick = null;
     draft.state = 'revealed';
 
-    winner.balance -= price;
+    winner.balance = roundMoney(winner.balance - price);
     winner.squad.push({ ...draft.player, price });
     draft.player.sold = true;
-    draft.result = { winnerName: winner.name };
+    draft.result = { winnerName: winner.name, price };
 
     Net.publishDraftNow();
     Net.publishManagers(winner.id);
     if (typeof SaveGame !== 'undefined') SaveGame.schedule();
+    showSaleRecap(draft.player, winner.name, price);
     playDraftAcquisitionAnimation(draft.player, winner.id, () => {
         updateDashboard(winner.id);
         gameState.activeDraft = null;
@@ -595,10 +594,12 @@ function renderAuctionClock() {
     const left = Math.max(0, a.turnEndsAt - Date.now());
     const seconds = Math.ceil(left / 1000);
     if (clock) {
-        clock.innerText = a.status === 'open' ? `${seconds}s` : 'Closed';
-        clock.className = `auction__clock${seconds <= 5 && a.status === 'open' ? ' is-danger' : ''}`;
+        setText(clock, a.status === 'open' ? `${seconds}s` : 'Closed');
+        setClass(clock, `auction__clock${seconds <= 5 && a.status === 'open' ? ' is-danger' : ''}`);
     }
-    if (bar) bar.style.width = `${clamp((left / SHOT_CLOCK_MS) * 100, 0, 100)}%`;
+    // The drain is a transform, so it runs on the compositor; the bar's box never
+    // changes size and nothing under it has to be laid out again.
+    if (bar) bar.style.transform = `scaleX(${clamp(left / SHOT_CLOCK_MS, 0, 1)})`;
 }
 
 function auctionStatusChip(managerId) {
@@ -632,11 +633,11 @@ function passHoldButton(extraClass = '') {
     return `<button type="button"
         class="pass-hold-btn btn-pass ${extraClass}"
         onpointerdown="startPassHold(this)" onpointerup="cancelPassHold()" onpointerleave="cancelPassHold()" onpointercancel="cancelPassHold()"
-        onkeydown="if (!event.repeat && (event.key === ' ' || event.key === 'Enter')) { event.preventDefault(); startPassHold(this); }"
+        onkeydown="if (!event.repeat && (isPassKey(event.key) || event.key === 'Enter')) { event.preventDefault(); startPassHold(this); }"
         onkeyup="cancelPassHold()" onblur="cancelPassHold()"
         oncontextmenu="return false" aria-label="Hold to pass">
         <span class="pass-hold-fill" aria-hidden="true"></span>
-        <span class="relative z-10">HOLD TO PASS</span>
+        <span class="relative z-10">HOLD TO PASS [C]</span>
     </button>`;
 }
 
@@ -660,7 +661,7 @@ function renderAuctionPanel() {
                 <span>Live Auction</span>
                 <span id="auction-clock" class="auction__clock">${Math.ceil(SHOT_CLOCK_MS / 1000)}s</span>
             </div>
-            <div class="auction__bar"><div id="auction-clock-bar" style="width:100%"></div></div>
+            <div class="auction__bar"><div id="auction-clock-bar" style="transform:scaleX(1)"></div></div>
             <div class="auction__bid ${a.highBid > 0 ? 'is-live' : ''}">
                 ${a.highBid > 0 ? `
                     <div class="auction__bid-label">Current Bid</div>
@@ -693,14 +694,14 @@ function renderAuctionPanel() {
                 ${standing.length > 1 ? '<p class="auction-note">You hold the high bid.</p>' : ''}
                 <div class="auction__bid-value" style="text-align:center;">€${a.highBid}M</div>
                 <p class="auction-note">is the price</p>
-                <button type="button" onclick="auctionControl('hammer')" class="btn-buy">BUY AT €${a.highBid}M</button>
+                <button type="button" id="btn-bid-buy" onclick="auctionControl('hammer')" class="btn-buy">BUY AT €${a.highBid}M [V]</button>
                 ${passHoldButton()}
             </div>`;
     }
 
     const raiseSteps = BID_RAISE_STEPS.map((step, index) => `
         <button type="button" onclick="auctionControl('raise', null, ${step})" ${canRaise ? '' : 'disabled'}
-            class="bid-step" title="Shortcut: ${index === 0 ? 'Z' : 'X'}">+${step}</button>`).join('');
+            class="bid-step">+${step} [${index === 0 ? 'Z' : 'X'}]</button>`).join('');
 
     return `
         ${header}
@@ -713,10 +714,9 @@ function renderAuctionPanel() {
             </div>
             <div class="bid-steps">${raiseSteps}</div>
             <button type="button" id="btn-bid-raise" onclick="auctionControl('raise', bidFieldValue())"
-                   class="btn-raise" disabled>RAISE</button>
+                   class="btn-raise" disabled>RAISE [V]</button>
             ${passHoldButton()}
             ${!canRaise ? '<p class="auction-note" style="color:#fb7185;">You cannot cover the current bid.</p>' : ''}
-            <p class="auction-note">+ type an amount, Enter to bid · Z +1 · X +5 · hold Space to pass</p>
         </div>`;
 }
 

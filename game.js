@@ -292,6 +292,9 @@ function resumeSavedGame() {
     if (!Array.isArray(gameState.managers) || !gameState.managers.length) {
         return showToast('That save is empty.');
     }
+    // A save made before receipts were rounded carries a drifted balance, and
+    // subtracting whole millions never clears the tail on its own.
+    gameState.managers.forEach(m => { m.balance = roundMoney(m.balance); });
 
     renderDOMForManagers();
     renderDraftBoard();

@@ -174,7 +174,7 @@ function tickPlayerAbsences(squad) {
 // A red card is rarely a fixed one-match ban: the enforcer and the hot head are
 // more likely to pick up an extra charge. The result is 1-3 matches.
 function suspensionLengthFor(player) {
-    const risk = typeof specialityBookingRateFor === 'function' ? specialityBookingRateFor(player) : 1;
+    const risk = typeof playstyleBookingRateFor === 'function' ? playstyleBookingRateFor(player) : 1;
     let matches = 1;
     if (Math.random() < Math.max(0.04, Math.min(0.45, 0.20 * risk))) matches++;
     if (Math.random() < Math.max(0.01, Math.min(0.12, 0.045 * risk))) matches++;
@@ -185,7 +185,7 @@ function suspensionLengthFor(player) {
 // programme. Most knocks are one or two matches; fragile players occasionally
 // pick up a long-term problem.
 function injuryLengthFor(player, team) {
-    const fragility = (typeof specialityInjuryRate === 'function' ? specialityInjuryRate(player) : 1)
+    const fragility = (typeof playstyleInjuryRate === 'function' ? playstyleInjuryRate(player) : 1)
         * (typeof medicalInjuryFactor === 'function' ? medicalInjuryFactor(team) : 1);
     const roll = Math.random();
     let matches;
@@ -283,9 +283,16 @@ function fansOf(manager) {
     return manager.fans;
 }
 
+// Money is counted in millions to one decimal. Every write to a balance goes
+// through this, because plain float addition of gate receipts drifts the stored
+// value into something like 80.29999999999995 that no subtraction can undo.
+function roundMoney(value) {
+    return Math.round((Number(value) || 0) * 10) / 10;
+}
+
 function ticketRevenueFor(fans) {
     const safe = Math.max(0, Number(fans) || 0);
-    return Math.max(0.1, Math.round(safe * MATCHDAY_FINANCE.TICKET_PRICE * 10) / 10);
+    return Math.max(0.1, roundMoney(safe * MATCHDAY_FINANCE.TICKET_PRICE));
 }
 
 function fanReactionFor(result, goalDiff) {
@@ -311,12 +318,12 @@ function awardMatchdayFinance(manager, result, goalsFor, goalsAgainst) {
     const ticketMult = (INVESTMENT.STADIUM_TICKET_MULT && INVESTMENT.STADIUM_TICKET_MULT[tier]) || 1;
     const fanGainMult = (INVESTMENT.STADIUM_FAN_GAIN_MULT && INVESTMENT.STADIUM_FAN_GAIN_MULT[tier]) || 1;
     const baseRevenue = ticketRevenueFor(before);
-    const revenue = Math.round(baseRevenue * ticketMult * 10) / 10;
+    const revenue = roundMoney(baseRevenue * ticketMult);
     const balance = Number(manager.balance) || 0;
-    manager.balance = Math.round((balance + revenue) * 10) / 10;
+    manager.balance = roundMoney(balance + revenue);
     // Cumulative gate receipts for the season report. Balance also holds the
     // unspent auction money, so it cannot be used to infer ticket income.
-    manager.ticketRevenue = Math.round(((Number(manager.ticketRevenue) || 0) + revenue) * 10) / 10;
+    manager.ticketRevenue = roundMoney((Number(manager.ticketRevenue) || 0) + revenue);
     let pct = fanReactionFor(result, (Number(goalsFor) || 0) - (Number(goalsAgainst) || 0));
     // Better facilities accelerate growth on good results; they do not soften losses.
     if (pct > 0) pct *= fanGainMult;
@@ -377,7 +384,7 @@ const DRAFT_OVR_MIN_WEIGHT = 0.25;
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;      // a room older than this is treated as expired and deleted when someone touches it
 // Bump on every deploy. A room records the build that created it and refuses guests
 // running a different one, so host and guests never simulate with different rules.
-const BUILD_ID = '2026-11-05.19';
+const BUILD_ID = '2026-11-05.20';
 
 // Once the room's skips are gone, an unwanted player is handed to one club picked at
 // random. The wheel spins this long, then pauses before the sale is announced.
@@ -623,6 +630,11 @@ const EURO_ROUND_TIER_WEIGHTS = {
     UEL: [[0.04, 0.16, 0.32, 0.30, 0.18], [0.12, 0.28, 0.32, 0.20, 0.08], [0.28, 0.38, 0.24, 0.08, 0.02], [0.45, 0.38, 0.15, 0.02, 0.00]]
 };
 const EURO_TIER_DELTA = { 1: 3, 2: 1.5, 3: 0, 4: -1.5, 5: -3 };
+// Europe's group nights are more open than a league afternoon and the home crowd
+// carries more of it. Benchmarked against the real group stage: ~2.95 goals a
+// match with roughly 45% home / 23% draw / 32% away.
+const EURO_GROUP_GOALS_PER_TEAM = 1.44;
+const EURO_GROUP_HOME_ADVANTAGE = 0.18;
 const CEREMONY_AWARDS = [
     { key: 'ballon',   title: "Ballon d'Or",                   icon: '🏆', accent: '#fbbf24', criteria: 'Season performance + trophies + big-game impact' },
     { key: 'european', title: 'FIFA Best European Player',     icon: '⭐', accent: '#60a5fa', criteria: 'European nationals · form + domestic success' },
@@ -770,244 +782,283 @@ const TACTICS_TRANSITION = Object.freeze({
 
 // --- Archetypes ---
 // Every player has one positional Archetype, legal only for the positions of its group.
-// A style does two things: it nudges the player's effective rating depending on
-// how the role suits the match plan on both sides (fit), and it decides which
-// kind of chance the player is asked to take (weights).
+// A style does three things: it shapes the six attributes the player is rated on, it
+// nudges his effective rating depending on how the role suits the match plan on both
+// sides (fit), and it decides which kind of chance he is asked to take (weights).
+// `attrs` is the role's body: points spent on the attributes the job demands and taken
+// back from the ones it does not. It is weighted against POS_WEIGHTS of the position it
+// is authored for, so it adds up to zero rating and a Poacher and a False 9 at the same
+// overall are visibly different men.
 // `fit.own` / `fit.opp` are indexed by the three tactic phases, so a style that
 // thrives against a low block only pays out when the opponent really parks it.
 // Two authoring rules keep roles honest:
 //   1. every phase is zero-sum — the `own` entries add to zero and the `opp`
 //      entries add to zero, so a style is never a hidden stat boost;
-//   2. the positive entries across a style stay under PLAYSTYLE_FIT_CLAMP, so a
+//   2. the positive entries across a style stay under ARCHETYPE_FIT_CLAMP, so a
 //      matchup never saturates and no row of the table is wasted.
 // The result is a pure trade-off: a role wins when the plan on either side of
 // the pitch suits it and costs when it does not, against an average of zero.
-const PLAYSTYLE_FIT_CLAMP = 3;
-const PLAYSTYLES = Object.freeze({
+const ARCHETYPE_FIT_CLAMP = 3;
+const ARCHETYPES = Object.freeze({
     // --- Goalkeepers ---
-    pitch_sentry: {
-        name: 'Sweeper Keeper', group: 'GK',
+    'Sweeper Keeper': {
+        attrs: { PAC: 14, SHO: 9, PAS: 9, DRI: 4, DEF: -4, PHY: -3 },
+        group: 'GK',
         fit: { own: { defense: { high: 1.2, man: 0.4, low: -1.6 } },
                opp: { possession: { direct: 1.4, positional: -0.7, central: -0.7 } } }
     },
-    citadel: {
-        name: 'Goalkeeper', group: 'GK',
+    'Goalkeeper': {
+        attrs: { PAC: -12, SHO: -8, PAS: -8, DRI: -4, DEF: 4, PHY: 2 },
+        group: 'GK',
         fit: { own: { defense: { low: 1.2, zonal: 0.4, high: -1.0, man: -0.6 } },
                opp: { possession: { overload: 1.0, spatial: 0.4, positional: -0.7, direct: -0.7 } } }
     },
     // --- Centre-backs ---
-    deep_architect: {
-        name: 'Ball-Playing Defender', group: 'CB',
+    'Ball-Playing Defender': {
+        attrs: { PAC: 3, SHO: -1, PAS: 13, DRI: 3, DEF: -5, PHY: -4 },
+        group: 'CB',
         fit: { own: { possession: { positional: 1.0, lavolpiana: 0.8, spatial: -0.6, central: -0.4, direct: -0.8 } },
                opp: { defense: { high: 0.9, man: 0.3, low: -1.2 } } },
         weights: { assist: 1.15 }
     },
-    wrecker: {
-        name: 'No-Nonsense Defender', group: 'CB',
+    'No-Nonsense Defender': {
+        attrs: { PAC: -6, SHO: -4, PAS: -13, DRI: -9, DEF: 8, PHY: 5 },
+        group: 'CB',
         fit: { own: { defense: { man: 1.1, low: 0.7, high: -1.2, zonal: -0.6 } },
                opp: { possession: { direct: 0.9, positional: -0.5, central: -0.4 } } },
         weights: { score: 0.85, assist: 0.85, setPiece: 1.2, workload: { def: 1.25, key: 0.7 } }
     },
-    central_defender: {
-        name: 'Central Defender', group: 'CB',
+    'Central Defender': {
+        attrs: { PAC: -5, SHO: -2, PAS: -6, DRI: -4, DEF: 4, PHY: 2 },
+        group: 'CB',
         fit: { own: { defense: { zonal: 0.9, mid: 0.5, high: -0.6, man: -0.8 } },
                opp: { possession: { positional: 0.7, central: 0.4, direct: -0.6, overload: -0.5 } } },
         weights: { score: 0.8, assist: 0.85, setPiece: 1.15, workload: { def: 1.2, key: 0.75 } }
     },
-    libero: {
-        name: 'Libero', group: 'CB',
+    'Libero': {
+        attrs: { PAC: 4, SHO: -2, PAS: 11, DRI: 6, DEF: -6, PHY: -2 },
+        group: 'CB',
         fit: { own: { possession: { positional: 0.9, lavolpiana: 0.7, direct: -0.9, overload: -0.7 },
                       defense: { high: 0.6, mid: 0.2, low: -0.8 } },
                opp: { transition: { gegenpress: 0.7, counter: -0.4, restDefense: -0.3 } } },
         weights: { assist: 1.25, score: 0.9, workload: { def: 1.05, key: 1.15 } }
     },
-    wide_center_back: {
-        name: 'Wide Centre-Back', group: 'CB',
+    'Wide Centre-Back': {
+        attrs: { PAC: 7, SHO: -1, PAS: 6, DRI: 6, DEF: -4, PHY: -3 },
+        group: 'CB',
         fit: { own: { possession: { overload: 0.9, spatial: 0.6, central: -0.7, positional: -0.8 },
                       defense: { high: 0.5, man: 0.3, low: -0.8 } },
                opp: { possession: { direct: 0.6, positional: -0.3, central: -0.3 } } },
         weights: { score: 0.95, assist: 1.1, setPiece: 1.1, workload: { def: 1.1, key: 1.0 } }
     },
     // --- Full-backs / wing-backs ---
-    phantom_pivot: {
-        name: 'Inverted Wing-Back', group: 'FB',
+    'Inverted Wing-Back': {
+        attrs: { PAC: 2, SHO: -1, PAS: 9, DRI: 6, DEF: -9, PHY: -3 },
+        group: 'FB',
         fit: { own: { possession: { positional: 1.0, central: 0.8, direct: -1.1, overload: -0.7 } },
                opp: { transition: { gegenpress: 0.9, counter: -0.5, tacticalFoul: -0.4 } } },
         weights: { score: 0.85, assist: 1.2, workload: { def: 1.1, key: 1.1 } }
     },
-    flank_railgun: {
-        name: 'Complete Wing-Back', group: 'FB',
+    'Complete Wing-Back': {
+        attrs: { PAC: 8, SHO: 2, PAS: 7, DRI: 7, DEF: -10, PHY: -10 },
+        group: 'FB',
         fit: { own: { possession: { overload: 1.2, direct: 0.4, central: -0.8, positional: -0.8 } },
                opp: { defense: { low: 1.0, man: -0.5, zonal: -0.5 } } },
         weights: { score: 1.05, assist: 1.35, setPiece: 1.1, workload: { def: 0.9, key: 1.3 } }
     },
-    wing_back: {
-        name: 'Wing-Back', group: 'FB',
+    'Wing-Back': {
+        attrs: { PAC: 7, SHO: 0, PAS: 4, DRI: 4, DEF: -8, PHY: -5 },
+        group: 'FB',
         fit: { own: { possession: { overload: 0.9, spatial: 0.6, direct: 0.3, positional: -0.9, central: -0.9 },
                       transition: { counter: 0.5, restAttack: 0.3, restDefense: -0.8 } },
                opp: { defense: { high: 0.7, low: -0.4, man: -0.3 } } },
         weights: { score: 1.0, assist: 1.3, workload: { def: 0.95, key: 1.2 } }
     },
-    no_nonsense_fullback: {
-        name: 'No-Nonsense Full-Back', group: 'FB',
+    'No-Nonsense Full-Back': {
+        attrs: { PAC: 2, SHO: -4, PAS: -9, DRI: -5, DEF: 8, PHY: 3 },
+        group: 'FB',
         fit: { own: { defense: { low: 1.0, man: 0.6, high: -0.9, zonal: -0.7 },
                       possession: { direct: 0.4, positional: -0.4 } },
                opp: { possession: { direct: 0.9, overload: 0.3, positional: -0.6, central: -0.6 } } },
         weights: { score: 0.75, assist: 0.9, setPiece: 1.05, workload: { def: 1.3, key: 0.7 } }
     },
     // --- Midfield ---
-    puppeteer: {
-        name: 'Deep-Lying Playmaker', group: 'MID',
+    'Deep-Lying Playmaker': {
+        attrs: { PAC: -3, SHO: -3, PAS: 7, DRI: 2, DEF: -5, PHY: -4 },
+        group: 'MID',
         fit: { own: { possession: { positional: 0.9, lavolpiana: 0.9, direct: -1.1, spatial: -0.7 } },
                opp: { transition: { restAttack: 0.5, counter: 0.5, gegenpress: -1.0 } } },
         weights: { score: 0.85, assist: 1.35, setPiece: 1.1, workload: { def: 0.85, key: 1.35 } }
     },
-    apex_engine: {
-        name: 'Box-to-Box Midfielder', group: 'MID',
+    'Box-to-Box Midfielder': {
+        attrs: { PAC: 6, SHO: 0, PAS: -6, DRI: 0, DEF: 2, PHY: 2 },
+        group: 'MID',
         fit: { own: { defense: { high: 0.8, man: 0.4, low: -1.2 },
                       transition: { gegenpress: 0.9, restAttack: 0.3, restDefense: -0.7, balanced: -0.5 } },
                opp: { possession: { positional: 0.5, direct: -0.5 } } },
         weights: { score: 1.2, assist: 1.1, workload: { def: 1.15, key: 1.15 } }
     },
-    reaper: {
-        name: 'Ball-Winning Midfielder', group: 'MID',
+    'Ball-Winning Midfielder': {
+        attrs: { PAC: 3, SHO: -3, PAS: -4, DRI: -2, DEF: 9, PHY: 5 },
+        group: 'MID',
         fit: { own: { defense: { man: 1.0, high: 0.6, low: -0.9, zonal: -0.7 },
                       transition: { gegenpress: 0.7, tacticalFoul: 0.4, restDefense: -0.6, counter: -0.5 } },
                opp: { possession: { positional: 0.6, central: 0.3, direct: -0.5, overload: -0.4 } } },
         weights: { score: 0.9, assist: 0.95, workload: { def: 1.35, key: 0.8 } }
     },
-    infiltrator: {
-        name: 'Roaming Playmaker', group: 'MID',
+    'Roaming Playmaker': {
+        attrs: { PAC: 2, SHO: 0, PAS: 2, DRI: 5, DEF: -10, PHY: -5 },
+        group: 'MID',
         fit: { own: { possession: { spatial: 1.1, overload: 0.5, positional: 0.3, direct: -0.9, central: -0.5, lavolpiana: -0.5 } },
                opp: { defense: { zonal: 0.6, man: 0.3, low: -0.9 } } },
         weights: { score: 1.2, assist: 1.15, workload: { def: 0.95, key: 1.2 } }
     },
-    codebreaker: {
-        name: 'Advanced Playmaker', group: 'MID',
+    'Advanced Playmaker': {
+        attrs: { PAC: -2, SHO: 4, PAS: 5, DRI: 3, DEF: -11, PHY: -6 },
+        group: 'MID',
         fit: { own: { possession: { positional: 0.7, central: 0.5, direct: -1.2 } },
                opp: { defense: { low: 1.2, zonal: 0.5, man: -0.9, high: -0.8 } } },
         weights: { score: 1.1, assist: 1.45, setPiece: 1.2, workload: { def: 0.7, key: 1.5 } }
     },
-    mezzala: {
-        name: 'Mezzala', group: 'MID',
+    'Mezzala': {
+        attrs: { PAC: 5, SHO: 2, PAS: 1, DRI: 3, DEF: -7, PHY: -4 },
+        group: 'MID',
         fit: { own: { possession: { spatial: 0.9, overload: 0.7, central: 0.3, positional: -0.8, direct: -0.6, lavolpiana: -0.5 } },
                opp: { defense: { zonal: 0.7, low: 0.4, man: -0.6, high: -0.5 } } },
         weights: { score: 1.15, assist: 1.2, setPiece: 1.05, workload: { def: 0.9, key: 1.25 } }
     },
-    carrilero: {
-        name: 'Carrilero', group: 'MID',
+    'Carrilero': {
+        attrs: { PAC: 2, SHO: -4, PAS: 1, DRI: -3, DEF: 4, PHY: 1 },
+        group: 'MID',
         fit: { own: { possession: { positional: 0.6, spatial: 0.5, overload: 0.3, direct: -0.7, central: -0.7 },
                       defense: { mid: 0.5, high: 0.3, low: -0.8 } },
                opp: { transition: { counter: 0.5, gegenpress: 0.3, restAttack: -0.4, restDefense: -0.4 } } },
         weights: { score: 0.9, assist: 1.15, workload: { def: 1.15, key: 1.1 } }
     },
-    anchor_man: {
-        name: 'Anchor Man', group: 'MID',
+    'Anchor Man': {
+        attrs: { PAC: -2, SHO: -4, PAS: 1, DRI: -4, DEF: 7, PHY: 5 },
+        group: 'MID',
         fit: { own: { defense: { low: 1.0, man: 0.6, high: -0.9, zonal: -0.7 },
                       possession: { positional: 0.5, lavolpiana: 0.4, direct: -0.5, overload: -0.4 } },
                opp: { possession: { direct: 0.8, overload: 0.4, positional: -0.6, central: -0.6 } } },
         weights: { score: 0.7, assist: 0.95, setPiece: 1.1, workload: { def: 1.4, key: 0.75 } }
     },
-    half_back: {
-        name: 'Half-Back', group: 'MID',
+    'Half-Back': {
+        attrs: { PAC: -4, SHO: -5, PAS: 4, DRI: -4, DEF: 3, PHY: 0 },
+        group: 'MID',
         fit: { own: { possession: { lavolpiana: 1.0, positional: 0.7, direct: -0.9, spatial: -0.8 },
                       defense: { mid: 0.5, low: 0.3, high: -0.8 } },
                opp: { defense: { high: 0.7, man: 0.3, low: -1.0 } } },
         weights: { score: 0.75, assist: 1.2, setPiece: 1.05, workload: { def: 1.2, key: 1.1 } }
     },
-    trequartista: {
-        name: 'Trequartista', group: 'MID',
+    'Trequartista': {
+        attrs: { PAC: -1, SHO: 3, PAS: 4, DRI: 5, DEF: -11, PHY: -6 },
+        group: 'MID',
         fit: { own: { possession: { central: 1.1, positional: 0.6, spatial: 0.3, direct: -1.0, overload: -1.0 } },
                opp: { defense: { zonal: 0.9, low: 0.5, man: -0.8, high: -0.6 } } },
         weights: { score: 1.25, assist: 1.35, setPiece: 1.15, workload: { def: 0.55, key: 1.45 } }
     },
     // --- Wingers ---
-    cutback_assassin: {
-        name: 'Inside Forward', group: 'WING',
+    'Inside Forward': {
+        attrs: { PAC: 1, SHO: 5, PAS: -4, DRI: 2, DEF: -11, PHY: -6 },
+        group: 'WING',
         fit: { own: { possession: { central: 0.9, spatial: 0.8, direct: -1.7 } },
                opp: { defense: { low: 0.8, man: -0.4, zonal: -0.4 } } },
         weights: { score: 1.35, assist: 1.1, setPiece: 1.1, workload: { def: 0.85, key: 1.25 } }
     },
-    touchline_demon: {
-        name: 'Classic Winger', group: 'WING',
+    'Classic Winger': {
+        attrs: { PAC: 7, SHO: -6, PAS: 0, DRI: 2, DEF: -6, PHY: -9 },
+        group: 'WING',
         fit: { own: { possession: { direct: 1.0, overload: 0.6, positional: -0.8, central: -0.8 } },
                opp: { defense: { high: 1.2, man: -0.8, zonal: -0.4 } } },
         weights: { score: 0.95, assist: 1.35, workload: { def: 0.9, key: 1.3 } }
     },
-    shadow_maestro: {
-        name: 'Inverted Winger', group: 'WING',
+    'Inverted Winger': {
+        attrs: { PAC: 2, SHO: -2, PAS: 2, DRI: 4, DEF: -11, PHY: -6 },
+        group: 'WING',
         fit: { own: { possession: { positional: 0.9, central: 0.8, overload: -0.6, direct: -1.1 } },
                opp: { defense: { high: 0.9, low: -0.9 } } },
         weights: { score: 1.05, assist: 1.3, setPiece: 1.15, workload: { def: 0.9, key: 1.4 } }
     },
-    wide_target_man: {
-        name: 'Wide Target Man', group: 'WING',
+    'Wide Target Man': {
+        attrs: { PAC: 2, SHO: 4, PAS: 1, DRI: -4, DEF: -4, PHY: 1 },
+        group: 'WING',
         fit: { own: { possession: { direct: 1.1, overload: 0.7, spatial: 0.2, positional: -1.0, central: -1.0 } },
                opp: { defense: { high: 0.8, man: 0.3, low: -0.6, zonal: -0.5 } } },
         weights: { score: 1.2, assist: 1.15, setPiece: 1.35, counter: 1.1, workload: { def: 0.85, key: 1.0 } }
     },
     // --- Forwards ---
-    juggernaut: {
-        name: 'Target Forward', group: 'FWD',
+    'Target Forward': {
+        attrs: { PAC: -9, SHO: 5, PAS: -8, DRI: -9, DEF: -9, PHY: 12 },
+        group: 'FWD',
         fit: { own: { possession: { direct: 1.6, overload: 0.4, positional: -1.1, central: -0.9 } },
                opp: { defense: { high: 0.6, low: 0.4, man: -1.0 } } },
         weights: { score: 1.15, assist: 1.05, setPiece: 1.5, counter: 1.1, workload: { def: 0.8, key: 0.9 } }
     },
-    box_assassin: {
-        name: 'Poacher', group: 'FWD',
+    'Poacher': {
+        attrs: { PAC: 5, SHO: 8, PAS: -13, DRI: -3, DEF: -19, PHY: -4 },
+        group: 'FWD',
         fit: { own: { possession: { direct: 0.8, overload: 0.5, positional: -0.8, central: -0.5 } },
                opp: { defense: { high: 1.2, man: 0.5, low: -1.7 } } },
         weights: { score: 1.55, assist: 0.6, setPiece: 1.25, workload: { def: 0.6, key: 0.6 } }
     },
-    illusionist: {
-        name: 'False 9', group: 'FWD',
+    'False 9': {
+        attrs: { PAC: 1, SHO: -5, PAS: 11, DRI: 7, DEF: -11, PHY: -3 },
+        group: 'FWD',
         fit: { own: { possession: { central: 1.2, positional: 0.7, direct: -1.2, spatial: -0.7 } },
                opp: { defense: { zonal: 0.6, high: 0.3, man: -0.9 } } },
         weights: { score: 1.05, assist: 1.25, workload: { def: 1.0, key: 1.2 } }
     },
-    dimension_walker: {
-        name: 'Raumdeuter', group: 'FWD',
+    'Raumdeuter': {
+        attrs: { PAC: 6, SHO: 7, PAS: -11, DRI: 1, DEF: -17, PHY: -10 },
+        group: 'FWD',
         fit: { own: { possession: { spatial: 0.9, overload: 0.6, positional: -0.8, direct: -0.7 } },
                opp: { defense: { zonal: 1.1, low: 0.3, man: -0.9, high: -0.5 } } },
         weights: { score: 1.4, assist: 0.7, setPiece: 1.15, workload: { def: 0.7, key: 0.8 } }
     },
-    apex_predator: {
-        name: 'Complete Forward', group: 'FWD',
+    'Complete Forward': {
+        attrs: { PAC: 2, SHO: 3, PAS: 0, DRI: 2, DEF: -13, PHY: -6 },
+        group: 'FWD',
         // Small swings on purpose: this role is never badly placed rather than
         // great in any one spot, which is what makes it worth its rating.
         fit: { own: { possession: { positional: 0.4, spatial: 0.3, overload: 0.3, direct: -0.5, central: -0.5 } },
                opp: { defense: { high: 0.4, man: 0.3, low: -0.7 } } },
         weights: { score: 1.25, assist: 1.15, setPiece: 1.1, workload: { def: 0.9, key: 1.1 } }
     },
-    advanced_forward: {
-        name: 'Advanced Forward', group: 'FWD',
+    'Advanced Forward': {
+        attrs: { PAC: 6, SHO: 4, PAS: -7, DRI: -1, DEF: -17, PHY: -6 },
+        group: 'FWD',
         fit: { own: { possession: { spatial: 0.8, overload: 0.7, direct: 0.4, positional: -0.9, central: -1.0 },
                       transition: { counter: 0.6, restAttack: 0.3, restDefense: -0.9 } },
                opp: { defense: { high: 1.0, man: 0.4, low: -0.8, zonal: -0.6 } } },
         weights: { score: 1.4, assist: 1.05, counter: 1.2, workload: { def: 0.85, key: 1.0 } }
     },
-    deep_lying_forward: {
-        name: 'Deep-Lying Forward', group: 'FWD',
+    'Deep-Lying Forward': {
+        attrs: { PAC: 2, SHO: -3, PAS: 8, DRI: 6, DEF: -11, PHY: -4 },
+        group: 'FWD',
         fit: { own: { possession: { positional: 0.9, central: 0.8, lavolpiana: 0.3, direct: -1.0, overload: -1.0 } },
                opp: { defense: { zonal: 0.7, high: 0.4, man: -0.6, low: -0.5 } } },
         weights: { score: 1.0, assist: 1.4, setPiece: 1.1, workload: { def: 0.9, key: 1.35 } }
     },
-    pressing_forward: {
-        name: 'Pressing Forward', group: 'FWD',
+    'Pressing Forward': {
+        attrs: { PAC: 6, SHO: 1, PAS: -4, DRI: 0, DEF: 3, PHY: -8 },
+        group: 'FWD',
         fit: { own: { defense: { high: 1.1, man: 0.5, low: -1.0, zonal: -0.6 },
                       transition: { gegenpress: 1.0, counter: 0.3, restDefense: -0.7, balanced: -0.6 } },
                opp: { possession: { positional: 0.6, central: 0.4, direct: -0.5, overload: -0.5 } } },
         weights: { score: 1.15, assist: 1.05, workload: { def: 1.25, key: 0.95 } }
     },
-    shadow_striker: {
-        name: 'Shadow Striker', group: 'FWD',
+    'Shadow Striker': {
+        attrs: { PAC: 3, SHO: 6, PAS: -5, DRI: 0, DEF: -18, PHY: -6 },
+        group: 'FWD',
         fit: { own: { possession: { central: 0.9, spatial: 0.7, positional: 0.3, direct: -0.9, overload: -1.0 } },
                opp: { defense: { zonal: 1.0, man: 0.3, high: -0.5, low: -0.8 } } },
         weights: { score: 1.45, assist: 0.95, setPiece: 1.05, workload: { def: 0.75, key: 1.1 } }
     },
     // --- Any position ---
-    wildcard: {
-        name: 'Wildcard', group: 'ANY',
+    'Wildcard': {
+        attrs: { PAC: 0, SHO: 0, PAS: 0, DRI: 0, DEF: 0, PHY: 0 },
+        group: 'ANY',
         // The wildcard is bought with the out-of-position cap, not with raw fit.
         fit: { own: { possession: { positional: 0.4, central: 0.4, direct: -0.8 },
                       transition: { restDefense: 0.4, gegenpress: -0.4 } },
@@ -1018,7 +1069,7 @@ const PLAYSTYLES = Object.freeze({
 
 // Which slots may carry which style. Group membership follows the same lines as
 // POSITION_META, and the wildcard is the one style any outfield role can take.
-const PLAYSTYLE_GROUPS = Object.freeze({
+const ARCHETYPE_GROUPS = Object.freeze({
     GK: ['GK'],
     CB: ['CB'],
     FB: ['LB', 'RB', 'LWB', 'RWB'],
@@ -1028,24 +1079,24 @@ const PLAYSTYLE_GROUPS = Object.freeze({
     ANY: ['CB', 'LB', 'RB', 'LWB', 'RWB', 'CDM', 'CM', 'CAM', 'LW', 'RW', 'LM', 'RM', 'CF', 'ST']
 });
 
-function playstylePositions(key) {
-    const style = PLAYSTYLES[key];
-    return style ? PLAYSTYLE_GROUPS[style.group] || [] : [];
+function archetypePositions(key) {
+    const style = ARCHETYPES[key];
+    return style ? ARCHETYPE_GROUPS[style.group] || [] : [];
 }
 
-function playstyleOf(player) {
-    const key = player && player.playstyle;
-    if (!key || !PLAYSTYLES[key]) return null;
+function archetypeOf(player) {
+    const key = player && player.archetype;
+    if (!key || !ARCHETYPES[key]) return null;
     const pos = player.mainPos;
-    if (pos && !playstylePositions(key).includes(pos)) return null;
+    if (pos && !archetypePositions(key).includes(pos)) return null;
     return key;
 }
 
 // How much the role suits this player in this specific matchup, in rating points.
-function playstyleFitDelta(player, ownTactics, oppTactics) {
-    const key = playstyleOf(player);
+function archetypeFitDelta(player, ownTactics, oppTactics) {
+    const key = archetypeOf(player);
     if (!key) return 0;
-    const fit = PLAYSTYLES[key].fit || {};
+    const fit = ARCHETYPES[key].fit || {};
     const own = ownTactics || DEFAULT_TACTICS;
     const opp = oppTactics || DEFAULT_TACTICS;
     let delta = 0;
@@ -1054,27 +1105,27 @@ function playstyleFitDelta(player, ownTactics, oppTactics) {
         if (fit.own && fit.own[phase]) delta += fit.own[phase][own[phase]] || 0;
         if (fit.opp && fit.opp[phase]) delta += fit.opp[phase][opp[phase]] || 0;
     });
-    return Math.max(-PLAYSTYLE_FIT_CLAMP, Math.min(PLAYSTYLE_FIT_CLAMP, delta));
+    return Math.max(-ARCHETYPE_FIT_CLAMP, Math.min(ARCHETYPE_FIT_CLAMP, delta));
 }
 
 // Averaging those slot deltas over the XI is the part a manager actually controls:
 // a team-sheet built around one plan gets rewarded with chances, a mismatched one
 // pays for it. Every style is zero-sum, so the league average stays where the
 // goals-per-match calibration put it and only the split between the two clubs moves.
-const PLAYSTYLE_COHERENCE_SCALE = 0.04;
+const ARCHETYPE_COHERENCE_SCALE = 0.04;
 
-function playstyleCoherence(team, oppTactics) {
+function archetypeCoherence(team, oppTactics) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player);
     if (!slots.length) return 1;
-    const total = slots.reduce((sum, slot) => sum + playstyleFitDelta(slot.player, team.tactics, oppTactics), 0);
-    return 1 + PLAYSTYLE_COHERENCE_SCALE * (total / slots.length);
+    const total = slots.reduce((sum, slot) => sum + archetypeFitDelta(slot.player, team.tactics, oppTactics), 0);
+    return 1 + ARCHETYPE_COHERENCE_SCALE * (total / slots.length);
 }
 
 // A stable style for a name with no curated entry, which is how ghost clubs get
 // their roles: same name, same position, same style, on every machine.
-function playstyleForName(pos, name) {
-    const legal = Object.keys(PLAYSTYLES).filter(key =>
-        PLAYSTYLE_GROUPS[PLAYSTYLES[key].group].includes(pos) && PLAYSTYLES[key].group !== 'ANY');
+function archetypeForName(pos, name) {
+    const legal = Object.keys(ARCHETYPES).filter(key =>
+        ARCHETYPE_GROUPS[ARCHETYPES[key].group].includes(pos) && ARCHETYPES[key].group !== 'ANY');
     if (!legal.length) return null;
     let hash = 0;
     const label = String(name || '');
@@ -1082,9 +1133,9 @@ function playstyleForName(pos, name) {
     return legal[hash % legal.length];
 }
 
-function playstyleWeights(player) {
-    const key = playstyleOf(player);
-    const style = key ? PLAYSTYLES[key] : null;
+function archetypeWeights(player) {
+    const key = archetypeOf(player);
+    const style = key ? ARCHETYPES[key] : null;
     const w = (style && style.weights) || {};
     return {
         score: w.score ?? 1,
@@ -1095,22 +1146,40 @@ function playstyleWeights(player) {
     };
 }
 
+// The attribute shape a role identity buys a player. Both tables carry their deltas
+// weighted-zero-sum against POS_WEIGHTS of the position they were authored for, so the
+// six numbers trade points with each other and never move the overall rating.
+function roleAttributeTilt(archetypeKey, playstyleKey) {
+    const tilt = { PAC: 0, SHO: 0, PAS: 0, DRI: 0, DEF: 0, PHY: 0 };
+    const arch = archetypeKey && ARCHETYPES[archetypeKey] ? ARCHETYPES[archetypeKey].attrs : null;
+    const habit = playstyleKey && PLAYSTYLES[playstyleKey] ? PLAYSTYLES[playstyleKey].attrs : null;
+    [arch, habit].forEach(table => {
+        if (!table) return;
+        Object.keys(tilt).forEach(k => { tilt[k] += table[k] || 0; });
+    });
+    return tilt;
+}
+
 // ============================================================
-// PLAYSTYLES (SPECIALITIES) — secondary habits layered on the Archetype.
+// PLAYSTYLES — the secondary habit layered on top of the Archetype.
 //
-// A playstyle answers "what job does this player do on the pitch"; a speciality
-// is the secondary myth-tag for dead balls, clutch moments, durability and
-// technical habits. Same zero-sum fit rules as PLAYSTYLES. Example: Loki
-// (poacher) + Theseus (penalties) is a box threat you must not foul.
+// An archetype answers "what job does this player do on the pitch"; a playstyle is
+// the reputation tag for dead balls, clutch moments, durability and technical habits.
+// The keys are the names the scout strip prints, and every entry is named after the
+// myth the community gave the habit — Boreas for the quickest man in the side,
+// Athena for the one who stands over a corner. Example: a Poacher wearing Achilles is
+// a box threat you must not foul.
 //
-// Same authoring rules as PLAYSTYLES:
-//   1. every `fit` phase is zero-sum, so a speciality is never a hidden stat boost;
-//   2. the other fields are trade-offs, not free upgrades — the aggressive tags buy
+// Same authoring rules as ARCHETYPES:
+//   1. every `fit` phase is zero-sum, so a playstyle is never a hidden stat boost;
+//   2. `attrs` is weighted-zero-sum, so a habit shapes the six numbers without
+//      buying rating;
+//   3. the other fields are trade-offs, not free upgrades — the aggressive tags buy
 //      actions with fouls and cards, the durable tags buy minutes with nothing else.
 // ============================================================
-const SPECIALITY_FIT_CLAMP = 2;
-const SPECIALITY_LEAD_CAP = 1.5;
-const SPECIALITY_LEAD_SCALE = 0.7;
+const PLAYSTYLE_FIT_CLAMP = 2;
+const PLAYSTYLE_LEAD_CAP = 1.5;
+const PLAYSTYLE_LEAD_SCALE = 0.7;
 
 const SP_ALL = ['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB', 'CDM', 'CM', 'CAM', 'LM', 'RM', 'LW', 'RW', 'CF', 'ST'];
 const SP_OUT = SP_ALL.filter(p => p !== 'GK');
@@ -1121,90 +1190,105 @@ const SP_ATT = ['CAM', 'LW', 'RW', 'CF', 'ST'];
 const SP_WING = ['LW', 'RW', 'LM', 'RM'];
 const SP_STRIKER = ['CF', 'ST'];
 
-const SPECIALITIES = Object.freeze({
+const PLAYSTYLES = Object.freeze({
     // --- Dead-ball & tactical specialists ---
-    captain: {
-        name: 'Odin', group: 'Dead Ball', positions: SP_ALL,
+    'Odin': {
+        attrs: { PAC: -1, SHO: -1, PAS: 1, DRI: -1, DEF: 3, PHY: 2 },
+        group: 'Dead Ball', positions: SP_ALL,
         lead: 1, card: 0.9,
         fit: { own: { defense: { high: 0.4, man: 0.3, low: -0.7 } },
                opp: { transition: { gegenpress: 0.5, counter: -0.5 } } }
     },
-    set_piece_specialist: {
-        name: 'Athena', group: 'Dead Ball',
+    'Athena': {
+        attrs: { PAC: -4, SHO: 3, PAS: 5, DRI: -1, DEF: -3, PHY: -3 },
+        group: 'Dead Ball',
         positions: ['CAM', 'CM', 'CDM', 'LM', 'RM'].concat(SP_WING, SP_FB, SP_STRIKER),
         setPiece: 1.45, delivery: 1.85, pen: 0.02, taker: true,
         fit: { own: { possession: { positional: 0.6, central: 0.4, direct: -1.0 } } }
     },
-    penalty_specialist: {
-        name: 'Achilles', group: 'Dead Ball', positions: SP_OUT,
+    'Achilles': {
+        attrs: { PAC: -1, SHO: 4, PAS: 0, DRI: -1, DEF: -2, PHY: -3 },
+        group: 'Dead Ball', positions: SP_OUT,
         pen: 0.09, taker: true, setPiece: 1.1,
         fit: { own: { possession: { central: 0.5, direct: -0.5 } } }
     },
-    long_throw_specialist: {
-        name: 'Atlas', group: 'Dead Ball',
+    'Atlas': {
+        attrs: { PAC: -1, SHO: 0, PAS: -1, DRI: -3, DEF: 4, PHY: 7 },
+        group: 'Dead Ball',
         positions: SP_FB.concat(['CB']),
         delivery: 1.6, aerial: 1.3, extraSetPieces: 0.03,
         fit: { own: { possession: { overload: 0.5, direct: 0.4, positional: -0.9 } } }
     },
 
     // --- Leadership & mental modifiers ---
-    vice_captain: {
-        name: 'Apollo', group: 'Mind', positions: SP_ALL,
+    'Apollo': {
+        attrs: { PAC: -1, SHO: -1, PAS: 0, DRI: -1, DEF: 2, PHY: 1 },
+        group: 'Mind', positions: SP_ALL,
         lead: 0.5, card: 0.95
     },
-    vocal_organizer: {
-        name: 'Heimdall', group: 'Mind', positions: SP_ALL,
+    'Heimdall': {
+        attrs: { PAC: -1, SHO: -2, PAS: -1, DRI: -2, DEF: 3, PHY: 2 },
+        group: 'Mind', positions: SP_ALL,
         lead: 0.25, card: 0.8, fouls: 0.9,
         fit: { own: { defense: { zonal: 0.5, man: -0.5 } } }
     },
-    big_game_player: {
-        name: 'Zeus', group: 'Mind', positions: SP_OUT,
+    'Zeus': {
+        attrs: { PAC: -1, SHO: 4, PAS: -2, DRI: -2, DEF: 2, PHY: 2 },
+        group: 'Mind', positions: SP_OUT,
         clutch: 1.35, card: 0.9,
         fit: { own: { defense: { high: 0.5, man: 0.3, low: -0.8 } },
                opp: { possession: { direct: 0.6, positional: -0.6 } } }
     },
-    super_sub: {
-        name: 'Hermes', group: 'Mind',
+    'Hermes': {
+        attrs: { PAC: 4, SHO: 1, PAS: -1, DRI: 2, DEF: -5, PHY: -4 },
+        group: 'Mind',
         positions: SP_WING.concat(SP_STRIKER, ['CAM', 'CM']),
         sub: 1.5,
         fit: { own: { possession: { direct: 0.5, spatial: 0.4, positional: -0.9 } } }
     },
-    enforcer: {
-        name: 'Ares', group: 'Mind', positions: SP_DEF,
+    'Ares': {
+        attrs: { PAC: -2, SHO: -2, PAS: -2, DRI: -5, DEF: 6, PHY: 8 },
+        group: 'Mind', positions: SP_DEF,
         card: 1.45, fouls: 1.15, aerial: 1.25, workload: { def: 1.2, key: 0.9 },
         fit: { own: { defense: { man: 0.6, low: 0.4, high: -1.0 } } }
     },
-    hot_head: {
-        name: 'Fenrir', group: 'Mind', positions: SP_OUT,
+    'Fenrir': {
+        attrs: { PAC: 3, SHO: -2, PAS: -3, DRI: -2, DEF: 3, PHY: 4 },
+        group: 'Mind', positions: SP_OUT,
         card: 1.7, fouls: 1.18, workload: { def: 1.1, key: 1 },
         fit: { own: { defense: { high: 0.5, man: 0.4, low: -0.9 },
                       transition: { gegenpress: 0.6, restDefense: -0.6 } } }
     },
 
     // --- Physical & durability tags ---
-    iron_man: {
-        name: 'Talos', group: 'Body', positions: SP_ALL,
+    'Talos': {
+        attrs: { PAC: 4, SHO: -2, PAS: -2, DRI: -3, DEF: 2, PHY: 6 },
+        group: 'Body', positions: SP_ALL,
         stamina: 0.72, injury: 0.55, workload: { def: 1.08, key: 1.05 }
     },
-    injury_prone: {
-        name: 'Prometheus', group: 'Body', positions: SP_ALL,
+    'Prometheus': {
+        attrs: { PAC: 2, SHO: 2, PAS: 1, DRI: 3, DEF: -2, PHY: -8 },
+        group: 'Body', positions: SP_ALL,
         injury: 2.1, stamina: 1.25
     },
-    workhorse: {
-        name: 'Heracles', group: 'Body', positions: SP_OUT,
+    'Heracles': {
+        attrs: { PAC: 5, SHO: -3, PAS: -2, DRI: 0, DEF: 4, PHY: 3 },
+        group: 'Body', positions: SP_OUT,
         stamina: 0.85, workload: { def: 1.25, key: 1.15 },
         fit: { own: { defense: { high: 0.5, zonal: 0.3, low: -0.8 },
                       transition: { gegenpress: 0.4, balanced: -0.4 } } }
     },
-    speedster: {
-        name: 'Boreas', group: 'Body',
+    'Boreas': {
+        attrs: { PAC: 8, SHO: -2, PAS: -2, DRI: 2, DEF: -3, PHY: -5 },
+        group: 'Body',
         positions: SP_FB.concat(SP_WING, SP_ATT),
         counter: 1.35,
         fit: { own: { possession: { direct: 0.7, overload: 0.4, positional: -1.1 } },
                opp: { defense: { high: 1.0, low: -1.0 } } }
     },
-    aerial_threat: {
-        name: 'Ymir', group: 'Body',
+    'Ymir': {
+        attrs: { PAC: -3, SHO: 4, PAS: -2, DRI: -5, DEF: 3, PHY: 8 },
+        group: 'Body',
         positions: ['CB', 'CDM', 'CM', 'LB', 'RB'].concat(SP_STRIKER),
         aerial: 1.7, setPiece: 1.2,
         fit: { own: { possession: { central: 0.4, spatial: -0.4 } },
@@ -1212,81 +1296,85 @@ const SPECIALITIES = Object.freeze({
     },
 
     // --- Technical & behavioural tendencies ---
-    distance_shooter: {
-        name: 'Artemis', group: 'Craft',
+    'Artemis': {
+        attrs: { PAC: -1, SHO: 7, PAS: -2, DRI: -3, DEF: -1, PHY: 0 },
+        group: 'Craft',
         positions: ['CM', 'CAM', 'CDM', 'LM', 'RM'].concat(SP_WING, SP_STRIKER),
         longShot: 1.6,
         fit: { own: { possession: { central: 0.6, spatial: 0.4, positional: -1.0 } } }
     },
-    trickster: {
-        name: 'Loki', group: 'Craft',
+    'Loki': {
+        attrs: { PAC: -3, SHO: 0, PAS: 2, DRI: 7, DEF: -5, PHY: -4 },
+        group: 'Craft',
         positions: ['CAM', 'CM'].concat(SP_WING, SP_STRIKER),
         flair: 1.3, card: 0.9, fouls: 0.92,
         fit: { own: { possession: { spatial: 0.7, positional: 0.3, direct: -1.0 } },
                opp: { defense: { man: 0.6, zonal: -0.6 } } }
     },
-    dives_into_tackles: {
-        name: 'Thor', group: 'Craft',
+    'Thor': {
+        attrs: { PAC: 4, SHO: -2, PAS: -3, DRI: -2, DEF: 6, PHY: -2 },
+        group: 'Craft',
         positions: SP_DEF.concat(['CM']),
         card: 1.5, fouls: 1.2, workload: { def: 1.18, key: 0.95 },
         fit: { own: { defense: { man: 0.7, high: 0.4, low: -1.1 } } }
     },
-    stays_on_feet: {
-        name: 'Perseus', group: 'Craft', positions: SP_OUT,
+    'Perseus': {
+        attrs: { PAC: -4, SHO: -1, PAS: 3, DRI: 1, DEF: -1, PHY: -1 },
+        group: 'Craft', positions: SP_OUT,
         card: 0.7, fouls: 0.8,
         fit: { own: { defense: { zonal: 0.5, low: 0.3, man: -0.8 } } }
     }
 });
 
 // The four families the tags come from, in the order a scout reads them.
-const SPECIALITY_GROUPS = Object.freeze({
-    'Dead Ball': ['captain', 'set_piece_specialist', 'penalty_specialist', 'long_throw_specialist'],
-    'Mind': ['vice_captain', 'vocal_organizer', 'big_game_player', 'super_sub', 'enforcer', 'hot_head'],
-    'Body': ['iron_man', 'injury_prone', 'workhorse', 'speedster', 'aerial_threat'],
-    'Craft': ['distance_shooter', 'trickster', 'dives_into_tackles', 'stays_on_feet']
+const PLAYSTYLE_GROUPS = Object.freeze({
+    'Dead Ball': ['Odin', 'Athena', 'Achilles', 'Atlas'],
+    'Mind': ['Apollo', 'Heimdall', 'Zeus', 'Hermes', 'Ares', 'Fenrir'],
+    'Body': ['Talos', 'Prometheus', 'Heracles', 'Boreas', 'Ymir'],
+    'Craft': ['Artemis', 'Loki', 'Thor', 'Perseus']
 });
 
-function specialityPositions(key) {
-    const sp = SPECIALITIES[key];
+function playstylePositions(key) {
+    const sp = PLAYSTYLES[key];
     return sp ? sp.positions : [];
 }
 
-function specialityOf(player) {
-    const key = player && player.speciality;
-    if (!key || !SPECIALITIES[key]) return null;
+function playstyleOf(player) {
+    const key = player && player.playstyle;
+    if (!key || !PLAYSTYLES[key]) return null;
     const pos = player.mainPos;
-    if (pos && !specialityPositions(key).includes(pos)) return null;
+    if (pos && !playstylePositions(key).includes(pos)) return null;
     return key;
 }
 
-function specialityName(player) {
-    const key = specialityOf(player);
-    return key ? SPECIALITIES[key].name : '';
+// The key is the name the scout strip prints, so there is nothing to look up.
+function playstyleName(player) {
+    return playstyleOf(player) || '';
 }
 
-const SPECIALITY_DEFAULTS = Object.freeze({
+const PLAYSTYLE_DEFAULTS = Object.freeze({
     lead: 0, setPiece: 1, delivery: 1, aerial: 1, longShot: 1, counter: 1, flair: 1,
     sub: 1, clutch: 1, card: 1, fouls: 1, stamina: 1, injury: 1,
     extraSetPieces: 0, pen: 0, taker: false, workload: { def: 1, key: 1 }
 });
 
-function specialityEffects(player) {
-    const key = specialityOf(player);
-    const sp = key ? SPECIALITIES[key] : null;
+function playstyleEffects(player) {
+    const key = playstyleOf(player);
+    const sp = key ? PLAYSTYLES[key] : null;
     const out = {};
-    Object.keys(SPECIALITY_DEFAULTS).forEach(field => {
-        out[field] = sp && sp[field] !== undefined ? sp[field] : SPECIALITY_DEFAULTS[field];
+    Object.keys(PLAYSTYLE_DEFAULTS).forEach(field => {
+        out[field] = sp && sp[field] !== undefined ? sp[field] : PLAYSTYLE_DEFAULTS[field];
     });
-    out.workload = { ...(SPECIALITY_DEFAULTS.workload), ...((sp && sp.workload) || {}) };
+    out.workload = { ...(PLAYSTYLE_DEFAULTS.workload), ...((sp && sp.workload) || {}) };
     return out;
 }
 
-// Tactic fit, on the same zero-sum contract as a playstyle but capped a point
+// Tactic fit, on the same zero-sum contract as a archetype but capped a point
 // tighter: a habit is a smaller part of a player than the job he is asked to do.
-function specialityFitDelta(player, ownTactics, oppTactics) {
-    const key = specialityOf(player);
+function playstyleFitDelta(player, ownTactics, oppTactics) {
+    const key = playstyleOf(player);
     if (!key) return 0;
-    const fit = SPECIALITIES[key].fit || {};
+    const fit = PLAYSTYLES[key].fit || {};
     const own = ownTactics || DEFAULT_TACTICS;
     const opp = oppTactics || DEFAULT_TACTICS;
     let delta = 0;
@@ -1294,84 +1382,86 @@ function specialityFitDelta(player, ownTactics, oppTactics) {
         if (fit.own && fit.own[phase]) delta += fit.own[phase][own[phase]] || 0;
         if (fit.opp && fit.opp[phase]) delta += fit.opp[phase][opp[phase]] || 0;
     });
-    return Math.max(-SPECIALITY_FIT_CLAMP, Math.min(SPECIALITY_FIT_CLAMP, delta));
+    return Math.max(-PLAYSTYLE_FIT_CLAMP, Math.min(PLAYSTYLE_FIT_CLAMP, delta));
 }
 
-const SPECIALITY_COHERENCE_SCALE = 0.03;
+const PLAYSTYLE_COHERENCE_SCALE = 0.03;
 
-function specialityCoherence(team, oppTactics) {
+function playstyleCoherence(team, oppTactics) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player);
     if (!slots.length) return 1;
-    const total = slots.reduce((sum, slot) => sum + specialityFitDelta(slot.player, team.tactics, oppTactics), 0);
-    return 1 + SPECIALITY_COHERENCE_SCALE * (total / slots.length);
+    const total = slots.reduce((sum, slot) => sum + playstyleFitDelta(slot.player, team.tactics, oppTactics), 0);
+    return 1 + PLAYSTYLE_COHERENCE_SCALE * (total / slots.length);
 }
 
 // One armband is worth a point of calm to everyone else on the pitch; the armband
 // plus a vice-captain is worth a little more, and the band never stacks twice.
 function leadershipRating(team) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player);
-    const lead = slots.reduce((sum, slot) => sum + specialityEffects(slot.player).lead, 0);
-    return Math.min(SPECIALITY_LEAD_CAP, lead) * SPECIALITY_LEAD_SCALE;
+    const lead = slots.reduce((sum, slot) => sum + playstyleEffects(slot.player).lead, 0);
+    return Math.min(PLAYSTYLE_LEAD_CAP, lead) * PLAYSTYLE_LEAD_SCALE;
 }
 
 // Dead-ball volume: long throws and tricks win more free kicks than a side that
 // never leaves its feet, so the XI's habits move the share of goals from set pieces.
-function specialitySetPieceBoost(team) {
+function playstyleSetPieceBoost(team) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player);
-    return Math.min(0.05, slots.reduce((sum, slot) => sum + specialityEffects(slot.player).extraSetPieces, 0));
+    return Math.min(0.05, slots.reduce((sum, slot) => sum + playstyleEffects(slot.player).extraSetPieces, 0));
 }
 
 // How many free kicks this XI gives away, relative to a disciplined side.
-function specialityFoulsGiven(team) {
+function playstyleFoulsGiven(team) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player);
     if (!slots.length) return 1;
-    const avg = slots.reduce((sum, slot) => sum + specialityEffects(slot.player).fouls, 0) / slots.length;
+    const avg = slots.reduce((sum, slot) => sum + playstyleEffects(slot.player).fouls, 0) / slots.length;
     return Math.max(0.85, Math.min(1.15, avg));
 }
 
 // Habits that would move the league's overall rate if left raw — measured across the
 // XIs a match week actually puts out (generated clubs plus the drafted one) and centred,
 // so a tag is a difference between two clubs rather than a global inflation of cards and
-// injuries. Each figure is the mean of the quantity its own consumer multiplies: the
-// per-man booking and knock-off rolls land on 1.00, and the team frailty is centred on
-// its own higher figure because it leans on the worst body in the XI by design.
-const SPECIALITY_CARD_CENTRE = 1.04;
-const SPECIALITY_INJURY_CENTRE = 1.03;
-const SPECIALITY_INJURY_TEAM_CENTRE = 1.25;
+// injuries. Each figure is the mean of the quantity its own consumer multiplies, so the
+// per-man booking and knock-off rolls land on 1.00 and the team frailty on its own
+// higher figure. Re-measured against the curated board, whose habit mix is not the
+// auto-assigned one these were first read off: mean card 0.996, mean injury 1.070, and
+// the frailty quantity 1.365.
+const PLAYSTYLE_CARD_CENTRE = 1.00;
+const PLAYSTYLE_INJURY_CENTRE = 1.07;
+const PLAYSTYLE_INJURY_TEAM_CENTRE = 1.365;
 
-// How badly this XI behaves when it does: the enforcer and the hot head turn
-// challenges into bookings, the captain and the technician talk the referee down.
-function specialityBookingRate(team) {
+// How badly this XI behaves when it does: Fenrir and Ares turn challenges into
+// bookings, Perseus and Heimdall talk the referee down.
+function playstyleBookingRate(team) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player);
     if (!slots.length) return 1;
-    const avg = slots.reduce((sum, slot) => sum + specialityEffects(slot.player).card, 0) / slots.length;
-    return Math.max(0.85, Math.min(1.2, avg / SPECIALITY_CARD_CENTRE));
+    const avg = slots.reduce((sum, slot) => sum + playstyleEffects(slot.player).card, 0) / slots.length;
+    return Math.max(0.85, Math.min(1.2, avg / PLAYSTYLE_CARD_CENTRE));
 }
 
 // How often this XI loses a man to a knock. One fragile body in eleven is enough to
 // change a substitution, so the risk leans on the worst offender, not the mean.
-function specialityInjuryRisk(team) {
+function playstyleInjuryRisk(team) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player);
     if (!slots.length) return 1;
-    const avg = slots.reduce((sum, slot) => sum + specialityEffects(slot.player).injury, 0) / slots.length;
-    const worst = slots.reduce((max, slot) => Math.max(max, specialityEffects(slot.player).injury), 1);
+    const avg = slots.reduce((sum, slot) => sum + playstyleEffects(slot.player).injury, 0) / slots.length;
+    const worst = slots.reduce((max, slot) => Math.max(max, playstyleEffects(slot.player).injury), 1);
     // A medical programme keeps fragile bodies on the pitch.
     const fit = medicalInjuryFactor(team);
-    return Math.max(0.4, Math.min(1.7, ((avg * 0.5 + worst * 0.5) / SPECIALITY_INJURY_TEAM_CENTRE) * fit));
+    return Math.max(0.4, Math.min(1.7, ((avg * 0.5 + worst * 0.5) / PLAYSTYLE_INJURY_TEAM_CENTRE) * fit));
 }
 
 // One player's own injury appetite, on the same centre as the team figure.
-function specialityInjuryRate(player) {
-    return Math.max(0.5, specialityEffects(player).injury / SPECIALITY_INJURY_CENTRE);
+function playstyleInjuryRate(player) {
+    return Math.max(0.5, playstyleEffects(player).injury / PLAYSTYLE_INJURY_CENTRE);
 }
 
 // One player's own booking appetite, on the same centre as the team figure.
-function specialityBookingRateFor(player) {
-    return Math.max(0.6, specialityEffects(player).card / SPECIALITY_CARD_CENTRE);
+function playstyleBookingRateFor(player) {
+    return Math.max(0.6, playstyleEffects(player).card / PLAYSTYLE_CARD_CENTRE);
 }
 
-function specialityWeights(player) {
-    const sp = specialityEffects(player);
+function playstyleWeights(player) {
+    const sp = playstyleEffects(player);
     return {
         score: (sp.flair >= 1 ? sp.flair : 1) * sp.longShot,
         assist: sp.flair * sp.delivery,
@@ -1383,16 +1473,16 @@ function specialityWeights(player) {
     };
 }
 
-// A habit only pays when the match is actually on the line, so a squad of Big Game
-// Players is worth a few percent in a knockout leg and nothing in a dead rubber.
-const SPECIALITY_PRESSURE_SCALE = 0.06;
-const SPECIALITY_PRESSURE_CAP = 0.06;
+// A habit only pays when the match is actually on the line, so a squad of Zeus
+// carriers is worth a few percent in a knockout leg and nothing in a dead rubber.
+const PLAYSTYLE_PRESSURE_SCALE = 0.06;
+const PLAYSTYLE_PRESSURE_CAP = 0.06;
 
-function specialityClutchBoost(team, pressure) {
+function playstyleClutchBoost(team, pressure) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player);
     if (!slots.length || !pressure) return 1;
-    const total = slots.reduce((sum, slot) => sum + (specialityEffects(slot.player).clutch - 1), 0);
-    const gain = Math.min(SPECIALITY_PRESSURE_CAP, total * SPECIALITY_PRESSURE_SCALE);
+    const total = slots.reduce((sum, slot) => sum + (playstyleEffects(slot.player).clutch - 1), 0);
+    const gain = Math.min(PLAYSTYLE_PRESSURE_CAP, total * PLAYSTYLE_PRESSURE_SCALE);
     return 1 + gain * Math.max(0, Math.min(1, pressure));
 }
 
@@ -1401,14 +1491,14 @@ function specialityClutchBoost(team, pressure) {
 // How reliable a side is from twelve yards, read off the men who would actually
 // step up: one world-class taker lifts the whole shoot-out, a squad of nervous
 // penalty-takers does not.
-function specialityPenaltyEdge(team) {
+function playstylePenaltyEdge(team) {
     const slots = ((team && team.lineup) || []).filter(slot => slot && slot.player && slot.pos !== 'GK');
     if (!slots.length) return 0;
-    const takers = slots.filter(slot => specialityEffects(slot.player).taker);
+    const takers = slots.filter(slot => playstyleEffects(slot.player).taker);
     if (!takers.length) return 0;
     // Only the first five kicks are properly taken by the chosen five, so a deep
     // bench of takers adds nothing on top of the best of them.
-    const chosen = takers.slice(0, 5).map(slot => specialityEffects(slot.player).pen);
+    const chosen = takers.slice(0, 5).map(slot => playstyleEffects(slot.player).pen);
     const best = Math.max(...chosen);
     return chosen.reduce((sum, pen) => sum + pen, 0) / Math.max(5, chosen.length) + best * 0.2;
 }
@@ -1417,54 +1507,54 @@ function specialityPenaltyEdge(team) {
 // squad gets its habits. The roll follows the frequency each tag actually appears at
 // in the drafted pool, so an AI club looks like a real club rather than a uniform
 // spread, and the armbands are still held back for the players good enough to wear them.
-const SPECIALITY_FREQUENCY = Object.freeze({
-    speedster: 136, set_piece_specialist: 107, trickster: 104, aerial_threat: 65,
-    distance_shooter: 57, penalty_specialist: 55, workhorse: 54, captain: 49,
-    dives_into_tackles: 49, injury_prone: 47, vocal_organizer: 42, enforcer: 41,
-    vice_captain: 37, stays_on_feet: 37, iron_man: 36, big_game_player: 34,
-    long_throw_specialist: 23, hot_head: 19, super_sub: 8
+const PLAYSTYLE_FREQUENCY = Object.freeze({
+    Boreas: 136, Athena: 107, Loki: 104, Ymir: 65,
+    Artemis: 57, Achilles: 55, Heracles: 54, Odin: 49,
+    Thor: 49, Prometheus: 47, Heimdall: 42, Ares: 41,
+    Apollo: 37, Perseus: 37, Talos: 36, Zeus: 34,
+    Atlas: 23, Fenrir: 19, Hermes: 8
 });
 
 // A centre-half is a far likelier captain than a winger, so the global spread above
 // is only the fallback: once the draft board exists, ghost tags are weighted by how
 // often each habit actually lands on that position. Measured once and kept, because
 // the board is the same 616 names for the life of the save.
-let specialityBoardWeights = null;
-function specialityBoardWeightsByPos() {
-    if (specialityBoardWeights) return specialityBoardWeights;
+let playstyleBoardWeights = null;
+function playstyleBoardWeightsByPos() {
+    if (playstyleBoardWeights) return playstyleBoardWeights;
     const byPos = {};
     const board = (typeof availablePlayers !== 'undefined' && Array.isArray(availablePlayers)) ? availablePlayers : [];
     board.forEach(player => {
-        const key = player && player.speciality;
-        if (!key || !SPECIALITIES[key] || !player.mainPos) return;
+        const key = player && player.playstyle;
+        if (!key || !PLAYSTYLES[key] || !player.mainPos) return;
         const bucket = byPos[player.mainPos] = byPos[player.mainPos] || {};
         bucket[key] = (bucket[key] || 0) + 1;
     });
-    specialityBoardWeights = Object.keys(byPos).length ? byPos : null;
-    return specialityBoardWeights;
+    playstyleBoardWeights = Object.keys(byPos).length ? byPos : null;
+    return playstyleBoardWeights;
 }
 
-function specialityTagWeight(pos, key) {
-    const byPos = specialityBoardWeightsByPos();
+function playstyleTagWeight(pos, key) {
+    const byPos = playstyleBoardWeightsByPos();
     const bucket = byPos && byPos[pos];
     // The bucket counts the men still on the board, so a habit the humans already
     // drafted away is not impossible for a ghost club — fall back to the league-wide
     // rate instead of zero, or an exhausted position collapses onto one identical tag.
-    if (bucket) return bucket[key] || SPECIALITY_FREQUENCY[key] || 10;
-    return SPECIALITY_FREQUENCY[key] || 10;
+    if (bucket) return bucket[key] || PLAYSTYLE_FREQUENCY[key] || 10;
+    return PLAYSTYLE_FREQUENCY[key] || 10;
 }
 
-function specialityForName(pos, name, band) {
-    const legal = Object.keys(SPECIALITIES).filter(key => {
-        if (!SPECIALITIES[key].positions.includes(pos)) return false;
-        const floor = SPECIALITY_STRICT_BAND[key];
+function playstyleForName(pos, name, band) {
+    const legal = Object.keys(PLAYSTYLES).filter(key => {
+        if (!PLAYSTYLES[key].positions.includes(pos)) return false;
+        const floor = PLAYSTYLE_STRICT_BAND[key];
         return floor === undefined || (band || 0) >= floor;
     });
     if (!legal.length) return null;
-    const weights = legal.map(key => specialityTagWeight(pos, key));
+    const weights = legal.map(key => playstyleTagWeight(pos, key));
     const total = weights.reduce((sum, w) => sum + w, 0);
     if (!total) return legal[0];
-    let roll = specialityHash(String(name || '') + '|' + pos) % total;
+    let roll = playstyleHash(String(name || '') + '|' + pos) % total;
     for (let i = 0; i < legal.length; i++) {
         roll -= weights[i];
         if (roll < 0) return legal[i];
@@ -1472,7 +1562,7 @@ function specialityForName(pos, name, band) {
     return legal[legal.length - 1];
 }
 
-function specialityHash(name) {
+function playstyleHash(name) {
     let hash = 0;
     const label = String(name || '');
     for (let i = 0; i < label.length; i++) hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
@@ -1482,104 +1572,104 @@ function specialityHash(name) {
 // Habits are read off the body: the quickest man in the squad gets the counter
 // tag, the strongest gets the aerial one, the calmest technician gets the ball on
 // the half-hour. A habit first has to be *possible* for the player — the gate,
-// measured against the peers who play his position — which is what keeps Captain
-// and Big Game Player on the shoulders of the players who would really wear them
+// measured against the peers who play his position — which is what keeps Odin
+// and Zeus on the shoulders of the players who would really wear them
 // instead of spreading evenly over the whole pool.
 // The three habits about standing in front of other men are held for the players
 // rated highly enough to wear them, whether the tag comes from the draft board or
 // from a generated ghost club.
-const SPECIALITY_STRICT_BAND = Object.freeze({ captain: 0.78, vice_captain: 0.5, big_game_player: 0.68 });
+const PLAYSTYLE_STRICT_BAND = Object.freeze({ 'Odin': 0.78, 'Apollo': 0.5, 'Zeus': 0.68 });
 
-const SPECIALITY_GATES = Object.freeze({
-    captain: (z, p, r) => r >= SPECIALITY_STRICT_BAND.captain,
-    vice_captain: (z, p, r) => r >= SPECIALITY_STRICT_BAND.vice_captain,
-    big_game_player: (z, p, r) => r >= SPECIALITY_STRICT_BAND.big_game_player,
-    super_sub: (z, p, r) => r <= 0.45 && z.PAC >= 0.3,
-    penalty_specialist: z => z.SHO >= 0.4,
-    set_piece_specialist: z => z.PAS >= 0.4,
-    long_throw_specialist: z => z.PHY >= 0.4,
-    speedster: z => z.PAC >= 0.6 && z.PAC > z.DRI,
-    aerial_threat: z => z.PHY >= 0.4,
-    distance_shooter: z => z.SHO >= 0.4,
-    trickster: z => z.DRI >= 0.4,
-    injury_prone: z => z.PHY <= -0.2 && z.DRI >= 0,
-    enforcer: z => z.DEF >= 0.3 && z.PHY >= 0.2,
-    hot_head: z => z.PHY >= 0.3,
-    dives_into_tackles: z => z.DEF >= 0.3,
-    iron_man: z => z.PHY >= 0.3 && z.PAC >= 0.2,
-    workhorse: z => z.DEF >= 0.2 && z.PAC >= 0.2,
-    stays_on_feet: z => z.PAS >= 0.2,
-    vocal_organizer: (z, p, r) => z.DEF >= 0.25,
+const PLAYSTYLE_GATES = Object.freeze({
+    'Odin': (z, p, r) => r >= PLAYSTYLE_STRICT_BAND['Odin'],
+    'Apollo': (z, p, r) => r >= PLAYSTYLE_STRICT_BAND['Apollo'],
+    'Zeus': (z, p, r) => r >= PLAYSTYLE_STRICT_BAND['Zeus'],
+    'Hermes': (z, p, r) => r <= 0.45 && z.PAC >= 0.3,
+    'Achilles': z => z.SHO >= 0.4,
+    'Athena': z => z.PAS >= 0.4,
+    'Atlas': z => z.PHY >= 0.4,
+    'Boreas': z => z.PAC >= 0.6 && z.PAC > z.DRI,
+    'Ymir': z => z.PHY >= 0.4,
+    'Artemis': z => z.SHO >= 0.4,
+    'Loki': z => z.DRI >= 0.4,
+    'Prometheus': z => z.PHY <= -0.2 && z.DRI >= 0,
+    'Ares': z => z.DEF >= 0.3 && z.PHY >= 0.2,
+    'Fenrir': z => z.PHY >= 0.3,
+    'Thor': z => z.DEF >= 0.3,
+    'Talos': z => z.PHY >= 0.3 && z.PAC >= 0.2,
+    'Heracles': z => z.DEF >= 0.2 && z.PAC >= 0.2,
+    'Perseus': z => z.PAS >= 0.2,
+    'Heimdall': (z, p, r) => z.DEF >= 0.25,
 });
 
 // Every score weights one attribute against the others the same body could have
 // spent, so it reads the shape of a player rather than his level: `d` is how far an
 // attribute sits from this player's own average, and `b` — the rating band — is only
 // spent by the habits about standing in front of other men.
-const SPECIALITY_SCORES = Object.freeze({
-    captain: (d, b) => 0.85 * d.DEF + 0.70 * d.PAS + 0.55 * d.PHY + 0.95 * b,
-    vice_captain: (d, b) => 0.60 * d.DEF + 0.30 * d.PHY + 0.75 * b,
-    vocal_organizer: d => 0.90 * d.DEF - 0.50 * d.DRI + 0.15 * d.PHY,
-    big_game_player: (d, b) => 0.85 * d.SHO + 0.45 * d.DRI + 0.90 * b,
-    super_sub: (d, b) => 1.05 * d.PAC + 0.40 * d.DRI + 0.30 * d.SHO - 0.55 * b,
-    enforcer: d => 0.85 * d.DEF + 0.85 * d.PHY - 0.70 * d.DRI,
-    hot_head: d => 0.75 * d.PHY + 0.50 * d.PAC - 0.60 * d.PAS - 0.60 * d.DEF,
-    iron_man: d => 0.85 * d.PHY + 0.60 * d.PAC - 0.50 * d.DRI,
-    injury_prone: d => -0.85 * d.PHY - 0.50 * d.PAC + 0.70 * d.DRI,
-    workhorse: d => 0.55 * d.PAC + 0.50 * d.DEF + 0.40 * d.PHY - 0.40 * d.SHO,
-    speedster: d => 1.10 * d.PAC - 0.60 * d.PHY - 0.40 * d.DEF,
-    aerial_threat: d => 1.00 * d.PHY + 0.50 * d.SHO - 0.60 * d.DRI - 0.40 * d.PAS,
-    distance_shooter: d => 1.00 * d.SHO + 0.50 * d.PHY - 0.60 * d.DRI - 0.50 * d.PAS,
-    set_piece_specialist: d => 1.00 * d.PAS + 0.50 * d.SHO - 0.70 * d.PAC - 0.40 * d.PHY,
-    penalty_specialist: (d, b) => 0.90 * d.SHO + 0.60 * d.PAS - 0.70 * d.DRI - 0.40 * d.PAC + 0.20 * b,
-    long_throw_specialist: d => 1.00 * d.PHY - 0.60 * d.DRI - 0.40 * d.PAS,
-    trickster: d => 1.00 * d.DRI + 0.40 * d.PAS - 0.70 * d.PHY - 0.40 * d.DEF,
-    dives_into_tackles: d => 1.00 * d.DEF + 0.50 * d.PAC - 0.80 * d.PHY - 0.60 * d.PAS,
-    stays_on_feet: d => 0.90 * d.PAS + 0.50 * d.DEF - 0.70 * d.PAC - 0.40 * d.PHY
+const PLAYSTYLE_SCORES = Object.freeze({
+    'Odin': (d, b) => 0.85 * d.DEF + 0.70 * d.PAS + 0.55 * d.PHY + 0.95 * b,
+    'Apollo': (d, b) => 0.60 * d.DEF + 0.30 * d.PHY + 0.75 * b,
+    'Heimdall': d => 0.90 * d.DEF - 0.50 * d.DRI + 0.15 * d.PHY,
+    'Zeus': (d, b) => 0.85 * d.SHO + 0.45 * d.DRI + 0.90 * b,
+    'Hermes': (d, b) => 1.05 * d.PAC + 0.40 * d.DRI + 0.30 * d.SHO - 0.55 * b,
+    'Ares': d => 0.85 * d.DEF + 0.85 * d.PHY - 0.70 * d.DRI,
+    'Fenrir': d => 0.75 * d.PHY + 0.50 * d.PAC - 0.60 * d.PAS - 0.60 * d.DEF,
+    'Talos': d => 0.85 * d.PHY + 0.60 * d.PAC - 0.50 * d.DRI,
+    'Prometheus': d => -0.85 * d.PHY - 0.50 * d.PAC + 0.70 * d.DRI,
+    'Heracles': d => 0.55 * d.PAC + 0.50 * d.DEF + 0.40 * d.PHY - 0.40 * d.SHO,
+    'Boreas': d => 1.10 * d.PAC - 0.60 * d.PHY - 0.40 * d.DEF,
+    'Ymir': d => 1.00 * d.PHY + 0.50 * d.SHO - 0.60 * d.DRI - 0.40 * d.PAS,
+    'Artemis': d => 1.00 * d.SHO + 0.50 * d.PHY - 0.60 * d.DRI - 0.50 * d.PAS,
+    'Athena': d => 1.00 * d.PAS + 0.50 * d.SHO - 0.70 * d.PAC - 0.40 * d.PHY,
+    'Achilles': (d, b) => 0.90 * d.SHO + 0.60 * d.PAS - 0.70 * d.DRI - 0.40 * d.PAC + 0.20 * b,
+    'Atlas': d => 1.00 * d.PHY - 0.60 * d.DRI - 0.40 * d.PAS,
+    'Loki': d => 1.00 * d.DRI + 0.40 * d.PAS - 0.70 * d.PHY - 0.40 * d.DEF,
+    'Thor': d => 1.00 * d.DEF + 0.50 * d.PAC - 0.80 * d.PHY - 0.60 * d.PAS,
+    'Perseus': d => 0.90 * d.PAS + 0.50 * d.DEF - 0.70 * d.PAC - 0.40 * d.PHY
 });
 
 // The role a player is already asked to play nudges the habit on top of it, which
 // keeps the two panels of the scout strip telling one story.
-const SPECIALITY_PLAYSTYLE_PRIOR = Object.freeze({
-    pitch_sentry: { captain: 0.5, vocal_organizer: 0.5 },
-    citadel: { captain: 0.5, iron_man: 0.5 },
-    deep_architect: { captain: 0.5, set_piece_specialist: 0.6 },
-    wrecker: { dives_into_tackles: 0.7, enforcer: 0.6 },
-    central_defender: { iron_man: 0.6, stays_on_feet: 0.4 },
-    libero: { captain: 0.5, set_piece_specialist: 0.5, stays_on_feet: 0.4 },
-    wide_center_back: { long_throw_specialist: 0.5, aerial_threat: 0.5, speedster: 0.3 },
-    phantom_pivot: { workhorse: 0.6, speedster: 0.5 },
-    flank_railgun: { speedster: 0.7, set_piece_specialist: 0.5, long_throw_specialist: 0.5 },
-    wing_back: { speedster: 0.7, workhorse: 0.5 },
-    no_nonsense_fullback: { dives_into_tackles: 0.7, enforcer: 0.5, iron_man: 0.4 },
-    puppeteer: { set_piece_specialist: 0.8, trickster: 0.4 },
-    apex_engine: { workhorse: 0.6, distance_shooter: 0.5 },
-    reaper: { enforcer: 0.7, dives_into_tackles: 0.5 },
-    infiltrator: { speedster: 0.6, big_game_player: 0.4 },
-    codebreaker: { set_piece_specialist: 0.7, trickster: 0.5 },
-    mezzala: { distance_shooter: 0.5, trickster: 0.5, workhorse: 0.4 },
-    carrilero: { workhorse: 0.7, stays_on_feet: 0.4 },
-    anchor_man: { enforcer: 0.5, stays_on_feet: 0.5, iron_man: 0.4 },
-    half_back: { captain: 0.4, set_piece_specialist: 0.5, stays_on_feet: 0.5 },
-    trequartista: { trickster: 0.7, set_piece_specialist: 0.5, penalty_specialist: 0.3 },
-    cutback_assassin: { trickster: 0.6, distance_shooter: 0.4 },
-    touchline_demon: { speedster: 0.7, super_sub: 0.4 },
-    shadow_maestro: { set_piece_specialist: 0.6, trickster: 0.5 },
-    wide_target_man: { aerial_threat: 0.7, long_throw_specialist: 0.4 },
-    juggernaut: { aerial_threat: 0.7, big_game_player: 0.4 },
-    box_assassin: { aerial_threat: 0.5, penalty_specialist: 0.5 },
-    illusionist: { trickster: 0.8, stays_on_feet: 0.4 },
-    dimension_walker: { big_game_player: 0.5, aerial_threat: 0.4 },
-    apex_predator: { big_game_player: 0.6, penalty_specialist: 0.5 },
-    advanced_forward: { speedster: 0.6, big_game_player: 0.5 },
-    deep_lying_forward: { set_piece_specialist: 0.5, trickster: 0.5 },
-    pressing_forward: { workhorse: 0.7, hot_head: 0.3 },
-    shadow_striker: { big_game_player: 0.5, speedster: 0.4 },
-    wildcard: { workhorse: 0.4 }
+const PLAYSTYLE_ARCHETYPE_PRIOR = Object.freeze({
+    'Sweeper Keeper': { 'Odin': 0.5, 'Heimdall': 0.5 },
+    'Goalkeeper': { 'Odin': 0.5, 'Talos': 0.5 },
+    'Ball-Playing Defender': { 'Odin': 0.5, 'Athena': 0.6 },
+    'No-Nonsense Defender': { 'Thor': 0.7, 'Ares': 0.6 },
+    'Central Defender': { 'Talos': 0.6, 'Perseus': 0.4 },
+    'Libero': { 'Odin': 0.5, 'Athena': 0.5, 'Perseus': 0.4 },
+    'Wide Centre-Back': { 'Atlas': 0.5, 'Ymir': 0.5, 'Boreas': 0.3 },
+    'Inverted Wing-Back': { 'Heracles': 0.6, 'Boreas': 0.5 },
+    'Complete Wing-Back': { 'Boreas': 0.7, 'Athena': 0.5, 'Atlas': 0.5 },
+    'Wing-Back': { 'Boreas': 0.7, 'Heracles': 0.5 },
+    'No-Nonsense Full-Back': { 'Thor': 0.7, 'Ares': 0.5, 'Talos': 0.4 },
+    'Deep-Lying Playmaker': { 'Athena': 0.8, 'Loki': 0.4 },
+    'Box-to-Box Midfielder': { 'Heracles': 0.6, 'Artemis': 0.5 },
+    'Ball-Winning Midfielder': { 'Ares': 0.7, 'Thor': 0.5 },
+    'Roaming Playmaker': { 'Boreas': 0.6, 'Zeus': 0.4 },
+    'Advanced Playmaker': { 'Athena': 0.7, 'Loki': 0.5 },
+    'Mezzala': { 'Artemis': 0.5, 'Loki': 0.5, 'Heracles': 0.4 },
+    'Carrilero': { 'Heracles': 0.7, 'Perseus': 0.4 },
+    'Anchor Man': { 'Ares': 0.5, 'Perseus': 0.5, 'Talos': 0.4 },
+    'Half-Back': { 'Odin': 0.4, 'Athena': 0.5, 'Perseus': 0.5 },
+    'Trequartista': { 'Loki': 0.7, 'Athena': 0.5, 'Achilles': 0.3 },
+    'Inside Forward': { 'Loki': 0.6, 'Artemis': 0.4 },
+    'Classic Winger': { 'Boreas': 0.7, 'Hermes': 0.4 },
+    'Inverted Winger': { 'Athena': 0.6, 'Loki': 0.5 },
+    'Wide Target Man': { 'Ymir': 0.7, 'Atlas': 0.4 },
+    'Target Forward': { 'Ymir': 0.7, 'Zeus': 0.4 },
+    'Poacher': { 'Ymir': 0.5, 'Achilles': 0.5 },
+    'False 9': { 'Loki': 0.8, 'Perseus': 0.4 },
+    'Raumdeuter': { 'Zeus': 0.5, 'Ymir': 0.4 },
+    'Complete Forward': { 'Zeus': 0.6, 'Achilles': 0.5 },
+    'Advanced Forward': { 'Boreas': 0.6, 'Zeus': 0.5 },
+    'Deep-Lying Forward': { 'Athena': 0.5, 'Loki': 0.5 },
+    'Pressing Forward': { 'Heracles': 0.7, 'Fenrir': 0.3 },
+    'Shadow Striker': { 'Zeus': 0.5, 'Boreas': 0.4 },
+    'Wildcard': { 'Heracles': 0.4 }
 });
 
 // Mean and spread of every attribute inside each position list.
-function specialityPeerBuckets(list) {
+function playstylePeerBuckets(list) {
     const keys = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
     const byPos = new Map();
     list.forEach(p => {
@@ -1607,7 +1697,7 @@ function specialityPeerBuckets(list) {
     return buckets;
 }
 
-function specialityZScores(player, buckets) {
+function playstyleZScores(player, buckets) {
     const bucket = buckets && buckets.get(player.mainPos);
     const z = { PAC: 0, SHO: 0, PAS: 0, DRI: 0, DEF: 0, PHY: 0 };
     if (bucket) {
@@ -1619,56 +1709,56 @@ function specialityZScores(player, buckets) {
 }
 
 // 0 at 85, 1 at the top of the ladder — the band the leadership habits look at.
-function specialityRatingBand(player) {
+function playstyleRatingBand(player) {
     const rating = (player && player.rating) || 85;
     return Math.max(0, Math.min(1, (rating - 85) / 22));
 }
 
-function specialityScoreFor(player, key, buckets) {
-    const z = specialityZScores(player, buckets);
+function playstyleScoreFor(player, key, buckets) {
+    const z = playstyleZScores(player, buckets);
     const keys = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
     const own = keys.reduce((sum, k) => sum + z[k], 0) / keys.length;
     const d = {};
     keys.forEach(k => { d[k] = z[k] - own; });
-    const prior = (SPECIALITY_PLAYSTYLE_PRIOR[player.playstyle] || {})[key] || 0;
-    return SPECIALITY_SCORES[key](d, specialityRatingBand(player)) + prior;
+    const prior = (PLAYSTYLE_ARCHETYPE_PRIOR[player.archetype] || {})[key] || 0;
+    return PLAYSTYLE_SCORES[key](d, playstyleRatingBand(player)) + prior;
 }
 
 // The armband and the big-game nerve are about who a player is among other men, so
 // they are never granted to someone whose season simply did not qualify. When no
 // habit clears its gate the rest are read off his shape, but these three stay behind
 // the rating band.
-const SPECIALITY_STRICT = Object.freeze(['captain', 'vice_captain', 'big_game_player']);
+const PLAYSTYLE_STRICT = Object.freeze(['Odin', 'Apollo', 'Zeus']);
 
 // The whole pool is scored in one pass, because "the quickest keeper" is only
 // meaningful against the other keepers.
-function bestSpecialityFor(player, buckets) {
-    const z = specialityZScores(player, buckets);
-    const band = specialityRatingBand(player);
-    const byPos = Object.keys(SPECIALITIES).filter(key => SPECIALITIES[key].positions.includes(player.mainPos));
+function bestPlaystyleFor(player, buckets) {
+    const z = playstyleZScores(player, buckets);
+    const band = playstyleRatingBand(player);
+    const byPos = Object.keys(PLAYSTYLES).filter(key => PLAYSTYLES[key].positions.includes(player.mainPos));
     if (!byPos.length) return null;
-    const clears = key => !SPECIALITY_GATES[key] || SPECIALITY_GATES[key](z, player, band);
+    const clears = key => !PLAYSTYLE_GATES[key] || PLAYSTYLE_GATES[key](z, player, band);
     const possible = byPos.filter(clears);
     // A player who passes none of the gates is still tagged by shape rather than
     // drawn from a hat, so the panel never turns into noise.
     const candidates = possible.length ? possible
-        : byPos.filter(key => !SPECIALITY_STRICT.includes(key) || clears(key));
+        : byPos.filter(key => !PLAYSTYLE_STRICT.includes(key) || clears(key));
     let best = null, bestScore = -Infinity;
     candidates.forEach(key => {
         // A sliver of name noise keeps two identical profiles at the same rank
         // from both landing on the same habit.
-        const score = specialityScoreFor(player, key, buckets) + (specialityHash(player.name + key) % 1000) / 1000 * 0.08;
+        const score = playstyleScoreFor(player, key, buckets) + (playstyleHash(player.name + key) % 1000) / 1000 * 0.08;
         if (score > bestScore) { bestScore = score; best = key; }
     });
     return best;
 }
 
-function assignSpecialities(list) {
+function assignPlaystyles(list) {
     if (!Array.isArray(list) || !list.length) return list;
-    const buckets = specialityPeerBuckets(list);
+    const buckets = playstylePeerBuckets(list);
     list.forEach(player => {
-        if (!player || player.speciality) return;
-        player.speciality = bestSpecialityFor(player, buckets);
+        if (!player || player.playstyle) return;
+        player.playstyle = bestPlaystyleFor(player, buckets);
     });
     return list;
 }

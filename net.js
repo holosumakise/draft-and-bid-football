@@ -669,7 +669,7 @@ function serializeDraft(d) {
         state: d.state,
         nonce: d.nonce || null,
         player: d.player ? serializePlayer(d.player) : null,
-        result: d.result ? { winnerName: d.result.winnerName } : null
+        result: d.result ? { winnerName: d.result.winnerName, price: d.result.price ?? null } : null
     };
 }
 

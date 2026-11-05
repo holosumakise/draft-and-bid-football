@@ -331,64 +331,54 @@ const Investment = (() => {
                 <div class="inv-effects">${effects}</div>
                 ${nextEffects}
                 <div style="margin-top:11px">${action}</div>
-            </div>
-            <p class="inv-help">Medical is bought once per club and lasts for the rest of the season. It does not stack with another club's programme.</p>`;
+            </div>`;
     }
 
     function stadiumHTML(m, inv) {
-        const tier = Math.max(0, Math.round(Number(inv.stadium) || Number(inv.scouting) || 0));
         const max = TRACK_MAX.stadium;
+        const tier = Math.max(0, Math.min(max, Math.round(Number(inv.stadium) || Number(inv.scouting) || 0)));
         const costs = INVESTMENT.STADIUM_COSTS || INVESTMENT.SCOUTING_COSTS;
-        const nextCost = tier >= max ? 0 : costs[tier];
-        const afford = tier < max && m.balance >= nextCost;
-        const action = tier >= max
-            ? '<span class="inv-done">Top level</span>'
-            : `<button type="button" class="inv-btn ${afford ? 'go' : ''}" data-act="stadium" ${afford ? '' : 'disabled'}>${afford ? `Upgrade · ${money(nextCost)}` : `Need ${money(nextCost)}`}</button>`;
+        const nextCost = tier < max ? costs[tier] : null;
+        const afford = nextCost != null && m.balance >= nextCost;
+        const levelName = ['Municipal ground', 'Modern stands', 'Cathedral of football'][tier];
+        const pips = Array.from({ length: max }, (_, index) => `<i class="${index < tier ? 'on' : ''}"></i>`).join('');
 
-        const ticketMult = (INVESTMENT.STADIUM_TICKET_MULT && INVESTMENT.STADIUM_TICKET_MULT[tier]) || 1;
-        const fanMult = (INVESTMENT.STADIUM_FAN_GAIN_MULT && INVESTMENT.STADIUM_FAN_GAIN_MULT[tier]) || 1;
-        const ticketPct = Math.round((ticketMult - 1) * 100);
-        const fanPct = Math.round((fanMult - 1) * 100);
-        const levelName = tier === 0 ? 'Municipal ground' : tier === 1 ? 'Modern stands' : 'Cathedral of football';
-        const pips = Array.from({ length: max }, (_, index) =>
-            `<i class="${index < tier ? 'on' : ''}"></i>`).join('');
+        const gatePct = Math.round(((INVESTMENT.STADIUM_TICKET_MULT[tier] || 1) - 1) * 100);
+        const growthPct = Math.round(((INVESTMENT.STADIUM_FAN_GAIN_MULT[tier] || 1) - 1) * 100);
+        const nextGatePct = nextCost == null ? 0 : Math.round(((INVESTMENT.STADIUM_TICKET_MULT[tier + 1] || 1) - 1) * 100);
+        const nextGrowthPct = nextCost == null ? 0 : Math.round(((INVESTMENT.STADIUM_FAN_GAIN_MULT[tier + 1] || 1) - 1) * 100);
 
         const fans = typeof fansOf === 'function' ? fansOf(m) : (m.fans || 0);
         const baseGate = typeof ticketRevenueFor === 'function' ? ticketRevenueFor(fans) : 0;
-        const nextGate = Math.round(baseGate * ticketMult * 10) / 10;
+        const gate = money(Math.round(baseGate * (INVESTMENT.STADIUM_TICKET_MULT[tier] || 1) * 10) / 10);
         const fansLabel = typeof formatFanCount === 'function' ? formatFanCount(fans) : String(fans);
 
-        const nextTicketMult = tier < max ? (INVESTMENT.STADIUM_TICKET_MULT[tier + 1] || ticketMult) : ticketMult;
-        const nextFanMult = tier < max ? (INVESTMENT.STADIUM_FAN_GAIN_MULT[tier + 1] || fanMult) : fanMult;
+        const effects = tier === 0
+            ? `<span class="inv-effect off">Municipal ground · ${gate} per match</span>`
+            : `<span class="inv-effect">+${gatePct}% gate receipts</span>
+               <span class="inv-effect">+${growthPct}% fan growth</span>
+               <span class="inv-effect">${gate} per match</span>`;
+        const nextEffects = nextCost == null ? '' : `
+            <div class="inv-effects">
+                <span class="inv-effect next">Next: +${nextGatePct}% gate</span>
+                <span class="inv-effect next">+${nextGrowthPct}% fan growth</span>
+            </div>`;
+        const action = nextCost == null
+            ? '<span class="inv-done">Top level active</span>'
+            : `<button type="button" class="inv-btn ${afford ? 'go' : ''}" data-act="stadium" ${afford ? '' : 'disabled'}>${afford ? `Upgrade · ${money(nextCost)}` : `Need ${money(nextCost)}`}</button>`;
 
-        return `
-            <div class="inv-track">
-                <div class="inv-track__top">
+        return `<div class="inv-card">
+                <div class="inv-card__top">
                     <div>
-                        <h3>Stadium · Level ${tier}/${max}</h3>
-                        <p class="inv-help" style="margin:4px 0 0">${esc(levelName)}. Better facilities raise gate receipts every match and accelerate fan growth after wins.</p>
+                        <h4>Stadium · Level ${tier}/${max}</h4>
+                        <p>${esc(levelName)} · ${esc(fansLabel)} fans. Better facilities raise gate receipts every match and accelerate fan growth after wins.</p>
                     </div>
-                    <div style="text-align:right">
-                        <div class="inv-pips" title="Stadium level ${tier}/${max}">${pips}</div>
-                        <div style="margin-top:8px">${action}</div>
-                    </div>
+                    <span class="inv-card__cost">${nextCost != null ? money(nextCost) : 'Top level'}</span>
                 </div>
-                <div class="inv-report" style="margin-top:12px">
-                    <div class="inv-report__head"><h4>Current effect</h4><span>${tier >= max ? 'Top level' : 'Active'}</span></div>
-                    <div class="inv-row" style="grid-template-columns:1fr auto">
-                        <span class="inv-row__main"><b>Ticket revenue</b><small>Current fanbase ${esc(fansLabel)} · base gate €${baseGate}M</small></span>
-                        <span class="inv-done" style="color:#34d399">+${ticketPct}% · €${nextGate}M / match</span>
-                    </div>
-                    <div class="inv-row" style="grid-template-columns:1fr auto">
-                        <span class="inv-row__main"><b>Fan growth</b><small>Applied on wins and positive results only</small></span>
-                        <span class="inv-done" style="color:#34d399">+${fanPct}% rate</span>
-                    </div>
-                    ${tier < max ? `
-                    <div class="inv-row" style="grid-template-columns:1fr auto;opacity:.85">
-                        <span class="inv-row__main"><b>Next upgrade</b><small>Tickets +${Math.round((nextTicketMult - 1) * 100)}% · Fan growth +${Math.round((nextFanMult - 1) * 100)}%</small></span>
-                        <span class="inv-done">${money(nextCost)}</span>
-                    </div>` : ''}
-                </div>
+                <div class="inv-pips" style="margin-top:9px">${pips}</div>
+                <div class="inv-effects">${effects}</div>
+                ${nextEffects}
+                <div style="margin-top:11px">${action}</div>
             </div>`;
     }
 
@@ -438,7 +428,7 @@ const Investment = (() => {
                 : INVESTMENT.TRAINING_COSTS[level];
             if ((Number(m.balance) || 0) < cost) return { ok: false, error: `Not enough money — ${money(cost)} needed.` };
 
-            m.balance -= cost;
+            m.balance = roundMoney(m.balance - cost);
             player.trainingLevel = level + 1;
             player.stats = player.stats || {};
             STAT_KEYS.forEach(key => {
@@ -463,7 +453,7 @@ const Investment = (() => {
             if (inv.medical >= TRACK_MAX.medical) return { ok: false, error: 'The medical programme is already at its top level.' };
             const cost = INVESTMENT.MEDICAL_COSTS[inv.medical];
             if ((Number(m.balance) || 0) < cost) return { ok: false, error: `Not enough money — ${money(cost)} needed.` };
-            m.balance -= cost;
+            m.balance = roundMoney(m.balance - cost);
             inv.medical += 1;
             return { ok: true, message: `Medical programme upgraded to level ${inv.medical}.` };
         }
@@ -476,7 +466,7 @@ const Investment = (() => {
             const costs = INVESTMENT.STADIUM_COSTS || INVESTMENT.SCOUTING_COSTS;
             const cost = costs[tier];
             if ((Number(m.balance) || 0) < cost) return { ok: false, error: `Not enough money — ${money(cost)} needed.` };
-            m.balance -= cost;
+            m.balance = roundMoney(m.balance - cost);
             inv.stadium = tier + 1;
             inv.scouting = inv.stadium;
             const label = inv.stadium === 1 ? 'Modern stands' : 'Cathedral of football';

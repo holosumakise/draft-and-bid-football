@@ -1,4 +1,16 @@
 // --- Core Helpers ---
+// The Tailwind runtime in the head watches the whole document, so any mutation —
+// including one that writes back exactly what was already there — re-scans the
+// page and invalidates style for every element on it. Renders that run on a timer
+// or on every room update go through these so unchanged output stays unwritten.
+function setText(el, value) { if (el && el.textContent !== value) el.textContent = value; }
+function setClass(el, value) { if (el && el.className !== value) el.className = value; }
+function setHTML(el, value) {
+    if (!el || el.__markup === value) return;
+    el.innerHTML = value;
+    el.__markup = value;
+}
+
 function showScreen(screenId) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(screenId).classList.add('active');
@@ -20,56 +32,9 @@ function showToast(msg, ms = 3500) {
     toastTimer = setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); }, ms);
 }
 
-// A backgrounded tab never paints, so rAF callbacks are never reached. An online
-// host normally sits in a background tab while it waits for a guest's bid, and
-// the fly-over is the only thing that re-enables the Roll button — hence the timer.
-function runWhenPainted(fn) {
-    let done = false;
-    const run = () => { if (done) return; done = true; fn(); };
-    requestAnimationFrame(run);
-    setTimeout(run, 300);
-}
-
-/** Animate a drafted player from the draft panel into the winning manager's squad card. */
-function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mobile-proof scroll lock: pin body with position:fixed (works on iOS where overflow:hidden fails)
-    let scrollLocked = false;
-    let lockedScrollY = 0;
-    const blockTouch = (e) => { e.preventDefault(); };
-
-    const lockScroll = () => {
-        if (scrollLocked) return;
-        scrollLocked = true;
-        lockedScrollY = window.scrollY || window.pageYOffset || 0;
-        document.body.style.position = 'fixed';
-        document.body.style.top = `-${lockedScrollY}px`;
-        document.body.style.left = '0';
-        document.body.style.right = '0';
-        document.body.style.width = '100%';
-        document.body.style.overflow = 'hidden';
-        document.documentElement.style.overflow = 'hidden';
-        document.body.style.touchAction = 'none';
-        document.addEventListener('touchmove', blockTouch, { passive: false, capture: true });
-        window.addEventListener('touchmove', blockTouch, { passive: false, capture: true });
-    };
-
-    const unlockScroll = () => {
-        if (!scrollLocked) return;
-        scrollLocked = false;
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.left = '';
-        document.body.style.right = '';
-        document.body.style.width = '';
-        document.body.style.overflow = '';
-        document.documentElement.style.overflow = '';
-        document.body.style.touchAction = '';
-        document.removeEventListener('touchmove', blockTouch, { capture: true });
-        window.removeEventListener('touchmove', blockTouch, { capture: true });
-        window.scrollTo(0, lockedScrollY);
-    };
-
+/** Stamp the sold card and light up the winning manager's squad panel. */
+function playDraftAcquisitionAnimation(player, winnerId, onComplete) {
     const finish = () => {
-        unlockScroll();
         gameState.draftAnimating = false;
         updateRollButton();
         if (typeof onComplete === 'function') onComplete();
@@ -84,8 +49,9 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
     const stampHost = panel.querySelector('.draft-reveal__card .pcard')
         || panel.querySelector('.draft-reveal__card')
         || panel;
+    const card = panel.querySelector('.draft-reveal__card') || panel;
 
-    if (gameState.draftAnimating || document.getElementById('draft-fly-overlay') || document.querySelector('.draft-sold-stamp')) {
+    if (gameState.draftAnimating || document.querySelector('.draft-sold-stamp')) {
         if (typeof onComplete === 'function') onComplete();
         return;
     }
@@ -93,220 +59,35 @@ function playDraftAcquisitionAnimation(player, winnerId, onComplete) {    // Mob
     gameState.draftAnimating = true;
     updateRollButton();
 
-    // Instant scroll into view, then lock (so measurements can't drift)
-    try { target.scrollIntoView({ behavior: 'instant', block: 'nearest' }); } catch (_) {
-        try { target.scrollIntoView({ block: 'nearest' }); } catch (__) {}
-    }
-    lockScroll();
+    // Stamp as an absolute child of the card so it stays on the portrait
+    const prevPos = stampHost.style.position;
+    if (!prevPos || prevPos === 'static') stampHost.style.position = 'relative';
+    const stamp = document.createElement('div');
+    stamp.className = 'draft-sold-stamp draft-sold-stamp-inpanel';
+    stamp.textContent = 'SOLD';
+    stamp.style.left = '50%';
+    stamp.style.top = '50%';
+    stampHost.appendChild(stamp);
+    void stamp.offsetWidth;
+    stamp.classList.add('stamped');
 
-    runWhenPainted(() => {
-        const src = panel.getBoundingClientRect();
-        const dst = target.getBoundingClientRect();
-        if (src.width < 4 || dst.width < 4) return finish();
+    card.classList.add('draft-card-sold-react');
 
-        const x0 = src.left + src.width / 2;
-        const y0 = src.bottom - 6;
-        const x1 = dst.left + dst.width / 2;
-        const y1 = dst.top + Math.min(40, dst.height * 0.3);
+    const cleanup = () => {
+        if (stamp.parentNode) stamp.remove();
+        card.classList.remove('draft-card-sold-react');
+        if (prevPos !== undefined) stampHost.style.position = prevPos;
+        target.classList.remove('draft-target-receive');
+        finish();
+    };
 
-        const drop = Math.max(36, Math.min(90, (y1 - y0) * 0.5));
-        const cornerY = y0 + drop;
-        const dx = x1 - x0;
-        const useL = Math.abs(dx) > 36;
-
-        let pathD;
-        if (useL) {
-            // Smooth L using cubics only (arcs break dash-length animation in some browsers)
-            const midY = cornerY;
-            pathD = [
-                `M ${x0} ${y0}`,
-                `C ${x0} ${y0 + (midY - y0) * 0.55}, ${x0} ${midY}, ${x0 + (x1 - x0) * 0.15} ${midY}`,
-                `C ${x0 + (x1 - x0) * 0.55} ${midY}, ${x1} ${midY}, ${x1} ${midY + (y1 - midY) * 0.35}`,
-                `L ${x1} ${y1}`
-            ].join(' ');
-        } else {
-            pathD = `M ${x0} ${y0} C ${x0} ${(y0 + y1) / 2}, ${x1} ${(y0 + y1) / 2}, ${x1} ${y1}`;
-        }
-
-        // Stamp as an absolute child of the card so it stays on the portrait
-        const prevPos = stampHost.style.position;
-        if (!prevPos || prevPos === 'static') stampHost.style.position = 'relative';
-        const stamp = document.createElement('div');
-        stamp.className = 'draft-sold-stamp draft-sold-stamp-inpanel';
-        stamp.textContent = 'SOLD';
-        stamp.style.left = '50%';
-        stamp.style.top = '50%';
-        stampHost.appendChild(stamp);
-        void stamp.offsetWidth;
-        stamp.classList.add('stamped');
-
-        panel.classList.add('draft-panel-sold-react');
-
-        const overlay = document.createElement('div');
-        overlay.id = 'draft-fly-overlay';
-
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        const svgNS = 'http://www.w3.org/2000/svg';
-        const svg = document.createElementNS(svgNS, 'svg');
-        // Explicit pixel size + viewBox so path coords (viewport px) map 1:1 on every path shape
-        svg.setAttribute('width', String(vw));
-        svg.setAttribute('height', String(vh));
-        svg.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
-        svg.style.cssText = 'position:absolute;left:0;top:0;overflow:visible;pointer-events:none;';
-
-        // Hidden full path — only used for length / point sampling
-        const guide = document.createElementNS(svgNS, 'path');
-        guide.setAttribute('d', pathD);
-        guide.setAttribute('fill', 'none');
-        guide.setAttribute('stroke', 'none');
-        svg.appendChild(guide);
-
-        // Visible trail that grows by rewriting `d` each frame (reliable on turns)
-        const trail = document.createElementNS(svgNS, 'path');
-        trail.setAttribute('fill', 'none');
-        trail.setAttribute('stroke', '#34d399');
-        trail.setAttribute('stroke-width', '3');
-        trail.setAttribute('stroke-linecap', 'round');
-        trail.setAttribute('stroke-linejoin', 'round');
-        trail.setAttribute('class', 'draft-fly-arrow-line');
-        trail.style.opacity = '1';
-        trail.style.filter = 'drop-shadow(0 0 6px rgba(52, 211, 153, 0.55))';
-        svg.appendChild(trail);
-
-        const head = document.createElementNS(svgNS, 'polygon');
-        head.setAttribute('class', 'draft-fly-arrow-head');
-        head.style.opacity = '0';
-        head.style.fill = '#34d399';
-        head.style.filter = 'drop-shadow(0 0 6px rgba(52, 211, 153, 0.55))';
-        svg.appendChild(head);
-        overlay.appendChild(svg);
-
-        const circle = document.createElement('div');
-        circle.className = 'draft-fly-circle';
-        circle.style.left = `${x0}px`;
-        circle.style.top = `${y0}px`;
-        overlay.appendChild(circle);
-        document.body.appendChild(overlay);
-
-        let pathLen = 0;
-        try { pathLen = guide.getTotalLength() || 0; } catch (_) { pathLen = 0; }
-        if (pathLen < 8) {
-            // Fallback length estimate
-            pathLen = Math.hypot(x1 - x0, y1 - y0) + Math.abs(dx) * 0.3 + 40;
-        }
-
-        const cleanup = () => {
-            if (stamp.parentNode) stamp.remove();
-            if (overlay.parentNode) overlay.remove();
-            panel.classList.remove('draft-panel-sold-react');
-            if (prevPos !== undefined) stampHost.style.position = prevPos;
-            target.classList.remove('draft-target-receive');
-            finish();
-        };
-
-        const pointAt = (t) => {
-            try {
-                const pt = guide.getPointAtLength(pathLen * t);
-                return { x: pt.x, y: pt.y };
-            } catch (_) {
-                return { x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t };
-            }
-        };
-
-        // Build visible trail up to progress e (0..1) by sampling the guide path
-        const buildTrail = (e) => {
-            const n = Math.max(2, Math.ceil(e * 48));
-            let d = '';
-            for (let i = 0; i <= n; i++) {
-                const p = pointAt(e * (i / n));
-                d += (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
-            }
-            trail.setAttribute('d', d);
-        };
-
-        setTimeout(() => {
-            circle.style.transition = 'opacity 0.2s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
-            circle.style.opacity = '1';
-            circle.style.transform = 'translate(-50%, -50%) scale(1)';
-        }, 220);
-
-        setTimeout(() => {
-            const duration = 1300;
-            const t0 = performance.now();
-            let landed = false;
-
-            function ease(t) {
-                return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-            }
-
-            // The stamp holds while the arrow lands, then the whole overlay clears.
-            const arrive = () => {
-                if (landed) return;
-                landed = true;
-                buildTrail(1);
-                head.style.opacity = '1';
-                target.classList.add('draft-target-receive');
-                circle.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
-                circle.style.opacity = '0';
-                circle.style.transform = 'translate(-50%, -50%) scale(0.35)';
-                trail.style.transition = 'opacity 0.85s ease';
-                head.style.transition = 'opacity 0.85s ease';
-                trail.style.opacity = '0';
-                head.style.opacity = '0';
-                setTimeout(() => {
-                    stamp.style.transition = 'opacity 0.4s ease';
-                    stamp.style.opacity = '0';
-                }, 500);
-                setTimeout(cleanup, 1100);
-            };
-
-            function frame(now) {
-                if (landed) return;
-                const t = Math.min(1, (now - t0) / duration);
-                const e = ease(t);
-                const p = pointAt(e);
-
-                buildTrail(e);
-
-                // Point arrowhead along the last segment of the path
-                if (e > 0.05) {
-                    const prev = pointAt(Math.max(0, e - 0.04));
-                    const ang = Math.atan2(p.y - prev.y, p.x - prev.x);
-                    const hl = 12;
-                    head.setAttribute('points', [
-                        `${p.x},${p.y}`,
-                        `${p.x - hl * Math.cos(ang - 0.4)},${p.y - hl * Math.sin(ang - 0.4)}`,
-                        `${p.x - hl * Math.cos(ang + 0.4)},${p.y - hl * Math.sin(ang + 0.4)}`
-                    ].join(' '));
-                    head.style.opacity = e > 0.75 ? String(Math.min(1, (e - 0.75) / 0.25)) : '0';
-                }
-
-                circle.style.left = `${p.x}px`;
-                circle.style.top = `${p.y}px`;
-                const s = 1 + Math.sin(e * Math.PI) * 0.1;
-                circle.style.transform = `translate(-50%, -50%) scale(${s})`;
-
-                if (t < 1) {
-                    requestAnimationFrame(frame);
-                } else {
-                    arrive();
-                }
-            }
-            requestAnimationFrame(frame);
-            // A backgrounded tab never reaches an animation frame, and an online host
-            // spends most of the auction in a background tab while a guest bids. The
-            // fly-over is what re-enables Roll, so land it from a timer instead.
-            setTimeout(() => {
-                if (landed) return;
-                const p = pointAt(1);
-                circle.style.transition = 'none';
-                circle.style.left = `${p.x}px`;
-                circle.style.top = `${p.y}px`;
-                arrive();
-            }, duration + 900);
-        }, 320);
-    });
+    // The buyer's panel glows as the signature finishes, then the stamp fades out.
+    setTimeout(() => target.classList.add('draft-target-receive'), 1900);
+    setTimeout(() => {
+        stamp.style.transition = 'opacity 0.4s ease';
+        stamp.style.opacity = '0';
+    }, 2450);
+    setTimeout(cleanup, 2950);
 }
 
 
@@ -324,9 +105,10 @@ function playDraftDiscardAnimation(onComplete) {
     const stampHost = panel.querySelector('.draft-reveal__card .pcard')
         || panel.querySelector('.draft-reveal__card')
         || panel;
+    const card = panel.querySelector('.draft-reveal__card') || panel;
 
     // Avoid stacking on top of an in-flight SOLD animation
-    if (document.querySelector('.draft-sold-stamp') || document.getElementById('draft-fly-overlay')) {
+    if (document.querySelector('.draft-sold-stamp')) {
         return finish();
     }
 
@@ -345,7 +127,7 @@ function playDraftDiscardAnimation(onComplete) {
     void stamp.offsetWidth;
     stamp.classList.add('stamped');
 
-    panel.classList.add('draft-panel-sold-react');
+    card.classList.add('draft-card-sold-react');
 
     // Hold the stamp long enough to read, then fade and clean up
     setTimeout(() => {
@@ -353,7 +135,7 @@ function playDraftDiscardAnimation(onComplete) {
         stamp.style.opacity = '0';
         setTimeout(() => {
             if (stamp.parentNode) stamp.remove();
-            panel.classList.remove('draft-panel-sold-react');
+            card.classList.remove('draft-card-sold-react');
             if (prevPos !== undefined) stampHost.style.position = prevPos;
             gameState.draftAnimating = false;
             updateRollButton();
@@ -364,7 +146,10 @@ function playDraftDiscardAnimation(onComplete) {
 
 
 
-function formatBalance(amount) { return amount >= 1000 ? `€${(amount / 1000).toFixed(2)}B` : `€${amount}M`; }
+function formatBalance(amount) {
+    const value = roundMoney(amount);
+    return value >= 1000 ? `€${(value / 1000).toFixed(2)}B` : `€${value}M`;
+}
 function escapeHTML(str) { return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function shortName(name) {
@@ -512,19 +297,19 @@ function updateDashboard(id) {
 
     // Money now buys squad investment, so a solo manager still needs to see it.
     if (balWrap) balWrap.classList.remove('hidden');
-    if (balEl) balEl.innerText = formatBalance(m.balance);
+    if (balEl) setText(balEl, formatBalance(m.balance));
 
     updateConnectionBadge(id);
 
-    document.getElementById(`m${id}-count`).innerText = m.squad.length;
+    setText(document.getElementById(`m${id}-count`), String(m.squad.length));
     const list = document.getElementById(`m${id}-squad`);
     if (!list) return;
-    list.innerHTML = m.squad.length === 0
+    setHTML(list, m.squad.length === 0
         ? '<li class="squad-empty">No players yet.</li>'
         : m.squad.map(p => renderSquadRow(p, {
             managerId: m.id,
             price: isSolo ? null : p.price
-        })).join('');
+        })).join(''));
 
     updateBudgetTracker(id);
     updateChemistryDisplay(id);
@@ -593,34 +378,47 @@ function showMatchdayReportPanels(reports, meta = {}) {
     layer.classList.remove('hidden');
 }
 
-function hideMatchReportPanels() {
+function hideMatchReportLayer() {
     const layer = document.getElementById('match-report-layer');
     if (layer) {
         layer.classList.add('hidden');
         layer.innerHTML = '';
     }
+}
+
+function hideMatchReportPanels() {
+    hideMatchReportLayer();
     hideSeasonEventPanel();
 }
 
-// League replay: when a matchday brings an injury or a ban, the replay stops and the
-// updates for every club sit under the chart until the manager presses Continue.
+// A matchday counts as carrying events when it leaves something behind that the
+// manager has to read: a ban, an injury or a booking.
+function matchReportHasEvents(reports) {
+    return (reports || []).filter(Boolean).some(report =>
+        (report.injuries || []).length || (report.suspensions || []).length || Number(report.yellows) > 0);
+}
+
+// League replay: the updates for every club sit under the chart on every matchday.
+// Only a matchday carrying events stops the replay and waits for Continue.
 // Returns false (and shows nothing) when there is nowhere to show the panel, so the
 // caller can carry on instead of waiting for a button that does not exist.
 function showSeasonEventPanel(reports, matchday, onContinue) {
     const panel = document.getElementById('season-event-panel');
     const list = (reports || []).filter(Boolean);
     if (!panel || !list.length) return false;
+    const blocking = typeof onContinue === 'function';
     panel.innerHTML = `
         <div class="season-event__head">Matchday ${matchday} · Updates</div>
         <div class="season-event__cards">${matchReportCardsHTML(list)}</div>
-        <div class="season-event__foot"><button type="button" id="season-event-continue" class="season-event__btn">Continue</button></div>`;
+        ${blocking ? '<div class="season-event__foot"><button type="button" id="season-event-continue" class="season-event__btn">Continue</button></div>' : ''}`;
     panel.classList.remove('hidden');
+    if (!blocking) return false;
     const button = document.getElementById('season-event-continue');
     button.onclick = () => {
         if (button.disabled) return;
         button.disabled = true;
         hideSeasonEventPanel();
-        if (typeof onContinue === 'function') onContinue();
+        onContinue();
     };
     try { panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); button.focus({ preventScroll: true }); } catch (err) { /* cosmetic */ }
     return true;
@@ -654,8 +452,8 @@ function updateBudgetTracker(id) {
     const reserveEl = document.getElementById(`m${id}-reserve`);
     const spendBar = document.getElementById(`m${id}-budget-bar`);
     const reserveBar = document.getElementById(`m${id}-reserve-bar`);
-    if (maxEl) maxEl.innerText = `€${maxBid}M`;
-    if (reserveEl) reserveEl.innerText = `€${reserve}M`;
+    if (maxEl) setText(maxEl, `€${maxBid}M`);
+    if (reserveEl) setText(reserveEl, `€${reserve}M`);
     if (spendBar) spendBar.style.width = `${spendPct}%`;
     if (reserveBar) reserveBar.style.width = `${reservePct}%`;
 }
@@ -667,7 +465,7 @@ function updateChemistryDisplay(id) {
 
     const chem = getFormationChemistry(m);
     if (!chem.players.length) {
-        el.innerHTML = '<b>Chemistry</b> · place players to build links.';
+        setHTML(el, '<b>Chemistry</b> · place players to build links.');
         return;
     }
 
@@ -676,7 +474,7 @@ function updateChemistryDisplay(id) {
         ? groups.map(group => `<span class="chem-group chem-group--${group.kind}">${escapeHTML(group.label)} ${group.count}×</span> <em>+${group.bonus}</em>`).join(' · ')
         : '<span>No links in the XI.</span>';
 
-    el.innerHTML = `<b>Chemistry</b> · ${detail}`;
+    setHTML(el, `<b>Chemistry</b> · ${detail}`);
 }
 
 function updateTeamOVR(id) {
@@ -684,7 +482,7 @@ function updateTeamOVR(id) {
     if (!m) return;
     const { total, count } = sumFormationOVR(m);
     const ovr = count === 0 ? 0 : Math.round(total / count);
-    document.getElementById(`m${id}-ovr-live`).innerText = String(ovr);
+    setText(document.getElementById(`m${id}-ovr-live`), String(ovr));
 }
 
 // --- Core Rules & OVR ---

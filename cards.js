@@ -203,9 +203,37 @@ function playerInitials(name) {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+// Appearance comes from the curated playerLooks row in players.js:
+// [skin index, hair index, most-worn career number]. A player with no row — anyone
+// outside the draft pool — keeps the old neutral light tone and a hashed hair colour
+// rather than being assigned a fact the table never made.
+const SKIN_TONES = [
+    { base:'#f3d6bc', shade:'#e7c3a5', deep:'#d8ae8c', line:'#c69a76' },
+    { base:'#ecc7a4', shade:'#ddaf8a', deep:'#cb9a72', line:'#b78760' },
+    { base:'#daa27d', shade:'#ce9671', deep:'#be825e', line:'#b77c59' },
+    { base:'#c08a5c', shade:'#b07b4f', deep:'#9c6a42', line:'#8a5c39' },
+    { base:'#9a6a44', shade:'#8a5e3c', deep:'#785034', line:'#66422a' },
+    { base:'#6f4a2e', shade:'#614028', deep:'#533622', line:'#452c1c' },
+    { base:'#4a3020', shade:'#3f281b', deep:'#352218', line:'#2a1a12' }
+];
+// Index 0 is a shaved head, so no hair shape is drawn at all.
+const HAIR_COLORS = [null, '#100d10', '#3a2a20', '#5b3d2a', '#8a5a34',
+    '#c9a24a', '#e3e6ea', '#93969c', '#9b4a24'];
+
+function playerLookRow(player) {
+    const row = typeof playerLooks !== 'undefined' && player && playerLooks[player.name];
+    return Array.isArray(row) ? row : null;
+}
+
+function playerSkin(player) {
+    const row = playerLookRow(player);
+    return SKIN_TONES[row ? row[0] : 2];
+}
+
 function playerShirtNumber(player) {
-    if (player && player.mainPos === 'GK') return 1;
-    return (hashText(player && player.name) % 99) + 1;
+    const row = playerLookRow(player);
+    if (row) return row[2];
+    return player && player.mainPos === 'GK' ? 1 : 9;
 }
 
 function cardPositions(player) {
@@ -216,10 +244,13 @@ function cardPositions(player) {
 
 let cardArtworkSequence = 0;
 
-function playerHairSvg(name) {
+function playerHairSvg(player) {
+    const name = player && player.name;
+    const row = playerLookRow(player);
+    // 0 is a shaved head: the scalp is the skin tone, so nothing is drawn over it.
+    if (row && row[1] === 0) return '';
+    const color = row ? HAIR_COLORS[row[1]] : HAIR_COLORS[1 + hashText(`${name}:hair`) % 8];
     const style = hashText(name) % 5;
-    const shades = ['#211b20', '#50362b', '#af8041', '#33252a'];
-    const color = shades[hashText(`${name}:hair`) % shades.length];
     const shapes = [
         'M69 65 Q60 44 73 33 Q75 20 92 24 Q105 11 120 28 Q138 31 132 60 L127 71 L123 47 Q104 54 84 42 L75 70 Z',
         'M68 65 Q59 52 66 43 Q58 29 73 26 Q73 14 88 20 Q98 8 110 20 Q125 14 129 27 Q143 28 137 42 Q142 53 131 65 L125 49 Q113 43 107 49 Q93 39 81 49 L75 69 Z',
@@ -353,6 +384,7 @@ function portraitHeadwearSvg(tier) {
 
 function portraitPoseSvg(tier, pose, palette, player) {
     if (tier === 'gold') return '';
+    const skin = playerSkin(player);
     const accent = tier === 'goat' ? '#f4cf75' : tier === 'invincible' ? '#ecb2ff' : '#9bdeff';
     const band = `<g class="pcard__captain-band"><path d="M31 145 L48 151 L45 163 L28 157Z" fill="${accent}"/>
         <text x="37" y="156" text-anchor="middle" fill="#152035" font-size="8" font-weight="900" transform="rotate(18 37 156)">C</text></g>`;
@@ -370,25 +402,25 @@ function portraitPoseSvg(tier, pose, palette, player) {
         <path d="${pose === 'point-up' ? 'M166 135 L155 146' : 'M160 141 L145 148'}" stroke="#f8fafc" stroke-width="3"/>
         <path d="M61 116 L51 131 M65 118 L55 133 M139 116 L149 131" stroke="#f8fafc" stroke-opacity=".65" stroke-width="1.8"/>
     </g>`;
-    if (pose === 'arms-crossed') return `<g class="pcard__pose-arms" stroke="#aa7253" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M43 142 Q36 159 42 172 Q47 186 60 182 L132 157 Q145 157 144 149 Q138 144 130 150 L58 167 L57 147Z" fill="#c9906c"/>
-        <path d="M157 142 Q164 159 158 172 Q153 186 139 181 L71 158 Q59 158 57 151 Q61 144 72 150 L142 167 L143 147Z" fill="#daa27d"/>
+    if (pose === 'arms-crossed') return `<g class="pcard__pose-arms" stroke="${skin.line}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M43 142 Q36 159 42 172 Q47 186 60 182 L132 157 Q145 157 144 149 Q138 144 130 150 L58 167 L57 147Z" fill="${skin.shade}"/>
+        <path d="M157 142 Q164 159 158 172 Q153 186 139 181 L71 158 Q59 158 57 151 Q61 144 72 150 L142 167 L143 147Z" fill="${skin.base}"/>
         <path d="M117 160 L122 176 M80 160 L75 176" stroke="${accent}" stroke-width="5"/>
-        <path d="M65 150 L78 156 M63 154 L75 160 M135 150 L124 154" fill="none" stroke="#b27a59"/>
-        <path d="M49 169 Q52 175 58 173 M151 169 Q148 175 142 173" fill="none" stroke="#b27a59"/>
+        <path d="M65 150 L78 156 M63 154 L75 160 M135 150 L124 154" fill="none" stroke="${skin.line}"/>
+        <path d="M49 169 Q52 175 58 173 M151 169 Q148 175 142 173" fill="none" stroke="${skin.line}"/>
     </g>${sleeves}`;
-    if (pose === 'point-up') return `<g class="pcard__pose-arms" stroke="#ab7355" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M42 143 L57 148 L48 200 H30Z" fill="#ce9671"/>
-        <path d="M158 134 Q170 138 177 146 L177 100 L191 99 L192 147 Q191 163 179 166 Q169 165 150 148Z" fill="#daa27d"/>
+    if (pose === 'point-up') return `<g class="pcard__pose-arms" stroke="${skin.line}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M42 143 L57 148 L48 200 H30Z" fill="${skin.shade}"/>
+        <path d="M158 134 Q170 138 177 146 L177 100 L191 99 L192 147 Q191 163 179 166 Q169 165 150 148Z" fill="${skin.base}"/>
         <path d="M177 111 L191 110" stroke="${accent}" stroke-width="6"/>
-        <path d="M178 102 L174 88 Q169 82 172 78 Q176 75 181 84 L181 59 Q181 53 185 53 Q189 53 189 59 V81 Q194 77 196 83 L196 95 Q195 101 190 104Z" fill="#daa27d"/>
+        <path d="M178 102 L174 88 Q169 82 172 78 Q176 75 181 84 L181 59 Q181 53 185 53 Q189 53 189 59 V81 Q194 77 196 83 L196 95 Q195 101 190 104Z" fill="${skin.base}"/>
         <path d="M187 83 L187 92 M192 84 L192 93 M178 148 Q183 152 187 147" fill="none"/>
     </g>${sleeves}`;
-    return `<g class="pcard__pose-arms" stroke="#ac7253" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M158 143 L143 148 L152 200 H170Z" fill="#ce9671"/>
-        <path d="M43 134 Q35 139 28 146 L23 111 L9 113 L13 150 Q15 164 27 166 Q37 165 54 147Z" fill="#daa27d"/>
+    return `<g class="pcard__pose-arms" stroke="${skin.line}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M158 143 L143 148 L152 200 H170Z" fill="${skin.shade}"/>
+        <path d="M43 134 Q35 139 28 146 L23 111 L9 113 L13 150 Q15 164 27 166 Q37 165 54 147Z" fill="${skin.base}"/>
         <path d="M10 121 L25 118" stroke="${accent}" stroke-width="6"/>
-        <path d="M10 113 L7 101 L8 90 Q10 84 14 87 Q17 81 21 86 Q27 82 30 88 L33 95 L29 107 L23 113Z" fill="#daa27d"/>
+        <path d="M10 113 L7 101 L8 90 Q10 84 14 87 Q17 81 21 86 Q27 82 30 88 L33 95 L29 107 L23 113Z" fill="${skin.base}"/>
         <path d="M13 91 L14 99 M20 89 L21 98 M27 91 L26 100 M17 148 Q22 153 27 148" fill="none"/>
     </g>${sleeves}`;
 }
@@ -397,19 +429,20 @@ function playerBustSvg(player, palette, initials, tier = cardTierOf(player)) {
     const pose = tier === 'goat' ? (hashText(`${player.name}:pose`) % 2 ? 'point-up' : 'arms-crossed')
         : tier === 'invincible' ? 'fist-up' : 'portrait';
     const expression = tier === 'goat' ? (pose === 'arms-crossed' ? 2 : 5) : undefined;
+    const skin = playerSkin(player);
     return `
         <svg class="pcard__bust" data-portrait-tier="${tier}" data-pose="${pose}" viewBox="0 0 200 200" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
             <ellipse class="pcard__bust-shadow" cx="100" cy="194" rx="72" ry="8"></ellipse>
             ${portraitAuraSvg(tier)}
             ${playerJerseySvg(player, palette, initials, pose)}
             ${portraitPoseSvg(tier, pose, palette, player)}
-            <path d="M89 87 H111 V108 L100 117 L89 108 Z" fill="#be825e"/>
+            <path d="M89 87 H111 V108 L100 117 L89 108 Z" fill="${skin.deep}"/>
             <path d="M89 88 H111 V98 Q99 107 89 99 Z" fill="#6b3d30" opacity=".3"/>
-            <ellipse cx="70" cy="68" rx="5" ry="9" fill="#ce9671"/>
-            <ellipse cx="130" cy="68" rx="5" ry="9" fill="#ce9671"/>
-            <path class="pcard__bust-head" d="M72 52 Q72 30 100 30 Q128 30 128 52 L125 80 Q120 96 100 101 Q80 96 75 80 Z" fill="#daa27d" stroke="#b77c59" stroke-width="1.5"/>
-            <path d="M100 37 Q127 36 127 59 L124 80 Q117 94 100 99 Z" fill="#a96d50" opacity=".2"/>
-            ${playerHairSvg(player.name)}
+            <ellipse cx="70" cy="68" rx="5" ry="9" fill="${skin.shade}"/>
+            <ellipse cx="130" cy="68" rx="5" ry="9" fill="${skin.shade}"/>
+            <path class="pcard__bust-head" d="M72 52 Q72 30 100 30 Q128 30 128 52 L125 80 Q120 96 100 101 Q80 96 75 80 Z" fill="${skin.base}" stroke="${skin.line}" stroke-width="1.5"/>
+            <path d="M100 37 Q127 36 127 59 L124 80 Q117 94 100 99 Z" fill="${skin.line}" opacity=".2"/>
+            ${playerHairSvg(player)}
             ${portraitHeadwearSvg(tier)}
             ${playerExpressionSvg(player.name, expression)}
         </svg>`;
@@ -547,18 +580,18 @@ function chemistryLinkInfo(manager, player) {
 // Display name for the player's assigned Archetype.
 // Uses the stored key directly so draft/scout info still shows GK roles
 // (Sweeper Keeper / Goalkeeper) even if a position check would null them out.
-function playstyleName(player) {
-    if (!player || typeof PLAYSTYLES === 'undefined') return '';
-    let key = player.playstyle;
-    if (!key || !PLAYSTYLES[key]) {
-        if (typeof playstyleOf === 'function') key = playstyleOf(player);
+function archetypeName(player) {
+    if (!player || typeof ARCHETYPES === 'undefined') return '';
+    let key = player.archetype;
+    if (!key || !ARCHETYPES[key]) {
+        if (typeof archetypeOf === 'function') key = archetypeOf(player);
     }
-    if (!key || !PLAYSTYLES[key]) {
-        if (typeof playstyleForName === 'function' && player.mainPos) {
-            key = playstyleForName(player.mainPos, player.name);
+    if (!key || !ARCHETYPES[key]) {
+        if (typeof archetypeForName === 'function' && player.mainPos) {
+            key = archetypeForName(player.mainPos, player.name);
         }
     }
-    return key && PLAYSTYLES[key] ? PLAYSTYLES[key].name : '';
+    return key && ARCHETYPES[key] ? key : '';
 }
 
 function renderScoutStrip(player, managerId) {
@@ -568,8 +601,8 @@ function renderScoutStrip(player, managerId) {
         : gameState.managers;
     if (!managers.length) return '';
     const tier = cardTierOf(player);
-    const style = playstyleName(player);
-    const habit = typeof specialityName === 'function' ? specialityName(player) : '';
+    const style = archetypeName(player);
+    const habit = typeof playstyleName === 'function' ? playstyleName(player) : '';
     return `
         <div class="scout-strip">
             ${style ? `
