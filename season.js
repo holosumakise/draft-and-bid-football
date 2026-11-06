@@ -2670,6 +2670,25 @@ function showFinalSummary() {
     const ranked = participants.map(h => ({ ...h, bestScore: scoreTeam(h) })).sort((a, b) => b.bestScore - a.bestScore);
     const best = ranked[0];
 
+    // Online tournaments pay Tokens to the account that owns the winning club.
+    // Each device claims its own reward, keyed to the room and the title so a
+    // re-render can never pay twice.
+    if (typeof Net !== 'undefined' && Net.online && typeof accountAwardTokens === 'function') {
+        const mine = participants.find(h => String(h.managerId) === String(Net.myManagerId));
+        if (mine) {
+            const room = Net.roomCode || 'room';
+            if (mine.leaguePos === 1) {
+                accountAwardTokens(TOKEN_REWARDS.LEAGUE_TITLE, `season_${room}_league`, 'League title');
+            }
+            if (mine.champion && mine.competition === 'UCL') {
+                accountAwardTokens(TOKEN_REWARDS.UCL_WIN, `season_${room}_ucl`, 'UCL title');
+            }
+            if (mine.champion && mine.competition === 'UEL') {
+                accountAwardTokens(TOKEN_REWARDS.UEL_WIN, `season_${room}_uel`, 'Europa title');
+            }
+        }
+    }
+
     if (gameState.managers.length === 1 && best) {
         document.getElementById('best-team-banner').innerHTML = `Season score: <span class="text-amber-300 font-black">${best.bestScore}</span> pts`;
     } else {

@@ -624,7 +624,7 @@
         .game-main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 22px 20px 60px; display: flex; flex-direction: column; gap: 24px; }
 
         /* ---------- Main menu ---------- */
-        .main-screen { align-items: center; justify-content: center; padding: 28px 20px; overflow: hidden; }
+        .main-screen { flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 18px 20px 28px; overflow-y: auto; }
         .stadium-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
         .stadium-bg::before {
             content: ''; position: absolute; inset: -20%;
@@ -646,7 +646,7 @@
         .stadium-glow { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.30; pointer-events: none; }
         .stadium-glow--left { width: 46vw; height: 46vw; left: -12vw; top: -10vw; background: #059669; }
         .stadium-glow--right { width: 42vw; height: 42vw; right: -10vw; top: 6vw; background: #0ea5e9; opacity: 0.22; }
-        .main-shell { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(280px, 0.88fr); gap: 54px; align-items: center; width: 100%; max-width: 1120px; }
+        .main-shell { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(280px, 0.88fr); gap: 54px; align-items: center; width: 100%; max-width: 1120px; margin: auto; }
         .main-copy { max-width: 620px; }
         .main-title { font-family: var(--font-display); font-size: clamp(44px, 6.6vw, 84px); line-height: 0.90; font-weight: 900; letter-spacing: -0.02em; margin: 18px 0 18px; text-transform: uppercase; }
         .main-title span { color: var(--emerald); }
@@ -1341,6 +1341,224 @@
             .mp-main { padding: 18px 12px 56px; }
         }
 
+        /* ============================================================
+           ACCOUNT + TOKENS
+           ============================================================ */
+        .main-hud {
+            position: relative; z-index: 6;
+            display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+            padding: 0 0 14px; flex-wrap: wrap;
+        }
+        .main-hud__left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+        .main-hud__signout { padding: 9px 14px; font-size: 11px; }
+        .account-chip {
+            display: inline-flex; align-items: center; gap: 10px; min-width: 0;
+            padding: 5px 16px 5px 5px; border-radius: 999px; cursor: pointer;
+            background: rgba(10, 17, 32, 0.86); border: 1px solid var(--line-strong);
+            color: var(--text); font: inherit; text-align: left; backdrop-filter: blur(14px);
+            transition: border-color .15s ease, background .15s ease;
+        }
+        .account-chip:hover { border-color: rgba(52, 211, 153, .55); background: rgba(14, 25, 42, .94); }
+        .account-chip__avatar, .account-card__avatar, .account-chip__avatar[data-account-avatar] {
+            width: 34px; height: 34px; flex: 0 0 auto; border-radius: 999px;
+            display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #34d399, #0ea5e9);
+            color: #04120c; font-family: var(--font-display); font-size: 15px; font-weight: 900;
+        }
+        .account-chip__body { display: flex; flex-direction: column; gap: 1px; min-width: 0; max-width: 210px; }
+        .account-chip__label { font-size: 8px; font-weight: 900; letter-spacing: .18em; text-transform: uppercase; color: var(--dim); }
+        .account-chip__email { font-size: 12px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        .token-pill {
+            display: inline-flex; align-items: center; gap: 7px;
+            padding: 8px 14px; border-radius: 999px;
+            border: 1px solid rgba(251, 191, 36, .45);
+            background: linear-gradient(135deg, rgba(251, 191, 36, .16), rgba(245, 158, 11, .08));
+            color: var(--gold); font-size: 13px; font-weight: 900; line-height: 1;
+            text-shadow: 0 0 18px rgba(251, 191, 36, .35);
+        }
+        .token-pill--sm { padding: 6px 11px; font-size: 12px; }
+        .token-pill__icon, .token-inline { display: inline-flex; align-items: center; justify-content: center; color: var(--gold); }
+        .token-pill__label { font-size: 8px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; color: rgba(251, 191, 36, .72); text-shadow: none; }
+        .token-icon { display: block; }
+        .mp-cost { color: var(--gold); }
+
+        .account-card {
+            position: relative; z-index: 2; width: 100%; max-width: 460px;
+            background: linear-gradient(160deg, rgba(16, 29, 51, .99), rgba(7, 13, 24, .99));
+            border: 1px solid var(--line-strong); border-radius: 22px; padding: 24px;
+            box-shadow: var(--shadow);
+        }
+        .account-card__head { display: flex; align-items: center; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+        .account-card__head h3 { font-family: var(--font-display); font-size: 26px; font-weight: 900; text-transform: uppercase; margin: 3px 0 0; }
+        .account-card__head p { color: var(--muted); font-size: 12px; margin: 3px 0 0; word-break: break-all; }
+        .account-card__avatar { width: 52px; height: 52px; font-size: 20px; }
+        .account-card__rows { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+        .account-card__rows > div { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 12px; }
+        .account-card__rows span { color: var(--dim); font-weight: 800; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+        .account-card__rows b { font-weight: 800; display: inline-flex; align-items: center; gap: 5px; text-align: right; }
+        .account-card__uid { font-size: 10px; color: var(--muted); max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .account-card__earn {
+            display: flex; align-items: flex-start; gap: 8px; margin-top: 16px; padding: 11px 13px;
+            border: 1px dashed rgba(251, 191, 36, .3); border-radius: 12px;
+            background: rgba(251, 191, 36, .05); color: #fde68a; font-size: 11px; line-height: 1.6;
+        }
+        .account-card__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+        .account-card__actions .btn { flex: 1; min-width: 100px; }
+        .btn--danger { background: rgba(127, 29, 29, .3); border-color: rgba(248, 113, 113, .4); color: #fecaca; }
+        .btn--danger:hover { background: rgba(127, 29, 29, .5); }
+        .btn:disabled { opacity: .42; cursor: not-allowed; box-shadow: none; }
+
+        /* ============================================================
+           MY PLAYER — dashboard
+           ============================================================ */
+        .mp-dash { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
+        .mp-dash__side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 78px; }
+        .mp-dash__cardwrap { display: flex; justify-content: center; padding: 18px; border: 1px solid var(--line); border-radius: 20px; background: radial-gradient(ellipse at 50% 0%, rgba(52, 211, 153, .12), transparent 60%), linear-gradient(165deg, rgba(16, 29, 51, .97), rgba(8, 14, 26, .98)); box-shadow: var(--shadow); }
+        .mp-dash__main { display: flex; flex-direction: column; gap: 14px; }
+        .mp-club-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .mp-club-head h3 { font-family: var(--font-display); font-size: 25px; font-weight: 900; line-height: 1; margin: 4px 0 0; }
+        .mp-club-head p { color: var(--muted); font-size: 11px; margin: 5px 0 0; }
+        .mp-club-side { text-align: right; }
+        .mp-club-side b { display: block; font-size: 19px; font-weight: 900; color: var(--emerald); }
+        .mp-club-side span { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 900; }
+
+        .mp-statgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+        .mp-stat { padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .03); }
+        .mp-stat span { display: block; font-size: 8px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+        .mp-stat b { display: block; margin-top: 4px; font-size: 18px; font-weight: 900; line-height: 1; }
+        .mp-stat small { display: block; margin-top: 3px; font-size: 9px; color: var(--muted); }
+
+        .mp-health { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+        .mp-health__row { display: flex; flex-direction: column; gap: 6px; }
+        .mp-health__top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .mp-health__top span { font-size: 9px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+        .mp-health__top b { font-size: 12px; font-weight: 900; }
+        .mp-bar { height: 9px; border-radius: 999px; background: rgba(148, 163, 184, .15); overflow: hidden; }
+        .mp-bar__fill { height: 100%; width: calc(var(--v, 100) * 1%); border-radius: inherit; transition: width .35s ease; }
+        .mp-bar__fill--stamina { background: linear-gradient(90deg, #34d399, #10b981); }
+        .mp-bar__fill--mental { background: linear-gradient(90deg, #a78bfa, #8b5cf6); }
+        .mp-bar__fill--low { background: linear-gradient(90deg, #fb7185, #ef4444); }
+
+        .mp-actions-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .mp-actionbtn {
+            display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left;
+            padding: 15px 16px; border: 1px solid var(--line); border-radius: 14px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, .015));
+            color: var(--text); font: inherit; cursor: pointer;
+            transition: border-color .15s ease, transform .15s ease, background .15s ease;
+        }
+        .mp-actionbtn:hover { border-color: rgba(52, 211, 153, .5); transform: translateY(-1px); background: rgba(52, 211, 153, .07); }
+        .mp-actionbtn b { font-size: 14px; font-weight: 900; }
+        .mp-actionbtn small { font-size: 10px; color: var(--muted); line-height: 1.5; }
+        .mp-actionbtn--primary { border-color: rgba(52, 211, 153, .5); background: linear-gradient(135deg, rgba(52, 211, 153, .2), rgba(16, 185, 129, .08)); }
+
+        .mp-next { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .025); flex-wrap: wrap; }
+        .mp-next__who { min-width: 0; }
+        .mp-next__who span { display: block; font-size: 8px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
+        .mp-next__who b { display: block; margin-top: 3px; font-size: 16px; font-weight: 900; }
+        .mp-next__who small { display: block; margin-top: 2px; font-size: 10px; color: var(--muted); }
+        .mp-next__tag { padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(251, 191, 36, .45); background: rgba(251, 191, 36, .1); color: var(--gold); font-size: 8px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+
+        .mp-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+        .mp-form__chip { min-width: 38px; text-align: center; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03); font-size: 11px; font-weight: 900; }
+        .mp-form__chip.is-good { border-color: rgba(52, 211, 153, .45); color: var(--emerald); }
+        .mp-form__chip.is-bad { border-color: rgba(251, 113, 133, .45); color: var(--red); }
+
+        /* ============================================================
+           MY PLAYER — calendar, training, assets
+           ============================================================ */
+        .mp-cal { border: 1px solid var(--line); border-radius: 18px; background: rgba(8, 15, 29, .6); padding: 16px; }
+        .mp-cal__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+        .mp-cal__head h3 { font-family: var(--font-display); font-size: 22px; font-weight: 900; margin: 0; }
+        .mp-cal__head small { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
+        .mp-cal__nav { display: flex; gap: 6px; }
+        .mp-cal__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+        .mp-cal__dow { text-align: center; font-size: 8px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); padding: 4px 0; }
+        .mp-cal__day { min-height: 74px; border: 1px solid rgba(148, 163, 184, .1); border-radius: 9px; background: rgba(255, 255, 255, .015); padding: 5px 5px 4px; display: flex; flex-direction: column; gap: 3px; }
+        .mp-cal__day.is-out { opacity: .25; }
+        .mp-cal__day.is-next { border-color: rgba(52, 211, 153, .45); background: rgba(52, 211, 153, .06); }
+        .mp-cal__date { font-size: 9px; font-weight: 900; color: var(--muted); }
+        .mp-cal__day.is-next .mp-cal__date { color: var(--emerald); }
+        .mp-fix {
+            display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 7px;
+            padding: 4px 5px; background: rgba(56, 189, 248, .08); color: #bae6fd;
+            font: inherit; font-size: 8px; font-weight: 900; line-height: 1.25; cursor: pointer;
+            overflow: hidden;
+        }
+        .mp-fix b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mp-fix span { display: block; font-size: 7px; opacity: .8; font-weight: 700; }
+        .mp-fix.is-key { border-color: rgba(251, 191, 36, .55); background: rgba(251, 191, 36, .12); color: #fde68a; }
+        .mp-fix.is-played { opacity: .42; border-style: dashed; }
+        .mp-fix:hover { border-color: rgba(52, 211, 153, .6); }
+
+        .mp-fixture-panel { margin-top: 16px; }
+        .mp-fixture-detail { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255, 255, 255, .03); flex-wrap: wrap; }
+        .mp-fixture-detail h4 { font-family: var(--font-display); font-size: 21px; font-weight: 900; margin: 2px 0 0; }
+        .mp-fixture-detail p { font-size: 10px; color: var(--muted); margin: 4px 0 0; }
+        .mp-fixture-detail__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .mp-lock { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
+        .mp-result-card { margin-bottom: 16px; border: 1px solid rgba(52, 211, 153, .35); border-radius: 16px; background: rgba(52, 211, 153, .06); padding: 16px; }
+        .mp-result-card h3 { font-family: var(--font-display); font-size: 22px; font-weight: 900; margin: 2px 0 0; }
+        .mp-result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; margin-top: 12px; }
+        .mp-result-grid > div { padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(0, 0, 0, .18); }
+        .mp-result-grid span { display: block; font-size: 8px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+        .mp-result-grid b { display: block; margin-top: 3px; font-size: 14px; font-weight: 900; }
+
+        .mp-training-grid, .mp-asset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .mp-train, .mp-asset { border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(150deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, .015)); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+        .mp-train__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+        .mp-train__top h4, .mp-asset h4 { font-size: 14px; font-weight: 900; margin: 0; }
+        .mp-train__top p, .mp-asset p { font-size: 10px; color: var(--muted); margin: 3px 0 0; line-height: 1.55; }
+        .mp-attr { flex: 0 0 auto; min-width: 52px; text-align: center; padding: 7px 8px; border-radius: 10px; border: 1px solid rgba(52, 211, 153, .35); background: rgba(52, 211, 153, .08); }
+        .mp-attr span { display: block; font-size: 8px; font-weight: 900; letter-spacing: .1em; color: var(--dim); }
+        .mp-attr b { display: block; font-size: 17px; font-weight: 900; color: var(--emerald); }
+        .mp-train__bar { height: 5px; border-radius: 999px; background: rgba(148, 163, 184, .15); overflow: hidden; }
+        .mp-train__bar i { display: block; height: 100%; background: linear-gradient(90deg, #34d399, #0ea5e9); }
+        .mp-train__foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .mp-train__foot .btn { flex: 1; min-width: 96px; padding: 10px 12px; font-size: 11px; }
+        .mp-cooldown { font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); }
+        .mp-ready { font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; color: var(--emerald); }
+
+        .mp-asset__price { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
+        .mp-asset__price b { font-size: 16px; font-weight: 900; color: var(--emerald); }
+        .mp-asset__price small { display: block; font-size: 8px; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; font-weight: 900; }
+        .mp-asset__effect { display: flex; gap: 6px; flex-wrap: wrap; }
+        .mp-chip { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03); font-size: 8px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+        .mp-chip--mental { border-color: rgba(167, 139, 250, .4); color: #d8caff; }
+        .mp-chip--stamina { border-color: rgba(52, 211, 153, .4); color: #b8f5dd; }
+
+        .mp-empty-note { padding: 26px; text-align: center; color: var(--muted); font-size: 12px; border: 1px dashed var(--line); border-radius: 14px; line-height: 1.7; }
+
+        @media (max-width: 1000px) {
+            .mp-dash { grid-template-columns: 1fr; }
+            .mp-dash__side { position: static; display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); align-items: start; }
+        }
+        @media (max-width: 760px) {
+            .main-hud { padding: 0 0 10px; }
+            .account-chip__body { max-width: 34vw; }
+            .main-hud__signout { padding: 8px 10px; }
+            .token-pill__label { display: none; }
+            .mp-statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .mp-training-grid, .mp-asset-grid { grid-template-columns: 1fr; }
+            .mp-actions-grid { grid-template-columns: 1fr; }
+            .mp-cal__day { min-height: 62px; }
+            .mp-fix span { display: none; }
+            .mp-dash__side { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 560px) {
+            .main-hud { gap: 8px; }
+            .account-chip { padding-right: 10px; }
+            .account-chip__body { max-width: 30vw; }
+            .mp-cal { padding: 10px; }
+            .mp-cal__grid { gap: 3px; }
+            .mp-cal__day { min-height: 54px; padding: 4px 3px; }
+            .mp-fix { font-size: 7px; padding: 3px; }
+            .mp-fixture-detail__actions { width: 100%; }
+            .mp-fixture-detail__actions .btn { flex: 1; }
+            .account-card { padding: 18px; }
+        }
+
     </style>
 </head>
 <body class="font-sans antialiased text-slate-100">
@@ -1397,11 +1615,32 @@
     <div id="online-note" class="hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-[80] max-w-[92vw] text-center text-[11px] font-bold px-3 py-1.5 rounded-full bg-slate-800/95 border border-emerald-500/40 text-emerald-200 shadow-lg pointer-events-none"></div>
 
     <!-- Screen 1: Main Menu -->
-    <div id="screen-main" class="screen active main-screen">
+    <div id="screen-main" class="screen main-screen">
         <div class="stadium-bg" aria-hidden="true">
             <div class="stadium-glow stadium-glow--left"></div>
             <div class="stadium-glow stadium-glow--right"></div>
         </div>
+
+        <div class="main-hud">
+            <div class="main-hud__left">
+                <button class="account-chip" onclick="accountShowInfo()" title="Account info">
+                    <span class="account-chip__avatar" data-account-avatar>?</span>
+                    <span class="account-chip__body">
+                        <span class="account-chip__label">Account</span>
+                        <b class="account-chip__email" data-account-email>—</b>
+                    </span>
+                </button>
+                <button class="btn btn--ghost main-hud__signout" onclick="accountSignOut()">Sign out</button>
+            </div>
+            <div class="main-hud__right">
+                <span class="token-pill" title="Tokens earned by winning online matches">
+                    <span class="token-pill__icon" data-token-icon="17"></span>
+                    <b id="menu-token-count" data-token-count>0</b>
+                    <span class="token-pill__label">Tokens</span>
+                </span>
+            </div>
+        </div>
+
         <div class="main-shell">
             <div class="main-copy">
                 <h1 class="main-title">Draft <span>&amp;</span> Bid <em>Football</em></h1>
@@ -1459,36 +1698,36 @@
     </div>
 
     <!-- My Player: account gate -->
-    <div id="screen-myplayer-auth" class="screen mp-auth-screen">
+    <!-- Global account gate: shown before the app, required for online + My Player -->
+    <div id="screen-auth" class="screen mp-auth-screen active">
         <div class="mp-auth-orbs" aria-hidden="true"></div>
         <main class="mp-auth">
             <div class="mp-auth-card">
                 <div class="mp-auth-head">
-                    <div class="mp-auth-mark">MP</div>
+                    <div class="mp-auth-mark">DB</div>
                     <div>
-                        <div class="eyebrow">Online career mode</div>
-                        <h2 class="mp-auth-title">My Player</h2>
+                        <div class="eyebrow">Draft &amp; Bid Football</div>
+                        <h2 class="mp-auth-title">Sign in</h2>
                     </div>
                 </div>
-                <p class="mp-auth-sub" id="mp-auth-sub">Sign in so every career is saved to your account — and only yours.</p>
+                <p class="mp-auth-sub" id="auth-sub">Sign in to play online, save My Player careers and collect Tokens.</p>
 
-                <label class="mp-label" for="mp-auth-email">Email</label>
-                <input class="mp-input" id="mp-auth-email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com">
+                <label class="mp-label" for="auth-email">Email</label>
+                <input class="mp-input" id="auth-email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com">
 
-                <label class="mp-label" for="mp-auth-password">Password</label>
-                <input class="mp-input" id="mp-auth-password" type="password" autocomplete="current-password" placeholder="At least 6 characters">
+                <label class="mp-label" for="auth-password">Password</label>
+                <input class="mp-input" id="auth-password" type="password" autocomplete="current-password" placeholder="At least 6 characters">
 
-                <div id="mp-auth-confirm-wrap" class="hidden">
-                    <label class="mp-label" for="mp-auth-confirm">Confirm password</label>
-                    <input class="mp-input" id="mp-auth-confirm" type="password" autocomplete="new-password" placeholder="Repeat your password">
+                <div id="auth-confirm-wrap" class="hidden">
+                    <label class="mp-label" for="auth-confirm">Confirm password</label>
+                    <input class="mp-input" id="auth-confirm" type="password" autocomplete="new-password" placeholder="Repeat your password">
                 </div>
 
-                <p class="mp-status" id="mp-auth-status" aria-live="polite"></p>
+                <p class="mp-status" id="auth-status" aria-live="polite"></p>
 
-                <button class="btn btn--primary mp-auth-submit" id="mp-auth-submit" onclick="mpSubmitAuth()">Sign in</button>
-                <button class="btn btn--ghost mp-auth-toggle" id="mp-auth-toggle" onclick="mpToggleAuthMode()">Create an account</button>
-                <button class="btn btn--ghost mp-auth-back" onclick="mpClose()">Back to menu</button>
-                <p class="mp-auth-note">My Player is online-only. Your careers live in your account and autosave after every story step.</p>
+                <button class="btn btn--primary mp-auth-submit" id="auth-submit" onclick="accountSubmitAuth()">Sign in</button>
+                <button class="btn btn--ghost mp-auth-toggle" id="auth-toggle" onclick="accountToggleAuthMode()">Create an account</button>
+                <p class="mp-auth-note">One account plays online, keeps your Token wallet and stores every My Player career. Your careers are visible only to you.</p>
             </div>
         </main>
     </div>
@@ -1501,6 +1740,10 @@
                 <span class="appbar__title">My Player <small>Online career</small></span>
             </div>
             <div class="appbar__right">
+                <span class="token-pill token-pill--sm" title="Tokens">
+                    <span class="token-pill__icon" data-token-icon="14"></span>
+                    <b data-token-count>0</b>
+                </span>
                 <span class="mp-save"><span class="mp-save__dot"></span>Autosave on</span>
             </div>
         </header>
@@ -1511,7 +1754,7 @@
                         <span class="mp-account__label">Signed in as</span>
                         <b class="mp-account__email" id="mp-account-email">—</b>
                     </div>
-                    <button class="btn btn--ghost" onclick="mpSignOut()">Sign out</button>
+                    <button class="btn btn--ghost" onclick="accountSignOut()">Sign out</button>
                 </div>
 
                 <div class="mp-panel">
@@ -1541,6 +1784,10 @@
                 <span class="appbar__title">Create My Player <small>Roll your beginning</small></span>
             </div>
             <div class="appbar__right">
+                <span class="token-pill token-pill--sm" title="Tokens">
+                    <span class="token-pill__icon" data-token-icon="14"></span>
+                    <b data-token-count>0</b>
+                </span>
                 <button class="btn btn--ghost" onclick="mpBackToList()">My Players</button>
             </div>
         </header>
@@ -1550,21 +1797,21 @@
                     <div>
                         <div class="eyebrow">New career</div>
                         <h2>Roll your player</h2>
-                        <p>The reels decide everything except the name. Only the name is yours to type.</p>
+                        <p>Press Roll to spin the reels. The first roll is free; every reroll costs <b class="mp-cost" id="mp-reroll-cost">25</b> Tokens.</p>
                     </div>
-                    <button class="btn btn--ghost" onclick="mpRollAgain()">Roll again</button>
+                    <button class="btn btn--primary" id="mp-roll-btn" onclick="mpRollAction()">Roll</button>
                 </div>
 
                 <label class="mp-label" for="mp-name">Player name</label>
                 <input class="mp-input" id="mp-name" type="text" maxlength="24" autocomplete="off" placeholder="Type your player's name">
 
                 <div class="mp-reel-grid" id="mp-reel-grid"></div>
-                <p class="mp-hint">Nationality, height, weight, position, archetype and playstyle are rolled from the game's pools. Archetype and playstyle always fit the rolled position.</p>
+                <p class="mp-hint">Nationality, height, weight, position, archetype and playstyle are rolled from the game's pools. Archetype and playstyle always fit the rolled position. Rerolls spend account Tokens.</p>
 
                 <p class="mp-status" id="mp-create-status" aria-live="polite"></p>
                 <div class="mp-create-actions">
                     <button class="btn btn--ghost" onclick="mpBackToList()">Back</button>
-                    <button class="btn btn--primary" id="mp-create-btn" onclick="mpCreateCareer()">Create My Player</button>
+                    <button class="btn btn--primary" id="mp-create-btn" onclick="mpCreateCareer()" disabled>Create My Player</button>
                 </div>
             </div>
         </main>
@@ -1578,8 +1825,12 @@
                 <span class="appbar__title">My Player <small id="mp-story-subtitle">Career</small></span>
             </div>
             <div class="appbar__right">
+                <span class="token-pill token-pill--sm" title="Tokens">
+                    <span class="token-pill__icon" data-token-icon="14"></span>
+                    <b data-token-count>0</b>
+                </span>
                 <span class="mp-save" id="mp-save-state"><span class="mp-save__dot"></span>Cloud save</span>
-                <button class="btn btn--ghost" onclick="mpBackToList()">My Players</button>
+                <button class="btn btn--ghost" onclick="mpBackToCareer()">Career</button>
             </div>
         </header>
         <main class="mp-main">
@@ -1588,6 +1839,118 @@
                 <article class="mp-story-panel" id="mp-story-panel"></article>
             </div>
         </main>
+    </div>
+
+    <!-- My Player: dashboard -->
+    <div id="screen-myplayer-dashboard" class="screen mp-screen">
+        <header class="appbar">
+            <div class="appbar__brand">
+                <span class="appbar__mark">MP</span>
+                <span class="appbar__title">My Player <small id="mp-dash-subtitle">Career</small></span>
+            </div>
+            <div class="appbar__right">
+                <span class="token-pill token-pill--sm" title="Tokens">
+                    <span class="token-pill__icon" data-token-icon="14"></span>
+                    <b data-token-count>0</b>
+                </span>
+                <span class="mp-save" id="mp-dash-save"><span class="mp-save__dot"></span>Saved</span>
+                <button class="btn btn--ghost" onclick="mpBackToList()">My Players</button>
+            </div>
+        </header>
+        <main class="mp-main">
+            <div id="mp-dashboard-root"></div>
+        </main>
+    </div>
+
+    <!-- My Player: schedule calendar -->
+    <div id="screen-myplayer-schedule" class="screen mp-screen">
+        <header class="appbar">
+            <div class="appbar__brand">
+                <span class="appbar__mark">MP</span>
+                <span class="appbar__title">Matches <small id="mp-schedule-subtitle">C League</small></span>
+            </div>
+            <div class="appbar__right">
+                <span class="token-pill token-pill--sm" title="Tokens">
+                    <span class="token-pill__icon" data-token-icon="14"></span>
+                    <b data-token-count>0</b>
+                </span>
+                <button class="btn btn--ghost" onclick="mpBackToCareer()">Career</button>
+            </div>
+        </header>
+        <main class="mp-main">
+            <div id="mp-schedule-root"></div>
+        </main>
+    </div>
+
+    <!-- My Player: training -->
+    <div id="screen-myplayer-training" class="screen mp-screen">
+        <header class="appbar">
+            <div class="appbar__brand">
+                <span class="appbar__mark">MP</span>
+                <span class="appbar__title">Training <small>Build your attributes</small></span>
+            </div>
+            <div class="appbar__right">
+                <span class="token-pill token-pill--sm" title="Tokens">
+                    <span class="token-pill__icon" data-token-icon="14"></span>
+                    <b data-token-count>0</b>
+                </span>
+                <button class="btn btn--ghost" onclick="mpBackToCareer()">Career</button>
+            </div>
+        </header>
+        <main class="mp-main">
+            <div id="mp-training-root"></div>
+        </main>
+    </div>
+
+    <!-- My Player: assets -->
+    <div id="screen-myplayer-assets" class="screen mp-screen">
+        <header class="appbar">
+            <div class="appbar__brand">
+                <span class="appbar__mark">MP</span>
+                <span class="appbar__title">Assets <small>Protect your mental health</small></span>
+            </div>
+            <div class="appbar__right">
+                <span class="token-pill token-pill--sm" title="Tokens">
+                    <span class="token-pill__icon" data-token-icon="14"></span>
+                    <b data-token-count>0</b>
+                </span>
+                <button class="btn btn--ghost" onclick="mpBackToCareer()">Career</button>
+            </div>
+        </header>
+        <main class="mp-main">
+            <div id="mp-assets-root"></div>
+        </main>
+    </div>
+
+    <!-- Account info modal -->
+    <div id="account-modal" class="modal-shell" aria-hidden="true">
+        <div class="modal-backdrop" onclick="accountCloseInfo()"></div>
+        <div class="account-card" role="dialog" aria-modal="true" aria-labelledby="account-info-title">
+            <button class="modal-close" onclick="accountCloseInfo()" aria-label="Close">&times;</button>
+            <div class="account-card__head">
+                <div class="account-card__avatar" data-account-avatar>?</div>
+                <div>
+                    <div class="eyebrow">Your account</div>
+                    <h3 id="account-info-title">Account</h3>
+                    <p id="account-info-email">—</p>
+                </div>
+            </div>
+            <div class="account-card__rows">
+                <div><span>Tokens</span><b><span class="token-inline" data-token-icon="14"></span><span id="account-info-tokens">0</span></b></div>
+                <div><span>My Players</span><b id="account-info-players">0</b></div>
+                <div><span>Member since</span><b id="account-info-since">Today</b></div>
+                <div><span>Account ID</span><b class="account-card__uid" id="account-info-uid">—</b></div>
+            </div>
+            <div class="account-card__earn">
+                <span class="token-inline" data-token-icon="15"></span>
+                Earn Tokens by winning online Head to Head matches and online tournament titles.
+            </div>
+            <div class="account-card__actions">
+                <button class="btn btn--primary" onclick="accountOpenMyPlayer()">My Player</button>
+                <button class="btn btn--ghost" onclick="accountCloseInfo()">Close</button>
+                <button class="btn btn--danger" onclick="accountSignOut()">Sign out</button>
+            </div>
+        </div>
     </div>
 
     <!-- Screen 2: Setup -->
@@ -2132,6 +2495,7 @@
     <script src="transfers.js"></script>
     <script src="investment.js"></script>
     <script src="save.js"></script>
+    <script src="account.js"></script>
     <script src="myplayer.js"></script>
     <script>
         // Menu showcase — Cristiano Ronaldo's card, for appreciation.

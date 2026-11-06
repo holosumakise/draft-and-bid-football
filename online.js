@@ -401,6 +401,7 @@ const Online = {
             this.mirrorSeen = 0;
             prepareMatchScreen(view.label || 'MATCH', view.name1 || 'Team 1', view.name2 || 'Team 2');
             this.mirror = {
+                matchId: view.matchId || null,
                 t1: { name: view.name1 || 'Team 1', id: null }, t2: { name: view.name2 || 'Team 2', id: null },
                 s1: 0, s2: 0, view: { s1: 0, s2: 0 }, ratings: {}, finished: false, remoteRatings: null
             };

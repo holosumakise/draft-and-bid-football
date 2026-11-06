@@ -1386,6 +1386,12 @@ function finishMatch() {
     if (Net.online && !Net.ownsGame()) return showToast('Only the host continues.');
     if (gameState.europe && gameState.europe.bracketPending) return;
     forceCloseMatchRatings();
+    // My Player runs its matches through this same engine, but the result is
+    // written back into the career instead of a tournament bracket.
+    if (gameState.mode === 'MP' && typeof mpOnLiveMatchFinished === 'function') {
+        mpOnLiveMatchFinished();
+        return;
+    }
     if (gameState.europe && gameState.currentMatchData && gameState.currentMatchData.isEurope) {
         gameState.currentMatchData = null;
         gameState.europe.bracketPending = true;
@@ -1417,6 +1423,17 @@ function showH2HResult(sim) {
         : 'Decided in normal time';
     showScreen('screen-h2h-result');
     if (typeof SaveGame !== 'undefined' && !Net.online) SaveGame.markFinished();
+
+    // Online Head to Head pays the winner's account. Tokens are written under
+    // the winner's own uid, so each device checks its own manager and claims
+    // its own reward; the match id makes the claim idempotent across screens.
+    if (Net.online && typeof accountAwardTokens === 'function') {
+        const mine = (gameState.managers || []).find(m => String(m.id) === String(Net.myManagerId));
+        if (mine && winner && winner.name === mine.name) {
+            const stamp = sim.matchId || `${sim.s1}-${sim.s2}-${sim.t1?.name || ''}-${sim.t2?.name || ''}`;
+            accountAwardTokens(TOKEN_REWARDS.H2H_WIN, `h2h_${Net.roomCode || 'room'}_${stamp}`, 'H2H win');
+        }
+    }
     const rematch = document.getElementById('h2h-rematch-btn');
     if (rematch) {
         const guest = Net.online && !Net.ownsGame();

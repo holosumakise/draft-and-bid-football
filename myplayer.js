@@ -1,29 +1,44 @@
 // ============================================================
-// MY PLAYER — online, account-based career mode.
+// MY PLAYER — account-based career: randomizer, dashboard, schedule,
+// live matches, training, rest, assets and the branching origin story.
 //
-// The mode is deliberately self-contained: local/H2H/Tournament keep working
-// without an account, while every My Player career lives under
+// The account gate lives in account.js; every career is stored at
 // users/{uid}/myPlayers/{careerId} and is only readable by that account.
 // ============================================================
 
 const MP = {
     open: false,
     view: null,
-    fb: null,
-    auth: null,
-    db: null,
-    user: null,
-    authBound: false,
-    authReady: null,
-    firstAuth: false,
-    authMode: 'login',
     careers: [],
     active: null,
     draft: null,
+    rollBusy: false,
+    createBusy: false,
     storyBusy: false,
+    screenBusy: false,
     reelToken: 0,
-    reelTimers: []
+    reelTimers: [],
+    selectedFixture: null,
+    calendarMonth: null,
+    lastResult: null,
+    liveFixtureId: null,
+    liveStarts: false,
+    livePlayerId: null,
+    liveClubSide: 1
 };
+
+// ------------------------------------------------------------
+// Balance knobs
+// ------------------------------------------------------------
+
+const MP_START_OVR = 67;
+const MP_MATCHDAY_GAP = 4;
+const MP_FIRST_MATCHDAY = 3;
+const MP_TRAIN_COOLDOWN_MS = 10 * 60 * 1000;
+const MP_TRAIN_BOOST_COOLDOWN_MS = 3 * 60 * 1000;
+const MP_REST_COOLDOWN_MS = 8 * 60 * 1000;
+const MP_REST_STAMINA = 34;
+const MP_ATTR_KEYS = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
 
 // ------------------------------------------------------------
 // Pools used by the randomizer
@@ -67,8 +82,6 @@ const MP_B_LEAGUE_CLUBS = [
     'Vanguard United', 'Summit City', 'Royal Park FC', 'Meridian Athletic'
 ];
 
-// Countries and football nations. This is intentionally broad so the
-// Nationality reel really can land anywhere in the world.
 const MP_COUNTRIES = [
     'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Antigua and Barbuda',
     'Argentina', 'Armenia', 'Australia', 'Austria', 'Azerbaijan', 'Bahamas',
@@ -106,6 +119,32 @@ const MP_COUNTRIES = [
     'Wales', 'Yemen', 'Zambia', 'Zimbabwe', 'England', 'Northern Ireland'
 ];
 
+const MP_TRAINING = [
+    { id: 'sprint', name: 'Sprint Drills', attr: 'PAC', desc: 'Explosive accelerations and top-speed work.' },
+    { id: 'finishing', name: 'Finishing Session', attr: 'SHO', desc: 'Striking technique, composure and shot power.' },
+    { id: 'passing', name: 'Passing Patterns', attr: 'PAS', desc: 'Vision, weight of pass and long distribution.' },
+    { id: 'dribbling', name: 'Close Control', attr: 'DRI', desc: 'Tight touches, turns and carrying the ball.' },
+    { id: 'defending', name: 'Defensive Unit', attr: 'DEF', desc: 'Timing, positioning and duels.' },
+    { id: 'gym', name: 'Strength & Power', attr: 'PHY', desc: 'Strength, stamina and aerial presence.' }
+];
+
+const MP_ASSETS = [
+    { id: 'dinner', name: 'Family Dinner', cost: 250, mental: 10, stamina: 0, shield: 0.02, desc: 'A proper meal at home. Small reset, big comfort.' },
+    { id: 'gym', name: 'Home Gym', cost: 800, mental: 4, stamina: 18, shield: 0.01, desc: 'Train away from the club and recover on your own schedule.' },
+    { id: 'therapist', name: 'Sports Psychologist', cost: 1500, mental: 30, stamina: 0, shield: 0.08, perMatch: 0.5, desc: 'Weekly sessions that keep pressure from turning into a slump.' },
+    { id: 'retreat', name: 'Weekend Retreat', cost: 2600, mental: 45, stamina: 10, shield: 0.05, desc: 'Two quiet days away from football and everyone who talks about it.' },
+    { id: 'network', name: 'Support Network', cost: 4000, mental: 60, stamina: 0, shield: 0.12, perMatch: 1, desc: 'Family, friends and a manager who actually listens. A permanent safety net.' }
+];
+
+// Which starting slot each MP position takes in the 4-3-3-ish shape below.
+const MP_SLOT_FOR_POS = {
+    GK: 0, LB: 1, LWB: 1, CB: 2, RB: 4, RWB: 4,
+    CDM: 6, CM: 5, CAM: 7, LM: 8, RM: 10,
+    LW: 8, RW: 10, CF: 9, ST: 9
+};
+
+const MP_TEAM_SHAPE = ['GK', 'LB', 'CB', 'CB', 'RB', 'CM', 'CDM', 'CM', 'LW', 'ST', 'RW'];
+
 // ------------------------------------------------------------
 // Small helpers
 // ------------------------------------------------------------
@@ -124,6 +163,10 @@ function mpRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function mpClamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
 function mpEsc(value) {
     return String(value == null ? '' : value)
         .replace(/&/g, '&amp;')
@@ -137,9 +180,6 @@ function mpEscAttr(value) {
     return mpEsc(value).replace(/`/g, '&#96;');
 }
 
-// A value safe to drop straight into an inline handler as a JS string literal:
-// JSON.stringify handles quotes/backslashes, then the HTML escaping protects the
-// attribute itself. Used for Firebase keys in generated rows.
 function mpJsArg(value) {
     return mpEsc(JSON.stringify(String(value == null ? '' : value)));
 }
@@ -153,6 +193,11 @@ function mpPosLabel(pos) {
     return MP_POSITION_LABELS[pos] || pos || '—';
 }
 
+function mpMoney(value) {
+    const n = Math.max(0, Math.round(Number(value) || 0));
+    return `$${n.toLocaleString()}`;
+}
+
 function mpRelativeTime(ts) {
     const value = Number(ts);
     if (!Number.isFinite(value) || value <= 0) return 'just now';
@@ -163,210 +208,62 @@ function mpRelativeTime(ts) {
     return `${Math.floor(diff / 86400000)}d ago`;
 }
 
-function mpFriendlyError(error) {
-    const message = (error && error.message) || String(error || 'Unknown error');
-    if (/permission_denied|permission denied/i.test(message)) {
-        return 'Firebase denied access. Deploy database.rules.json so each account can read and write its own users/{uid} branch.';
-    }
-    if (/network|offline|unavailable/i.test(message)) {
-        return 'Network error. My Player needs a connection to save your career.';
-    }
-    return message;
+function mpCooldownText(until) {
+    const remaining = Number(until) - Date.now();
+    if (!Number.isFinite(remaining) || remaining <= 0) return '';
+    const minutes = Math.ceil(remaining / 60000);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ${minutes % 60}m`;
 }
 
-function mpFriendlyAuthError(error) {
-    const code = (error && error.code) || '';
-    const messages = {
-        'auth/email-already-in-use': 'That email already has an account. Sign in instead.',
-        'auth/invalid-email': 'Enter a valid email address.',
-        'auth/weak-password': 'Password must be at least 6 characters.',
-        'auth/user-not-found': 'Email or password is incorrect.',
-        'auth/wrong-password': 'Email or password is incorrect.',
-        'auth/invalid-credential': 'Email or password is incorrect.',
-        'auth/invalid-login-credentials': 'Email or password is incorrect.',
-        'auth/too-many-requests': 'Too many attempts. Wait a moment and try again.',
-        'auth/network-request-failed': 'Network error. Check your connection and try again.',
-        'auth/operation-not-allowed': 'Email/Password sign-in is disabled. Enable it in Firebase Authentication, then try again.',
-        'auth/unauthorized-domain': 'This domain is not authorized in Firebase Authentication settings.'
-    };
-    return messages[code] || mpFriendlyError(error);
+function mpAvg(values) {
+    const list = (values || []).filter(v => Number.isFinite(Number(v)));
+    if (!list.length) return null;
+    return list.reduce((sum, v) => sum + Number(v), 0) / list.length;
 }
 
-// ------------------------------------------------------------
-// Firebase / account bootstrap
-// ------------------------------------------------------------
-
-async function mpEnsureFirebase() {
-    const cfg = (typeof Net !== 'undefined' && Net.config) ? Net.config() : null;
-    if (!cfg) {
-        throw new Error('No Firebase project configured. Add your web app config to firebase-config.js, then reload.');
-    }
-    await Net.loadSdk();
-    if (typeof firebase === 'undefined' || !firebase.initializeApp) {
-        throw new Error('Firebase SDK failed to load. Check your connection and reload.');
-    }
-    const app = (firebase.apps && firebase.apps.length) ? firebase.app() : firebase.initializeApp(cfg);
-    MP.fb = firebase;
-    MP.auth = firebase.auth();
-    MP.db = app.database();
-    if (typeof Net !== 'undefined' && !Net.fb) {
-        Net.fb = firebase;
-        Net.root = MP.db.ref();
-    }
-    return true;
+function mpOverallRating(career) {
+    const stats = career && career.careerStats;
+    if (!stats || !stats.ratingCount) return null;
+    return stats.ratingSum / stats.ratingCount;
 }
 
-function mpBindAuth() {
-    if (MP.authBound) return MP.authReady || Promise.resolve(MP.user);
-
-    MP.authBound = true;
-    MP.authReady = mpEnsureFirebase().then(() => new Promise(resolve => {
-        MP.auth.onAuthStateChanged(user => {
-            const realUser = user && !user.isAnonymous ? user : null;
-            MP.user = realUser;
-
-            // Keep the online module's cached identity in step. Without this, a
-            // device that played anonymously first would keep using that uid
-            // after the player signs into My Player.
-            if (typeof Net !== 'undefined') {
-                if (realUser) {
-                    Net.fb = MP.fb;
-                    if (!Net.root) Net.root = MP.db.ref();
-                    Net._authUser = user;
-                    Net.authUid = user.uid;
-                } else if (!Net._authUser || !Net._authUser.isAnonymous) {
-                    Net._authUser = null;
-                    Net.authUid = null;
-                }
-            }
-
-            if (!MP.firstAuth) {
-                MP.firstAuth = true;
-                resolve(MP.user);
-                return;
-            }
-            if (MP.open) mpOnAuthChanged();
-        });
-    })).catch(error => {
-        MP.authBound = false;
-        MP.authReady = null;
-        throw error;
-    });
-
-    return MP.authReady;
+function mpNextFixture(career) {
+    const fixtures = (career.schedule && career.schedule.fixtures) || [];
+    return fixtures.find(fixture => !fixture.played) || null;
 }
 
-async function mpEnsureProfile(user) {
-    if (!MP.db || !user) return;
-    try {
-        await MP.db.ref(`users/${user.uid}/profile`).update({
-            email: user.email || '',
-            lastSeenAt: Date.now()
-        });
-    } catch (error) {
-        // Profile metadata is a convenience; career access still works (or fails
-        // with a clear rules message) through the myPlayers branch.
-    }
+function mpFixtureDate(career, fixture) {
+    const start = Number(career.startDate) || Date.now();
+    return new Date(start + Number(fixture.day || 0) * 86400000);
 }
 
-function mpOnAuthChanged() {
-    if (!MP.open) return;
-    if (MP.user) {
-        mpEnsureProfile(MP.user).catch(() => {});
-        mpShowList();
-    } else {
-        MP.careers = [];
-        MP.active = null;
-        MP.view = 'auth';
-        mpShowAuth();
-    }
+function mpDateLabel(date) {
+    return date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-// ------------------------------------------------------------
-// Entry / navigation
-// ------------------------------------------------------------
-
-async function openMyPlayer() {
-    MP.open = true;
-    MP.view = 'auth';
-    MP.active = null;
-    showScreen('screen-myplayer-auth');
-    mpResetAuthUI();
-    mpSetAuthStatus('Connecting to your account…');
-
-    try {
-        await mpBindAuth();
-        if (MP.user) {
-            await mpShowList();
-        } else {
-            mpShowAuth();
-        }
-    } catch (error) {
-        mpSetAuthStatus(mpFriendlyError(error), true);
-    }
-}
-
-function mpClose() {
-    MP.open = false;
-    MP.view = null;
-    MP.active = null;
-    showScreen('screen-main');
-}
-
-function mpShowAuth() {
-    if (!MP.open) MP.open = true;
-    MP.view = 'auth';
-    MP.active = null;
-    showScreen('screen-myplayer-auth');
-    mpResetAuthUI();
-}
-
-async function mpShowList() {
-    if (!MP.user) {
-        mpShowAuth();
-        return;
-    }
-    MP.open = true;
-    MP.view = 'list';
-    MP.active = null;
-
-    const emailEl = document.getElementById('mp-account-email');
-    if (emailEl) emailEl.textContent = MP.user.email || 'Signed in';
-
-    mpSetListStatus('Loading your careers…');
-    mpRenderList();
-    showScreen('screen-myplayer-list');
-
-    try {
-        await mpLoadCareers();
-        mpSetListStatus('');
-    } catch (error) {
-        MP.careers = [];
-        mpSetListStatus(mpFriendlyError(error), true);
-    }
-    mpRenderList();
-}
-
-function mpBackToList() {
-    if (!MP.user) {
-        mpShowAuth();
-        return;
-    }
-    MP.active = null;
-    MP.view = 'list';
-    mpRenderList();
-    showScreen('screen-myplayer-list');
-    mpSetListStatus('');
+function mpMonthKey(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
 // ------------------------------------------------------------
 // Cloud data
 // ------------------------------------------------------------
 
-// Careers are plain JSON, so a partially written or future-version record must
-// never crash the story renderer. Fill in the opening chapter and club names.
+function mpRequireAccount() {
+    if (typeof Account === 'undefined' || !Account.user) {
+        if (typeof accountShowGate === 'function') accountShowGate();
+        return false;
+    }
+    return true;
+}
+
+// A career is plain JSON. Fill in fields added after a career was created so an
+// older or partially written record can never crash the dashboard or story.
 function mpEnsureCareerShape(career) {
     if (!career) return career;
+
     career.story = career.story || { path: 'intro', step: 0 };
     if (!MP_STORY[career.story.path]) career.story.path = 'intro';
     if (!Number.isFinite(Number(career.story.step))) career.story.step = 0;
@@ -376,29 +273,88 @@ function mpEnsureCareerShape(career) {
     if (!career.story.clubs.loan) {
         career.story.clubs.loan = mpPickDifferent(MP_C_LEAGUE_CLUBS, [career.story.clubs.cLeague]);
     }
+
+    career.position = career.position || 'CM';
+    career.age = Number(career.age) || 18;
+    career.name = career.name || 'My Player';
+    career.nationality = career.nationality || 'England';
+    career.hometown = career.hometown || mpPick(MP_CITIES);
+    career.archetype = career.archetype || 'Deep-Lying Forward';
+    career.playstyle = career.playstyle || 'Athena';
+    career.heightCm = Number(career.heightCm) || 180;
+    career.weightKg = Number(career.weightKg) || 74;
+    career.createdAt = Number(career.createdAt) || Date.now();
+    career.updatedAt = Number(career.updatedAt) || career.createdAt;
+    career.startDate = Number(career.startDate) || career.createdAt;
+
+    // Attribute ratings are stored separately from career record stats.
+    if (!career.attrs || typeof career.attrs !== 'object') {
+        const target = mpClamp(Number(career.ovr) || MP_START_OVR, 40, 99);
+        career.attrs = mpBuildStartingAttrs(career.position, career.archetype, career.playstyle, target);
+    }
+    MP_ATTR_KEYS.forEach(key => {
+        const value = Number(career.attrs[key]);
+        career.attrs[key] = Number.isFinite(value) ? mpClamp(Math.round(value), 1, 99) : 60;
+    });
+    career.ovr = calculateOVRFromStats(career.attrs, career.position);
+
+    const legacy = career.stats || {};
+    career.careerStats = career.careerStats || {
+        matches: Number(legacy.matches) || 0,
+        goals: Number(legacy.goals) || 0,
+        assists: Number(legacy.assists) || 0,
+        ratingSum: 0,
+        ratingCount: 0
+    };
+    career.careerStats.matches = Number(career.careerStats.matches) || 0;
+    career.careerStats.goals = Number(career.careerStats.goals) || 0;
+    career.careerStats.assists = Number(career.careerStats.assists) || 0;
+    career.careerStats.ratingSum = Number(career.careerStats.ratingSum) || 0;
+    career.careerStats.ratingCount = Number(career.careerStats.ratingCount) || 0;
+
+    career.club = career.club || {};
+    career.club.name = career.club.name || career.story.clubs.cLeague;
+    career.club.league = career.club.league || 'C League';
+    career.club.salary = Number(career.club.salary) || 1450;
+
+    career.money = Number(career.money) || 0;
+    career.health = career.health || {};
+    career.health.stamina = mpClamp(Number(career.health.stamina) || 100, 0, 100);
+    career.health.mental = mpClamp(Number(career.health.mental) || 100, 0, 100);
+    career.injury = Math.max(0, Number(career.injury) || 0);
+    career.suspension = Math.max(0, Number(career.suspension) || 0);
+    career.form = Array.isArray(career.form) ? career.form.filter(v => Number.isFinite(Number(v))).slice(-8) : [];
+    career.trainingCooldowns = career.trainingCooldowns || {};
+    career.restReadyAt = Number(career.restReadyAt) || 0;
+    career.assets = Array.isArray(career.assets) ? career.assets : [];
+    career.schedule = career.schedule || { fixtures: [] };
+    career.schedule.fixtures = Array.isArray(career.schedule.fixtures) ? career.schedule.fixtures : [];
+    mpEnsureSchedule(career);
     return career;
 }
 
 async function mpLoadCareers() {
-    if (!MP.user || !MP.db) throw new Error('Sign in required.');
-    const snapshot = await MP.db.ref(`users/${MP.user.uid}/myPlayers`).once('value');
+    if (!mpRequireAccount()) throw new Error('Sign in required.');
+    const snapshot = await Account.db.ref(`users/${Account.user.uid}/myPlayers`).once('value');
     const raw = snapshot.val() || {};
     MP.careers = Object.keys(raw).map(key => {
         const career = raw[key] || {};
         return mpEnsureCareerShape({ ...career, id: career.id || key });
     }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    Account.loadedCareers = MP.careers.length;
 }
 
 async function mpSaveCareer(career) {
-    if (!MP.user || !MP.db) throw new Error('Sign in required to save.');
+    if (!mpRequireAccount()) throw new Error('Sign in required to save.');
     career.updatedAt = Date.now();
     const payload = JSON.parse(JSON.stringify(career));
-    await MP.db.ref(`users/${MP.user.uid}/myPlayers/${career.id}`).set(payload);
+    await Account.db.ref(`users/${Account.user.uid}/myPlayers/${career.id}`).set(payload);
 
     const index = MP.careers.findIndex(item => item.id === career.id);
     if (index >= 0) MP.careers[index] = career;
     else MP.careers.unshift(career);
     MP.careers.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    Account.loadedCareers = MP.careers.length;
 }
 
 async function mpAutosaveNow() {
@@ -409,134 +365,131 @@ async function mpAutosaveNow() {
         mpSetSaveState('saved');
     } catch (error) {
         mpSetSaveState('error');
-        if (typeof showToast === 'function') showToast(`Autosave failed: ${mpFriendlyError(error)}`, 5200);
+        if (typeof showToast === 'function') showToast(`Autosave failed: ${accountFriendlyError(error)}`, 5200);
     }
 }
 
+function mpSetSaveState(state) {
+    const labels = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
+    const cls = `mp-save${state === 'saved' ? ' is-saved' : state === 'saving' ? ' is-saving' : state === 'error' ? ' is-error' : ''}`;
+    ['mp-save-state', 'mp-dash-save'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.className = cls;
+        el.innerHTML = `<span class="mp-save__dot"></span>${labels[state] || 'Cloud save'}`;
+    });
+}
+
 async function mpDeleteCareer(id) {
-    if (!MP.user || !MP.db) return;
+    if (!mpRequireAccount()) return;
     const career = MP.careers.find(item => item.id === id);
     if (!career) return;
     const label = career.name || 'this career';
     if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
 
     try {
-        await MP.db.ref(`users/${MP.user.uid}/myPlayers/${id}`).remove();
+        await Account.db.ref(`users/${Account.user.uid}/myPlayers/${id}`).remove();
         MP.careers = MP.careers.filter(item => item.id !== id);
         if (MP.active && MP.active.id === id) MP.active = null;
+        Account.loadedCareers = MP.careers.length;
         mpRenderList();
         if (typeof showToast === 'function') showToast('My Player deleted.');
     } catch (error) {
-        if (typeof showToast === 'function') showToast(`Delete failed: ${mpFriendlyError(error)}`, 5200);
-    }
-}
-
-async function mpSignOut() {
-    if (!MP.auth) return;
-    try {
-        await MP.auth.signOut();
-    } catch (error) {
-        if (typeof showToast === 'function') showToast('Could not sign out. Try again.');
+        if (typeof showToast === 'function') showToast(`Delete failed: ${accountFriendlyError(error)}`, 5200);
     }
 }
 
 // ------------------------------------------------------------
-// Auth screen
+// Entry / navigation
 // ------------------------------------------------------------
 
-function mpResetAuthUI() {
-    MP.authMode = 'login';
-    const email = document.getElementById('mp-auth-email');
-    const password = document.getElementById('mp-auth-password');
-    const confirm = document.getElementById('mp-auth-confirm');
-    if (email) email.value = '';
-    if (password) password.value = '';
-    if (confirm) confirm.value = '';
-    mpSetAuthMode('login');
+function openMyPlayer() {
+    if (!mpRequireAccount()) return;
+    MP.open = true;
+    MP.active = null;
+    mpShowList();
 }
 
-function mpSetAuthMode(mode) {
-    MP.authMode = mode === 'signup' ? 'signup' : 'login';
-    const signup = MP.authMode === 'signup';
-
-    const submit = document.getElementById('mp-auth-submit');
-    if (submit) {
-        submit.disabled = false;
-        submit.textContent = signup ? 'Create account' : 'Sign in';
-    }
-    const toggle = document.getElementById('mp-auth-toggle');
-    if (toggle) toggle.textContent = signup ? 'I already have an account' : 'Create an account';
-    const sub = document.getElementById('mp-auth-sub');
-    if (sub) {
-        sub.textContent = signup
-            ? 'Create a free account. Every My Player career is saved to it and visible only to you.'
-            : 'Sign in so every career is saved to your account — and only yours.';
-    }
-    const wrap = document.getElementById('mp-auth-confirm-wrap');
-    if (wrap) wrap.classList.toggle('hidden', !signup);
-    const password = document.getElementById('mp-auth-password');
-    if (password) password.setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
-    mpSetAuthStatus('');
+function mpClose() {
+    MP.open = false;
+    MP.view = null;
+    MP.active = null;
+    showScreen('screen-main');
+    if (typeof accountRenderHud === 'function') accountRenderHud();
 }
 
-function mpToggleAuthMode() {
-    const password = document.getElementById('mp-auth-password');
-    const confirm = document.getElementById('mp-auth-confirm');
-    if (password) password.value = '';
-    if (confirm) confirm.value = '';
-    mpSetAuthMode(MP.authMode === 'signup' ? 'login' : 'signup');
-    const email = document.getElementById('mp-auth-email');
-    if (email) email.focus();
-}
+async function mpShowList() {
+    if (!mpRequireAccount()) return;
+    MP.open = true;
+    MP.view = 'list';
+    MP.active = null;
+    MP.selectedFixture = null;
+    MP.calendarMonth = null;
 
-async function mpSubmitAuth() {
-    const submit = document.getElementById('mp-auth-submit');
-    const email = (document.getElementById('mp-auth-email')?.value || '').trim();
-    const password = document.getElementById('mp-auth-password')?.value || '';
-    const confirm = document.getElementById('mp-auth-confirm')?.value || '';
+    const emailEl = document.getElementById('mp-account-email');
+    if (emailEl) emailEl.textContent = Account.user.email || 'Signed in';
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        mpSetAuthStatus('Enter a valid email address.', true);
-        return;
-    }
-    if (password.length < 6) {
-        mpSetAuthStatus('Password must be at least 6 characters.', true);
-        return;
-    }
-    if (MP.authMode === 'signup' && password !== confirm) {
-        mpSetAuthStatus('Passwords do not match.', true);
-        return;
-    }
-
-    const mode = MP.authMode;
-    if (submit) {
-        submit.disabled = true;
-        submit.textContent = mode === 'signup' ? 'Creating account…' : 'Signing in…';
-    }
-    mpSetAuthStatus('');
+    mpSetListStatus('Loading your careers…');
+    mpRenderList();
+    showScreen('screen-myplayer-list');
+    accountRenderHud();
 
     try {
-        await mpBindAuth();
-        if (mode === 'signup') {
-            await MP.auth.createUserWithEmailAndPassword(email, password);
-        } else {
-            await MP.auth.signInWithEmailAndPassword(email, password);
-        }
-        // onAuthStateChanged takes over and loads the career list.
+        await mpLoadCareers();
+        mpSetListStatus('');
     } catch (error) {
-        mpSetAuthStatus(mpFriendlyAuthError(error), true);
-        if (submit) {
-            submit.disabled = false;
-            submit.textContent = mode === 'signup' ? 'Create account' : 'Sign in';
-        }
+        MP.careers = [];
+        mpSetListStatus(accountFriendlyError(error), true);
     }
+    mpRenderList();
+    accountRenderHud();
 }
 
-function mpSetAuthStatus(text, isError) {
-    const el = document.getElementById('mp-auth-status');
-    if (!el) return;
-    el.textContent = text || '';
-    el.className = 'mp-status' + (isError ? ' is-error' : '');
+function mpBackToList() {
+    if (!mpRequireAccount()) return;
+    MP.active = null;
+    MP.view = 'list';
+    MP.selectedFixture = null;
+    MP.calendarMonth = null;
+    mpRenderList();
+    showScreen('screen-myplayer-list');
+    mpSetListStatus('');
+    accountRenderHud();
+}
+
+function mpOpenCareer(id) {
+    const career = MP.careers.find(item => item.id === id);
+    if (!career) return;
+    MP.active = mpEnsureCareerShape(career);
+    MP.open = true;
+    MP.view = 'dashboard';
+    MP.selectedFixture = null;
+    MP.calendarMonth = null;
+    mpRenderDashboard();
+    showScreen('screen-myplayer-dashboard');
+}
+
+function mpBackToCareer() {
+    if (!MP.active) {
+        mpBackToList();
+        return;
+    }
+    MP.view = 'dashboard';
+    mpRenderDashboard();
+    showScreen('screen-myplayer-dashboard');
+}
+
+function mpOpenStory() {
+    if (!MP.active) return;
+    MP.view = 'story';
+    MP.storyBusy = false;
+    mpRenderStory();
+    showScreen('screen-myplayer-story');
+}
+
+function mpChapterName(career) {
+    const scene = mpGetScene(career).scene;
+    return scene && scene.act ? scene.act : 'Chapter 1 · The Last Game';
 }
 
 function mpSetListStatus(text, isError) {
@@ -572,15 +525,15 @@ function mpRenderList() {
 
     host.innerHTML = MP.careers.map(career => {
         const chapter = mpChapterName(career);
-        const position = career.position || '—';
+        const next = mpNextFixture(career);
         return `
             <div class="mp-career">
                 <button class="mp-career__open" onclick="mpOpenCareer(${mpJsArg(career.id)})">
-                    <span class="mp-career__badge">${mpEsc(position)}</span>
+                    <span class="mp-career__badge">${mpEsc(String(career.ovr || MP_START_OVR))}</span>
                     <span class="mp-career__body">
                         <span class="mp-career__name">${mpEsc(career.name || 'Unnamed Player')}</span>
-                        <span class="mp-career__meta">Age ${Number(career.age) || 18} · ${mpEsc(career.nationality || '—')} · ${mpEsc(mpHeight(career.heightCm))} · ${mpEsc((Number(career.weightKg) || 0) + ' kg')}</span>
-                        <span class="mp-career__tags">${mpEsc(career.archetype || '—')} · ${mpEsc(career.playstyle || '—')}</span>
+                        <span class="mp-career__meta">${mpEsc(career.position || '—')} · Age ${Number(career.age) || 18} · ${mpEsc(career.nationality || '—')} · ${mpEsc(career.club ? career.club.league : 'C League')}</span>
+                        <span class="mp-career__tags">${mpEsc(career.club ? career.club.name : '—')}${next ? ' · Next: ' + mpEsc(next.opponent) : ' · Season complete'}</span>
                     </span>
                     <span class="mp-career__side">
                         <span class="mp-career__chapter">${mpEsc(chapter)}</span>
@@ -590,21 +543,6 @@ function mpRenderList() {
                 <button class="mp-career__del" onclick="mpDeleteCareer(${mpJsArg(career.id)})" title="Delete career">Delete</button>
             </div>`;
     }).join('');
-}
-
-function mpOpenCareer(id) {
-    const career = MP.careers.find(item => item.id === id);
-    if (!career) return;
-    MP.active = mpEnsureCareerShape(career);
-    MP.view = 'story';
-    MP.storyBusy = false;
-    mpRenderStory();
-    showScreen('screen-myplayer-story');
-}
-
-function mpChapterName(career) {
-    const scene = mpGetScene(career).scene;
-    return scene && scene.act ? scene.act : 'Chapter 1 · The Last Game';
 }
 
 // ------------------------------------------------------------
@@ -682,10 +620,13 @@ function mpRenderReels() {
         ['archetype', 'Archetype'],
         ['playstyle', 'Playstyle']
     ];
+    const idle = !MP.draft;
     host.innerHTML = reels.map(([field, label]) => `
         <div class="mp-reel" data-field="${field}">
             <div class="mp-reel__label">${label}</div>
-            <div class="mp-reel__window"><div class="mp-reel__track"></div></div>
+            <div class="mp-reel__window"><div class="mp-reel__track">
+                <div class="mp-reel__item">${idle ? 'Ready to roll' : mpEsc(mpDraftDisplay(field))}</div>
+            </div></div>
         </div>`).join('');
 }
 
@@ -722,45 +663,96 @@ function mpAnimateReels() {
 }
 
 function mpShowCreate() {
-    if (!MP.user) {
-        mpShowAuth();
-        return;
-    }
+    if (!mpRequireAccount()) return;
     MP.open = true;
     MP.view = 'create';
     MP.active = null;
-    MP.draft = mpRollDraft();
+    MP.draft = null;
+    MP.rollBusy = false;
+    MP.createBusy = false;
+    MP.selectedFixture = null;
 
     const name = document.getElementById('mp-name');
     if (name) name.value = '';
     const submit = document.getElementById('mp-create-btn');
     if (submit) {
-        submit.disabled = false;
+        submit.disabled = true;
         submit.textContent = 'Create My Player';
     }
-    mpSetCreateStatus('');
+    const roll = document.getElementById('mp-roll-btn');
+    if (roll) {
+        roll.disabled = false;
+        roll.textContent = 'Roll';
+    }
+    mpSetCreateStatus('Your first roll is free. Rerolls cost Tokens.');
     mpRenderReels();
     showScreen('screen-myplayer-create');
-    mpAnimateReels();
-    setTimeout(() => {
-        const input = document.getElementById('mp-name');
-        if (input) input.focus();
-    }, 80);
+    accountRenderHud();
 }
 
-function mpRollAgain() {
+async function mpRollAction() {
+    if (!mpRequireAccount() || MP.rollBusy) return;
+    const reroll = !!MP.draft;
+    MP.rollBusy = true;
+
+    const roll = document.getElementById('mp-roll-btn');
+    const submit = document.getElementById('mp-create-btn');
+    if (roll) { roll.disabled = true; roll.textContent = reroll ? 'Rolling…' : 'Rolling…'; }
+    if (submit) submit.disabled = true;
+
+    if (reroll) {
+        const paid = await accountSpendTokens(TOKEN_COSTS.MP_REROLL, 'My Player reroll');
+        if (!paid) {
+            MP.rollBusy = false;
+            if (roll) { roll.disabled = false; roll.textContent = `Reroll · ${TOKEN_COSTS.MP_REROLL} Tokens`; }
+            if (submit) submit.disabled = !MP.draft;
+            mpSetCreateStatus(`You need ${TOKEN_COSTS.MP_REROLL} Tokens to reroll.`, true);
+            return;
+        }
+        mpSetCreateStatus(`Rerolled for ${TOKEN_COSTS.MP_REROLL} Tokens.`);
+    } else {
+        mpSetCreateStatus('Rolling your player…');
+    }
+
     MP.draft = mpRollDraft();
-    mpSetCreateStatus('');
     mpRenderReels();
     mpAnimateReels();
+    accountRenderHud();
+
+    setTimeout(() => {
+        MP.rollBusy = false;
+        if (roll) { roll.disabled = false; roll.textContent = `Reroll · ${TOKEN_COSTS.MP_REROLL} Tokens`; }
+        if (submit) submit.disabled = false;
+        const hint = document.getElementById('mp-create-status');
+        if (hint) {
+            hint.textContent = 'Happy with the roll? Name your player and create the career.';
+            hint.className = 'mp-status';
+        }
+    }, 1000);
+}
+
+function mpBuildStartingAttrs(position, archetype, playstyle, target = MP_START_OVR) {
+    const attrs = buildRoleStats(target, position, archetype, playstyle);
+    MP_ATTR_KEYS.forEach(key => { attrs[key] = mpClamp(Math.round(attrs[key]), 1, 99); });
+    const weights = POS_WEIGHTS[position] || POS_WEIGHTS.CM;
+    const sorted = MP_ATTR_KEYS.slice().sort((a, b) => (weights[b] || 0) - (weights[a] || 0));
+
+    let guard = 0;
+    while (calculateOVRFromStats(attrs, position) !== target && guard++ < 300) {
+        const diff = target - calculateOVRFromStats(attrs, position);
+        const step = diff > 0 ? 1 : -1;
+        const key = sorted.find(k => step > 0 ? attrs[k] < 99 : attrs[k] > 40) || sorted[0];
+        attrs[key] = mpClamp(attrs[key] + step, 40, 99);
+    }
+    return attrs;
 }
 
 async function mpCreateCareer() {
-    if (!MP.user) {
-        mpShowAuth();
+    if (!mpRequireAccount() || MP.createBusy) return;
+    if (!MP.draft) {
+        mpSetCreateStatus('Press Roll first — the reels decide everything except the name.', true);
         return;
     }
-    if (!MP.draft) MP.draft = mpRollDraft();
 
     const input = document.getElementById('mp-name');
     const name = (input?.value || '').trim().replace(/\s+/g, ' ');
@@ -774,6 +766,7 @@ async function mpCreateCareer() {
         return;
     }
 
+    MP.createBusy = true;
     const submit = document.getElementById('mp-create-btn');
     if (submit) {
         submit.disabled = true;
@@ -785,9 +778,11 @@ async function mpCreateCareer() {
     const cLeague = mpPick(MP_C_LEAGUE_CLUBS);
     const bLeague = mpPick(MP_B_LEAGUE_CLUBS);
     const draft = MP.draft;
+    const attrs = mpBuildStartingAttrs(draft.position, draft.archetype, draft.playstyle);
+
     const career = {
         id: `mp_${now.toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
-        version: 1,
+        version: 2,
         name,
         nationality: draft.nationality,
         heightCm: draft.heightCm,
@@ -795,11 +790,23 @@ async function mpCreateCareer() {
         position: draft.position,
         archetype: draft.archetype,
         playstyle: draft.playstyle,
+        attrs,
+        ovr: calculateOVRFromStats(attrs, draft.position),
         age: 18,
         hometown: mpPick(MP_CITIES),
         createdAt: now,
         updatedAt: now,
-        stats: { matches: 0, goals: 0, assists: 0 },
+        startDate: now,
+        money: 0,
+        health: { stamina: 100, mental: 100 },
+        injury: 0,
+        suspension: 0,
+        form: [],
+        assets: [],
+        trainingCooldowns: {},
+        restReadyAt: 0,
+        careerStats: { matches: 0, goals: 0, assists: 0, ratingSum: 0, ratingCount: 0 },
+        club: { name: cLeague, league: 'C League', salary: 1450 },
         story: {
             path: 'intro',
             step: 0,
@@ -811,21 +818,1085 @@ async function mpCreateCareer() {
             }
         }
     };
+    mpEnsureSchedule(career);
 
     try {
         await mpSaveCareer(career);
         MP.active = career;
+        MP.draft = null;
+        MP.createBusy = false;
         MP.view = 'story';
         MP.storyBusy = false;
         mpRenderStory();
         showScreen('screen-myplayer-story');
+        if (typeof showToast === 'function') showToast(`${career.name} signs for ${career.club.name}.`);
     } catch (error) {
-        mpSetCreateStatus(mpFriendlyError(error), true);
+        MP.createBusy = false;
+        mpSetCreateStatus(accountFriendlyError(error), true);
         if (submit) {
             submit.disabled = false;
             submit.textContent = 'Create My Player';
         }
     }
+}
+
+// ------------------------------------------------------------
+// Schedule generation
+// ------------------------------------------------------------
+
+function mpEnsureSchedule(career) {
+    if (!career || !career.schedule) return;
+    const fixtures = career.schedule.fixtures;
+    const unplayed = fixtures.filter(fixture => !fixture.played).length;
+    if (unplayed >= 14) return;
+
+    let round = fixtures.length + 1;
+    for (let i = unplayed; i < 16; i++) {
+        const opponents = MP_C_LEAGUE_CLUBS.filter(club => club !== career.club.name);
+        const opponent = opponents[(round * 7 + round * round) % Math.max(1, opponents.length)] || opponents[0];
+        fixtures.push({
+            id: `fx_${career.id}_${round}`,
+            round,
+            opponent,
+            home: round % 2 === 1,
+            day: MP_FIRST_MATCHDAY + (round - 1) * MP_MATCHDAY_GAP,
+            key: round % 5 === 0,
+            played: false,
+            result: null
+        });
+        round++;
+    }
+}
+
+function mpLookupFixture(id) {
+    if (!MP.active || !MP.active.schedule) return null;
+    return MP.active.schedule.fixtures.find(fixture => fixture.id === id) || null;
+}
+
+// ------------------------------------------------------------
+// Dashboard
+// ------------------------------------------------------------
+
+function mpManagerDecision(career) {
+    if (career.injury > 0) {
+        return { starts: false, reason: `Injured — out for ${career.injury} more match${career.injury > 1 ? 'es' : ''}` };
+    }
+    if (career.suspension > 0) {
+        return { starts: false, reason: `Suspended — ${career.suspension} more match${career.suspension > 1 ? 'es' : ''}` };
+    }
+    if (career.health.stamina < 32) {
+        return { starts: false, reason: 'The manager rests you — stamina too low' };
+    }
+    if (career.health.mental < 28) {
+        return { starts: false, reason: 'The manager protects you — mental state too low' };
+    }
+    const formAvg = mpAvg(career.form.slice(-5));
+    if (formAvg != null && formAvg < 6.0) {
+        return { starts: false, reason: 'Dropped — recent performances below the standard' };
+    }
+    if (formAvg != null && formAvg < 6.3 && career.health.stamina < 55) {
+        return { starts: false, reason: 'Rotated — the manager wants fresher legs' };
+    }
+    return { starts: true, reason: 'Starting XI' };
+}
+
+function mpPlayerObject(career, scale = 1) {
+    const attrs = {};
+    MP_ATTR_KEYS.forEach(key => {
+        attrs[key] = mpClamp(Math.round((Number(career.attrs[key]) || 60) * scale), 1, 99);
+    });
+    return {
+        id: `mp_${career.id}`,
+        name: career.name,
+        rating: scale === 1 ? career.ovr : calculateOVRFromStats(attrs, career.position),
+        displayOVR: String(Math.min(99, Math.round(scale === 1 ? career.ovr : calculateOVRFromStats(attrs, career.position)))),
+        stats: attrs,
+        mainPos: career.position,
+        archetype: career.archetype,
+        playstyle: career.playstyle,
+        subPos: [],
+        team: career.club ? career.club.name : '',
+        nationality: career.nationality
+    };
+}
+
+// A tired or drained player really is worse in the live engine: low stamina and
+// low mental health shave the attributes used for every duel, chance and rating.
+function mpConditionScale(career) {
+    const stamina = Number(career.health.stamina) || 0;
+    const mental = Number(career.health.mental) || 0;
+    let scale = 1;
+    if (stamina < 65) scale -= (65 - stamina) / 100 * 0.3;
+    if (mental < 65) scale -= (65 - mental) / 100 * 0.16;
+    return mpClamp(scale, 0.78, 1);
+}
+
+function mpFormMarkup(career) {
+    if (!career.form.length) {
+        return '<div class="mp-form"><span class="mp-chip">Form</span><span class="mp-chip">No rated matches yet</span></div>';
+    }
+    return `<div class="mp-form"><span class="mp-chip">Form</span>${career.form.slice(-8).map(rating => {
+        const value = Number(rating);
+        const cls = value >= 7 ? ' is-good' : value < 6 ? ' is-bad' : '';
+        return `<span class="mp-form__chip${cls}">${value.toFixed(1)}</span>`;
+    }).join('')}</div>`;
+}
+
+function mpHealthMarkup(career) {
+    const stamina = Math.round(career.health.stamina);
+    const mental = Math.round(career.health.mental);
+    return `
+        <div class="mp-health">
+            <div class="mp-health__row">
+                <div class="mp-health__top"><span>Stamina</span><b>${stamina}%</b></div>
+                <div class="mp-bar"><div class="mp-bar__fill ${stamina < 35 ? 'mp-bar__fill--low' : 'mp-bar__fill--stamina'}" style="--v:${stamina}"></div></div>
+            </div>
+            <div class="mp-health__row">
+                <div class="mp-health__top"><span>Mental health</span><b>${mental}%</b></div>
+                <div class="mp-bar"><div class="mp-bar__fill ${mental < 35 ? 'mp-bar__fill--low' : 'mp-bar__fill--mental'}" style="--v:${mental}"></div></div>
+            </div>
+        </div>`;
+}
+
+function mpRenderDashboard() {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const root = document.getElementById('mp-dashboard-root');
+    if (!root) return;
+
+    const subtitle = document.getElementById('mp-dash-subtitle');
+    if (subtitle) subtitle.textContent = career.name;
+
+    const player = mpPlayerObject(career);
+    const avg = mpOverallRating(career);
+    const next = mpNextFixture(career);
+    const decision = mpManagerDecision(career);
+    const trainingReady = MP_TRAINING.some(exercise => !mpCooldownText(career.trainingCooldowns[exercise.id]));
+    const restReady = !mpCooldownText(career.restReadyAt);
+
+    root.innerHTML = `
+        <div class="mp-dash">
+            <aside class="mp-dash__side">
+                <div class="mp-dash__cardwrap">${renderPlayerCard(player, { size: 'xl' })}</div>
+                <div class="mp-panel">
+                    <div class="mp-idcard__rows">
+                        <div><span>Overall</span><b>${career.ovr}</b></div>
+                        <div><span>Position</span><b>${mpEsc(mpPosLabel(career.position))}</b></div>
+                        <div><span>Archetype</span><b>${mpEsc(career.archetype)}</b></div>
+                        <div><span>Playstyle</span><b>${mpEsc(career.playstyle)}</b></div>
+                        <div><span>Height / Weight</span><b>${mpEsc(mpHeight(career.heightCm))} · ${career.weightKg} kg</b></div>
+                    </div>
+                    <div class="mp-form" style="margin-top:14px">
+                        ${MP_ATTR_KEYS.map(key => `<span class="mp-chip">${key} ${Math.round(career.attrs[key])}</span>`).join('')}
+                    </div>
+                    <button class="btn btn--ghost mp-idcard__back" onclick="mpOpenStory()">Origin story · ${mpEsc(mpChapterName(career))}</button>
+                </div>
+            </aside>
+
+            <section class="mp-dash__main">
+                <div class="mp-panel">
+                    <div class="mp-club-head">
+                        <div>
+                            <div class="eyebrow">${mpEsc(career.club.league)}</div>
+                            <h3>${mpEsc(career.club.name)}</h3>
+                            <p>${mpEsc(mpPosLabel(career.position))} · ${career.age} years old · ${mpEsc(career.nationality)}</p>
+                        </div>
+                        <div class="mp-club-side">
+                            <b>${mpMoney(career.money)}</b>
+                            <span>Saved from salary</span>
+                        </div>
+                    </div>
+
+                    <div class="mp-statgrid">
+                        <div class="mp-stat"><span>Salary</span><b>${mpMoney(career.club.salary)}</b><small>per week</small></div>
+                        <div class="mp-stat"><span>Appearances</span><b>${career.careerStats.matches}</b><small>${career.careerStats.goals} goals · ${career.careerStats.assists} assists</small></div>
+                        <div class="mp-stat"><span>Avg rating</span><b>${avg ? avg.toFixed(2) : '—'}</b><small>Sofascore style</small></div>
+                        <div class="mp-stat"><span>Manager</span><b>${decision.starts ? 'Starts' : 'Benched'}</b><small>${mpEsc(decision.reason)}</small></div>
+                    </div>
+
+                    ${mpHealthMarkup(career)}
+
+                    ${mpFormMarkup(career)}
+                </div>
+
+                <div class="mp-panel">
+                    <div class="mp-next">
+                        <div class="mp-next__who">
+                            <span>Next fixture</span>
+                            <b>${next ? `${next.home ? 'vs' : 'at'} ${mpEsc(next.opponent)}` : 'Season complete'}</b>
+                            <small>${next ? `Matchday ${next.round} · ${mpDateLabel(mpFixtureDate(career, next))}${next.key ? ' · Key match' : ''}` : 'The schedule will extend when the season rolls over.'}</small>
+                        </div>
+                        ${next ? `<span class="mp-next__tag">${next.key ? 'Key match' : 'League'}</span>` : ''}
+                        <button class="btn btn--primary" onclick="mpOpenSchedule()">Matches</button>
+                    </div>
+                </div>
+
+                <div class="mp-actions-grid">
+                    <button class="mp-actionbtn mp-actionbtn--primary" onclick="mpOpenSchedule()">
+                        <b>Play Match</b>
+                        <small>Schedule calendar, live key matches and simulations.</small>
+                    </button>
+                    <button class="mp-actionbtn" onclick="mpOpenTraining()">
+                        <b>Training</b>
+                        <small>${trainingReady ? 'A session is ready.' : 'All drills are on cooldown.'} Spend Tokens to boost.</small>
+                    </button>
+                    <button class="mp-actionbtn" onclick="mpRest()">
+                        <b>Rest</b>
+                        <small>${restReady ? `Recover up to ${MP_REST_STAMINA} stamina.` : `Ready in ${mpCooldownText(career.restReadyAt)}.`}</small>
+                    </button>
+                    <button class="mp-actionbtn" onclick="mpOpenAssets()">
+                        <b>Assets</b>
+                        <small>Spend salary on things that protect your mental health.</small>
+                    </button>
+                </div>
+            </section>
+        </div>`;
+    mpSetSaveState('saved');
+    accountRenderHud();
+}
+
+// ------------------------------------------------------------
+// Calendar / schedule
+// ------------------------------------------------------------
+
+function mpOpenSchedule() {
+    if (!MP.active) return;
+    mpEnsureSchedule(MP.active);
+    MP.view = 'schedule';
+    MP.selectedFixture = MP.selectedFixture || (mpNextFixture(MP.active) && mpNextFixture(MP.active).id);
+    if (!MP.calendarMonth) {
+        const next = mpNextFixture(MP.active);
+        MP.calendarMonth = mpMonthKey(next ? mpFixtureDate(MP.active, next) : new Date());
+    }
+    mpRenderSchedule();
+    showScreen('screen-myplayer-schedule');
+}
+
+function mpShiftCalendar(delta) {
+    if (!MP.active || !MP.calendarMonth) return;
+    const [year, month] = MP.calendarMonth.split('-').map(Number);
+    const date = new Date(year, month - 1 + delta, 1);
+    MP.calendarMonth = mpMonthKey(date);
+    if (delta > 0) mpEnsureSchedule(MP.active);
+    mpRenderSchedule();
+}
+
+function mpFixturesForDate(career, date) {
+    return career.schedule.fixtures.filter(fixture => {
+        const fixtureDate = mpFixtureDate(career, fixture);
+        return fixtureDate.getFullYear() === date.getFullYear()
+            && fixtureDate.getMonth() === date.getMonth()
+            && fixtureDate.getDate() === date.getDate();
+    });
+}
+
+function mpFixtureActionButtons(career, fixture) {
+    if (fixture.played) return '<span class="mp-chip">Result recorded</span>';
+
+    const unavailable = career.injury > 0 || career.suspension > 0;
+    const decision = mpManagerDecision(career);
+    const canPlay = !unavailable;
+    const canSim = !fixture.key && canPlay;
+    const canSkip = !fixture.key || unavailable;
+    const buttons = [];
+
+    buttons.push(`<button class="btn btn--primary" onclick="mpPlayFixture(${mpJsArg(fixture.id)})" ${canPlay ? '' : 'disabled'}>Play live</button>`);
+    if (fixture.key) {
+        buttons.push(`<span class="mp-lock">★ Key match — no simulation</span>`);
+    } else {
+        buttons.push(`<button class="btn btn--ghost" onclick="mpSimulateFixture(${mpJsArg(fixture.id)})" ${canSim ? '' : 'disabled'}>Simulate</button>`);
+        buttons.push(`<button class="btn btn--ghost" onclick="mpBenchFixture(${mpJsArg(fixture.id)})" ${canPlay ? '' : 'disabled'}>Bench</button>`);
+    }
+    buttons.push(`<button class="btn btn--ghost" onclick="mpSkipFixture(${mpJsArg(fixture.id)})" ${canSkip ? '' : 'disabled'}>Skip</button>`);
+
+    return `<div class="mp-fixture-detail__actions">${buttons.join('')}</div>
+        <p class="mp-status" style="width:100%;margin:4px 0 0">${canPlay ? mpEsc(decision.reason) : mpEsc(decision.reason) + '. Recovery or skipping is the only option.'}</p>`;
+}
+
+function mpRenderSchedule() {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const root = document.getElementById('mp-schedule-root');
+    if (!root) return;
+    const subtitle = document.getElementById('mp-schedule-subtitle');
+    if (subtitle) subtitle.textContent = `${career.club.league} · ${career.club.name}`;
+
+    mpEnsureSchedule(career);
+    const [year, month] = (MP.calendarMonth || mpMonthKey(new Date())).split('-').map(Number);
+    const first = new Date(year, month - 1, 1);
+    const monthLabel = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const startOffset = (first.getDay() + 6) % 7; // Monday first
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const next = mpNextFixture(career);
+    const selected = MP.selectedFixture ? mpLookupFixture(MP.selectedFixture) : next;
+
+    const cells = [];
+    for (let i = 0; i < startOffset; i++) cells.push('<div class="mp-cal__day is-out"></div>');
+    for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month - 1, day);
+        const fixtures = mpFixturesForDate(career, date);
+        const isNext = next && mpFixtureDate(career, next).toDateString() === date.toDateString();
+        cells.push(`
+            <div class="mp-cal__day${isNext ? ' is-next' : ''}">
+                <span class="mp-cal__date">${day}</span>
+                ${fixtures.map(fixture => `
+                    <button class="mp-fix${fixture.key ? ' is-key' : ''}${fixture.played ? ' is-played' : ''}"
+                        onclick="mpSelectFixture(${mpJsArg(fixture.id)})" title="${mpEsc(fixture.opponent)}">
+                        <b>${fixture.key ? '★ ' : ''}${mpEsc(fixture.opponent)}</b>
+                        <span>MD ${fixture.round} · ${fixture.home ? 'H' : 'A'}${fixture.played ? ' · played' : ''}</span>
+                    </button>`).join('')}
+            </div>`);
+    }
+    while (cells.length % 7) cells.push('<div class="mp-cal__day is-out"></div>');
+
+    const result = MP.lastResult ? mpResultMarkup(MP.lastResult) : '';
+    const nextCard = next ? `
+        <div class="mp-fixture-detail">
+            <div>
+                <div class="eyebrow">${next.key ? 'Key match' : 'Next match'}</div>
+                <h4>${next.home ? 'vs' : 'at'} ${mpEsc(next.opponent)}</h4>
+                <p>Matchday ${next.round} · ${mpDateLabel(mpFixtureDate(career, next))} · ${next.home ? 'Home' : 'Away'} · ${mpEsc(career.club.name)}</p>
+            </div>
+            ${mpFixtureActionButtons(career, next)}
+        </div>` : '<div class="mp-empty-note">No fixtures are scheduled. Open the calendar again to extend the season.</div>';
+
+    const selectedCard = selected && (!next || selected.id !== next.id) ? `
+        <div class="mp-fixture-panel">
+            <div class="mp-fixture-detail">
+                <div>
+                    <div class="eyebrow">${selected.key ? 'Key match' : 'Fixture'}</div>
+                    <h4>${selected.home ? 'vs' : 'at'} ${mpEsc(selected.opponent)}</h4>
+                    <p>Matchday ${selected.round} · ${mpDateLabel(mpFixtureDate(career, selected))} · ${selected.home ? 'Home' : 'Away'}</p>
+                </div>
+                ${mpFixtureActionButtons(career, selected)}
+            </div>
+        </div>` : '';
+
+    root.innerHTML = `
+        ${result}
+        <div class="mp-panel">
+            <div class="mp-head">
+                <div>
+                    <div class="eyebrow">Season schedule</div>
+                    <h2>Matches</h2>
+                    <p>Every fifth match is a key match. Key matches must be played live; they cannot be simulated or skipped.</p>
+                </div>
+                <div class="mp-actions" style="margin:0">
+                    <button class="btn btn--ghost" onclick="mpSimulateToKey()">Simulate to next key match</button>
+                </div>
+            </div>
+
+            <div class="mp-cal">
+                <div class="mp-cal__head">
+                    <div>
+                        <h3>${monthLabel}</h3>
+                        <small>${next ? `Next: ${next.home ? 'vs' : 'at'} ${mpEsc(next.opponent)} · ${mpDateLabel(mpFixtureDate(career, next))}` : 'No unplayed fixtures'}</small>
+                    </div>
+                    <div class="mp-cal__nav">
+                        <button class="btn btn--ghost" onclick="mpShiftCalendar(-1)" aria-label="Previous month">←</button>
+                        <button class="btn btn--ghost" onclick="mpShiftCalendar(1)" aria-label="Next month">→</button>
+                    </div>
+                </div>
+                <div class="mp-cal__grid">
+                    ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => `<div class="mp-cal__dow">${day}</div>`).join('')}
+                    ${cells.join('')}
+                </div>
+            </div>
+
+            <div class="mp-fixture-panel">${nextCard}</div>
+            ${selectedCard}
+        </div>`;
+
+    mpSetSaveState('saved');
+    accountRenderHud();
+}
+
+function mpResultMarkup(result) {
+    return `
+        <div class="mp-result-card">
+            <div class="eyebrow">Last match</div>
+            <h3>${mpEsc(result.title)}</h3>
+            <div class="mp-result-grid">
+                <div><span>Rating</span><b>${result.rating == null ? '—' : Number(result.rating).toFixed(1)}</b></div>
+                <div><span>Goals</span><b>${result.goals || 0}</b></div>
+                <div><span>Assists</span><b>${result.assists || 0}</b></div>
+                <div><span>Stamina</span><b>${result.stamina >= 0 ? '+' : ''}${result.stamina}</b></div>
+                <div><span>Mental</span><b>${result.mental >= 0 ? '+' : ''}${result.mental}</b></div>
+                <div><span>Salary</span><b>+${mpMoney(result.salary)}</b></div>
+            </div>
+            ${result.note ? `<p class="mp-hint" style="margin-top:10px">${mpEsc(result.note)}</p>` : ''}
+        </div>`;
+}
+
+function mpSelectFixture(id) {
+    MP.selectedFixture = id;
+    mpRenderSchedule();
+}
+
+// ------------------------------------------------------------
+// Match engine bridge
+// ------------------------------------------------------------
+
+function mpBuildTeamState(career, includeMp, side, conditionScale = 1) {
+    const isHome = side === 'home';
+    const league = career.club.league;
+    const base = league === 'C League' ? 64 : 70;
+    const ownBoost = includeMp ? Math.round((career.ovr - MP_START_OVR) * 0.35) : 0;
+    const seed = Math.floor(Math.random() * 900) + 1;
+
+    const lineup = MP_TEAM_SHAPE.map((pos, index) => {
+        const ovr = mpClamp(base + ownBoost + (isHome ? 2 : 0) + mpRandomInt(-3, 3), 52, 88);
+        return { player: makeGhostPlayer(pos, ovr, career.club.name, seed * 20 + index), pos, yel: 0 };
+    });
+
+    if (includeMp) {
+        const slotIndex = MP_SLOT_FOR_POS[career.position] != null ? MP_SLOT_FOR_POS[career.position] : 5;
+        const mpPlayer = mpPlayerObject(career, conditionScale);
+        lineup[slotIndex] = { player: mpPlayer, pos: career.position, yel: 0 };
+    }
+
+    const bench = Array.from({ length: 5 }, (_, index) => {
+        const pos = ['GK', 'CB', 'CM', 'LW', 'ST'][index];
+        const ovr = mpClamp(base + (isHome ? 2 : 0) + mpRandomInt(-4, 2), 52, 86);
+        return makeGhostPlayer(pos, ovr, career.club.name, seed * 40 + index);
+    });
+
+    return {
+        id: `mp-team-${side}`,
+        name: side === 'home' ? career.club.name : null,
+        lineup,
+        bench,
+        reserves: [],
+        subs: 0,
+        tactics: normalizeTactics(DEFAULT_TACTICS),
+        medicalTier: 0,
+        isGhost: true
+    };
+}
+
+function mpOpponentTeam(career, fixture) {
+    const seed = (Number(String(fixture.id).replace(/\D/g, '')) || 1) + fixture.round;
+    const strength = 63 + Math.min(7, Math.floor(fixture.round / 3)) + (fixture.key ? 2 : 0);
+    const lineup = MP_TEAM_SHAPE.map((pos, index) => {
+        const ovr = mpClamp(strength + mpRandomInt(-4, 4), 52, 92);
+        return { player: makeGhostPlayer(pos, ovr, fixture.opponent, seed * 30 + index), pos, yel: 0 };
+    });
+    const bench = Array.from({ length: 5 }, (_, index) => {
+        const pos = ['GK', 'CB', 'CM', 'LW', 'ST'][index];
+        return makeGhostPlayer(pos, mpClamp(strength + mpRandomInt(-5, 2), 52, 88), fixture.opponent, seed * 50 + index);
+    });
+    return {
+        id: `mp-team-opp-${fixture.id}`,
+        name: fixture.opponent,
+        lineup,
+        bench,
+        reserves: [],
+        subs: 0,
+        tactics: normalizeTactics(DEFAULT_TACTICS),
+        medicalTier: 0,
+        isGhost: true
+    };
+}
+
+function mpStartLiveMatch(fixture) {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const decision = mpManagerDecision(career);
+    if (career.injury > 0 || career.suspension > 0) {
+        if (typeof showToast === 'function') showToast(decision.reason);
+        return;
+    }
+
+    MP.liveFixtureId = fixture.id;
+    MP.liveStarts = decision.starts;
+    MP.livePlayerId = `mp_${career.id}`;
+    MP.liveClubSide = fixture.home ? 1 : 2;
+    MP.selectedFixture = null;
+
+    // Home and away are real: the club can be side 2, so the result is mapped
+    // back through liveClubSide when the match ends.
+    const condition = mpConditionScale(career);
+    const club = mpBuildTeamState(career, decision.starts, fixture.home ? 'home' : 'away', condition);
+    const opponent = mpOpponentTeam(career, fixture);
+    club.name = career.club.name;
+    opponent.name = fixture.opponent;
+    const t1 = fixture.home ? club : opponent;
+    const t2 = fixture.home ? opponent : club;
+
+    gameState.mode = 'MP';
+    gameState.managers = [];
+    gameState.matchQueue = [];
+    gameState.matchSim = null;
+    gameState.currentMatchData = {
+        isMP: true,
+        fixtureId: fixture.id,
+        label: `C League · Matchday ${fixture.round}`,
+        t1,
+        t2
+    };
+
+    prepareMatchScreen(`C League · Matchday ${fixture.round}`, t1.name, t2.name);
+    forceCloseMatchRatings();
+    showScreen('screen-match');
+    simulateMatchSequence(t1, t2);
+}
+
+function mpOnLiveMatchFinished() {
+    if (!MP.active || !MP.liveFixtureId) return;
+    const sim = gameState.matchSim;
+    const fixture = mpLookupFixture(MP.liveFixtureId);
+    if (!sim || !fixture) {
+        gameState.currentMatchData = null;
+        mpOpenSchedule();
+        return;
+    }
+
+    const entry = sim.ratings ? sim.ratings[MP.livePlayerId] : null;
+    const rating = entry ? mpClamp(liveRatingFor(sim, entry), 1, 10) : null;
+    const goals = entry ? entry.goals : 0;
+    const assists = entry ? entry.assists : 0;
+    const yellow = entry ? entry.yellow : 0;
+    const red = entry ? !!entry.red : false;
+    const clubSide = MP.liveClubSide === 2 ? 2 : 1;
+    const gf = clubSide === 1 ? sim.s1 : sim.s2;
+    const ga = clubSide === 1 ? sim.s2 : sim.s1;
+
+    const outcome = mpApplyMatchOutcome(MP.active, fixture, {
+        starts: MP.liveStarts && !!entry,
+        goals,
+        assists,
+        rating,
+        gf,
+        ga,
+        yellow,
+        red,
+        live: true
+    });
+
+    MP.liveFixtureId = null;
+    MP.livePlayerId = null;
+    MP.liveClubSide = 1;
+    gameState.currentMatchData = null;
+    gameState.matchSim = null;
+    forceCloseMatchRatings();
+
+    MP.lastResult = outcome;
+    MP.view = 'schedule';
+    MP.selectedFixture = null;
+    mpRenderSchedule();
+    showScreen('screen-myplayer-schedule');
+    mpAutosaveNow();
+}
+
+// ------------------------------------------------------------
+// Match outcome
+// ------------------------------------------------------------
+
+function mpOwnedAssets(career) {
+    return MP_ASSETS.filter(asset => career.assets.includes(asset.id));
+}
+
+function mpMentalShield(career) {
+    return Math.min(0.5, mpOwnedAssets(career).reduce((sum, asset) => sum + (asset.shield || 0), 0));
+}
+
+function mpApplyMatchOutcome(career, fixture, detail) {
+    // The fixture just passed, so any injury or ban carried into it has now
+    // been served. New ones are added below and are not ticked away again.
+    if (career.injury > 0) career.injury--;
+    if (career.suspension > 0) career.suspension--;
+
+    const beforeStamina = career.health.stamina;
+    const beforeMental = career.health.mental;
+    const started = !!detail.starts;
+    const result = detail.gf > detail.ga ? 'W' : detail.gf === detail.ga ? 'D' : 'L';
+    const shield = mpMentalShield(career);
+    const salary = Math.round(career.club.salary / 4);
+
+    let mentalDelta = 0;
+    if (started) {
+        mentalDelta += result === 'W' ? 3 : result === 'L' ? -3 : 0;
+        if (detail.goals) mentalDelta += detail.goals * 2;
+        if (detail.assists) mentalDelta += detail.assists;
+        if (detail.rating != null) {
+            if (detail.rating >= 8) mentalDelta += 3;
+            else if (detail.rating <= 5.5) mentalDelta -= 3;
+        }
+        mentalDelta -= detail.yellow ? 1 : 0;
+    } else {
+        mentalDelta -= detail.benched === false ? 2 : 4;
+    }
+
+    if (detail.red) {
+        career.suspension = Math.max(career.suspension, 1);
+        mentalDelta -= 8;
+    }
+
+    // Assets soften every negative hit, not just injuries.
+    if (mentalDelta < 0) mentalDelta *= (1 - shield);
+    mentalDelta = Math.round(mentalDelta);
+    if (mentalDelta > 0) {
+        const passive = mpOwnedAssets(career).reduce((sum, asset) => sum + (asset.perMatch || 0), 0);
+        mentalDelta = Math.round(mentalDelta + passive);
+    }
+
+    let staminaDelta;
+    if (started) staminaDelta = fixture.key ? -22 : -18;
+    else if (detail.mode === 'skip') staminaDelta = 12;
+    else staminaDelta = 8;
+
+    career.health.stamina = mpClamp(career.health.stamina + staminaDelta, 0, 100);
+    career.health.mental = mpClamp(career.health.mental + mentalDelta, 0, 100);
+
+    let injuryNote = '';
+    if (started) {
+        const chance = mpClamp(
+            0.03 + (100 - beforeStamina) / 100 * 0.12 + (100 - beforeMental) / 100 * 0.06 + (fixture.key ? 0.03 : 0),
+            0.02,
+            0.35
+        );
+        if (Math.random() < chance) {
+            const matches = mpRandomInt(1, 4);
+            career.injury = Math.max(career.injury, matches);
+            career.health.mental = mpClamp(career.health.mental - 12, 0, 100);
+            career.health.stamina = mpClamp(career.health.stamina - 10, 0, 100);
+            injuryNote = `Injured in the match — out for ${matches} match${matches > 1 ? 'es' : ''}.`;
+        }
+    }
+
+    if (started) {
+        career.careerStats.matches++;
+        career.careerStats.goals += detail.goals || 0;
+        career.careerStats.assists += detail.assists || 0;
+        if (detail.rating != null) {
+            career.careerStats.ratingSum += detail.rating;
+            career.careerStats.ratingCount++;
+            career.form.push(Number(detail.rating.toFixed(1)));
+            career.form = career.form.slice(-8);
+        }
+    }
+
+    career.money += salary;
+    fixture.played = true;
+    fixture.result = {
+        gf: detail.gf,
+        ga: detail.ga,
+        result,
+        home: fixture.home,
+        rating: detail.rating == null ? null : Number(detail.rating.toFixed(1)),
+        goals: detail.goals || 0,
+        assists: detail.assists || 0,
+        started: started
+    };
+
+    // This fixture is now behind us; injuries and bans were ticked at the top.
+    const title = `${career.club.name} ${detail.gf}–${detail.ga} ${fixture.opponent}`;
+    const note = injuryNote || (started ? '' : 'The manager did not use you in this match.');
+    return {
+        title,
+        rating: detail.rating,
+        goals: detail.goals || 0,
+        assists: detail.assists || 0,
+        stamina: Math.round(career.health.stamina - beforeStamina),
+        mental: Math.round(career.health.mental - beforeMental),
+        salary,
+        note,
+        result
+    };
+}
+
+// ------------------------------------------------------------
+// Quick simulation / skip / bench
+// ------------------------------------------------------------
+
+function mpQuickMatch(career, fixture, starts) {
+    const home = fixture.home;
+    const myStrength = 64 + (career.ovr - MP_START_OVR) * 0.35 + (home ? 2 : 0) + mpRandomInt(-3, 3);
+    const oppStrength = 63 + Math.min(7, Math.floor(fixture.round / 3)) + (fixture.key ? 2 : 0) + mpRandomInt(-3, 3);
+    const diff = mpClamp((myStrength - oppStrength) / 11, -0.9, 0.9);
+    const lambdaMy = mpClamp(1.4 + diff - (fixture.key ? 0.1 : 0), 0.3, 3.4);
+    const lambdaOpp = mpClamp(1.3 - diff + (fixture.key ? 0.15 : 0), 0.3, 3.4);
+    let gf = EngineCore.samplePoisson(lambdaMy);
+    let ga = EngineCore.samplePoisson(lambdaOpp);
+
+    let goals = 0, assists = 0, rating = null;
+    if (starts) {
+        const roleWeight = {
+            ST: 0.42, CF: 0.38, LW: 0.3, RW: 0.3, CAM: 0.27,
+            LM: 0.22, RM: 0.22, CM: 0.16, CDM: 0.08,
+            LWB: 0.07, RWB: 0.07, LB: 0.04, RB: 0.04, CB: 0.04, GK: 0
+        }[career.position] || 0.12;
+        for (let i = 0; i < gf; i++) if (Math.random() < roleWeight) goals++;
+        for (let i = 0; i < gf; i++) if (Math.random() < roleWeight * 0.75) assists++;
+        const resultBonus = gf > ga ? 0.35 : gf < ga ? -0.3 : 0;
+        rating = 6.2 + (career.ovr - MP_START_OVR) * 0.035 + (Math.random() * 0.9 - 0.45)
+            + resultBonus + goals * 0.7 + assists * 0.4
+            - (100 - career.health.stamina) / 100 * 0.8
+            - (100 - career.health.mental) / 100 * 0.5;
+        rating = mpClamp(Number(rating.toFixed(1)), 4, 10);
+    }
+    return { gf, ga, goals, assists, rating };
+}
+
+function mpResolveFixture(fixture, mode) {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    if (!fixture || fixture.played) return;
+
+    const decision = mpManagerDecision(career);
+    const unavailable = career.injury > 0 || career.suspension > 0;
+
+    if (mode === 'simulate' || mode === 'play') {
+        if (unavailable) {
+            if (typeof showToast === 'function') showToast(decision.reason);
+            return;
+        }
+        const result = mpQuickMatch(career, fixture, decision.starts);
+        const outcome = mpApplyMatchOutcome(career, fixture, {
+            starts: decision.starts,
+            goals: result.goals,
+            assists: result.assists,
+            rating: result.rating,
+            gf: result.gf,
+            ga: result.ga,
+            live: false
+        });
+        MP.lastResult = outcome;
+    } else if (mode === 'skip') {
+        const outcome = mpApplyMatchOutcome(career, fixture, {
+            starts: false,
+            mode: 'skip',
+            goals: 0,
+            assists: 0,
+            rating: null,
+            gf: 0,
+            ga: 0,
+            live: false,
+            benched: false
+        });
+        MP.lastResult = outcome;
+        if (typeof showToast === 'function') showToast('Match skipped. You stayed fresh but the manager noticed.');
+    } else {
+        const outcome = mpApplyMatchOutcome(career, fixture, {
+            starts: false,
+            mode: 'bench',
+            goals: 0,
+            assists: 0,
+            rating: null,
+            gf: 0,
+            ga: 0,
+            live: false,
+            benched: true
+        });
+        MP.lastResult = outcome;
+        if (typeof showToast === 'function') showToast('You started on the bench.');
+    }
+
+    MP.selectedFixture = null;
+    mpRenderSchedule();
+    mpAutosaveNow();
+}
+
+function mpPlayFixture(id) {
+    const fixture = mpLookupFixture(id);
+    if (!fixture || fixture.played) return;
+    if (typeof showToast === 'function' && mpManagerDecision(MP.active).starts === false) {
+        showToast(mpManagerDecision(MP.active).reason);
+    }
+    mpStartLiveMatch(fixture);
+}
+
+function mpSimulateFixture(id) {
+    const fixture = mpLookupFixture(id);
+    if (!fixture || fixture.played) return;
+    if (fixture.key) {
+        if (typeof showToast === 'function') showToast('Key matches must be played live.');
+        return;
+    }
+    if (!window.confirm(`Simulate ${fixture.home ? 'vs' : 'at'} ${fixture.opponent}?`)) return;
+    mpResolveFixture(fixture, 'simulate');
+}
+
+function mpSkipFixture(id) {
+    const fixture = mpLookupFixture(id);
+    if (!fixture || fixture.played) return;
+    const unavailable = MP.active.injury > 0 || MP.active.suspension > 0;
+    if (fixture.key && !unavailable) {
+        if (typeof showToast === 'function') showToast('Key matches cannot be skipped.');
+        return;
+    }
+    if (!window.confirm('Skip this match? You will not play, but you recover stamina.')) return;
+    mpResolveFixture(fixture, 'skip');
+}
+
+function mpBenchFixture(id) {
+    const fixture = mpLookupFixture(id);
+    if (!fixture || fixture.played) return;
+    if (fixture.key) {
+        if (typeof showToast === 'function') showToast('Key matches cannot be skipped or benched away.');
+        return;
+    }
+    mpResolveFixture(fixture, 'bench');
+}
+
+function mpSimulateToKey() {
+    if (!MP.active || MP.screenBusy) return;
+    const career = MP.active;
+    let count = 0;
+
+    while (count < 10) {
+        const fixture = mpNextFixture(career);
+        if (!fixture) break;
+        if (fixture.key) {
+            if (typeof showToast === 'function') showToast('Next up is a key match — it must be played live.');
+            break;
+        }
+        if (career.injury > 0 || career.suspension > 0) {
+            if (typeof showToast === 'function') showToast(mpManagerDecision(career).reason);
+            break;
+        }
+        if (career.health.stamina < 25) {
+            if (typeof showToast === 'function') showToast('Too exhausted to simulate further. Rest or skip a match.');
+            break;
+        }
+        MP.screenBusy = true;
+        const result = mpQuickMatch(career, fixture, mpManagerDecision(career).starts);
+        mpApplyMatchOutcome(career, fixture, {
+            starts: mpManagerDecision(career).starts,
+            goals: result.goals,
+            assists: result.assists,
+            rating: result.rating,
+            gf: result.gf,
+            ga: result.ga,
+            live: false
+        });
+        count++;
+        MP.screenBusy = false;
+    }
+
+    MP.screenBusy = false;
+    MP.selectedFixture = null;
+    mpRenderSchedule();
+    mpAutosaveNow();
+    if (count && typeof showToast === 'function') showToast(`Simulated ${count} match${count > 1 ? 'es' : ''}.`);
+}
+
+// ------------------------------------------------------------
+// Training / rest
+// ------------------------------------------------------------
+
+function mpOpenTraining() {
+    if (!MP.active) return;
+    MP.view = 'training';
+    mpRenderTraining();
+    showScreen('screen-myplayer-training');
+}
+
+function mpRenderTraining() {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const root = document.getElementById('mp-training-root');
+    if (!root) return;
+
+    root.innerHTML = `
+        <div class="mp-panel">
+            <div class="mp-head">
+                <div>
+                    <div class="eyebrow">Player development</div>
+                    <h2>Training</h2>
+                    <p>Every drill raises one attribute and can raise your OVR. Boost with Tokens to train harder and cut the cooldown.</p>
+                </div>
+                <div class="token-pill"><span class="token-pill__icon" data-token-icon="15"></span><b>${tokenText(Account.tokenBalance)}</b><span class="token-pill__label">Tokens</span></div>
+            </div>
+
+            <div class="mp-training-grid">
+                ${MP_TRAINING.map(exercise => {
+                    const value = Math.round(career.attrs[exercise.attr]);
+                    const cooldown = mpCooldownText(career.trainingCooldowns[exercise.id]);
+                    return `
+                        <div class="mp-train">
+                            <div class="mp-train__top">
+                                <div>
+                                    <h4>${exercise.name}</h4>
+                                    <p>${exercise.desc}</p>
+                                </div>
+                                <div class="mp-attr"><span>${exercise.attr}</span><b>${value}</b></div>
+                            </div>
+                            <div class="mp-train__bar"><i style="width:${mpClamp(value, 0, 100)}%"></i></div>
+                            <div class="mp-train__foot">
+                                ${cooldown
+                                    ? `<span class="mp-cooldown">Cooldown ${cooldown}</span>`
+                                    : `<span class="mp-ready">Ready</span>`}
+                                <button class="btn btn--primary" onclick="mpDoTraining(${mpJsArg(exercise.id)}, false)" ${cooldown ? 'disabled' : ''}>Train +1</button>
+                                <button class="btn btn--ghost" onclick="mpDoTraining(${mpJsArg(exercise.id)}, true)">Boost +2 · ${TOKEN_COSTS.TRAINING_BOOST} Tokens</button>
+                            </div>
+                        </div>`;
+                }).join('')}
+            </div>
+
+            <div class="mp-fixture-detail" style="margin-top:16px">
+                <div>
+                    <div class="eyebrow">Recovery</div>
+                    <h4>Rest</h4>
+                    <p>${career.health.stamina < 100 ? `Recover up to ${MP_REST_STAMINA} stamina.` : 'Stamina is already full.'} No attribute changes, no match involvement.</p>
+                </div>
+                <div class="mp-fixture-detail__actions">
+                    <button class="btn btn--primary" onclick="mpRest()" ${mpCooldownText(career.restReadyAt) || career.health.stamina >= 100 ? 'disabled' : ''}>
+                        ${career.health.stamina >= 100 ? 'Stamina full' : mpCooldownText(career.restReadyAt) ? `Ready in ${mpCooldownText(career.restReadyAt)}` : 'Rest now'}
+                    </button>
+                    <button class="btn btn--ghost" onclick="mpBackToCareer()">Back to career</button>
+                </div>
+            </div>
+        </div>`;
+    accountRenderHud();
+}
+
+async function mpDoTraining(exerciseId, boosted) {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const exercise = MP_TRAINING.find(item => item.id === exerciseId);
+    if (!exercise) return;
+
+    const cooldown = mpCooldownText(career.trainingCooldowns[exercise.id]);
+    if (!boosted && cooldown) {
+        if (typeof showToast === 'function') showToast(`This drill is on cooldown for ${cooldown}. Use a Token boost to train now.`);
+        return;
+    }
+
+    if (boosted) {
+        const paid = await accountSpendTokens(TOKEN_COSTS.TRAINING_BOOST, `${exercise.name} boost`);
+        if (!paid) return;
+    }
+
+    const gain = boosted ? 2 : 1;
+    const current = Math.round(career.attrs[exercise.attr]);
+    const next = mpClamp(current + gain, 1, 99);
+    career.attrs[exercise.attr] = next;
+    career.ovr = calculateOVRFromStats(career.attrs, career.position);
+    career.health.stamina = mpClamp(career.health.stamina - (boosted ? 6 : 8), 0, 100);
+    career.trainingCooldowns[exercise.id] = Date.now() + (boosted ? MP_TRAIN_BOOST_COOLDOWN_MS : MP_TRAIN_COOLDOWN_MS);
+
+    if (typeof showToast === 'function') {
+        showToast(`${exercise.name}: ${exercise.attr} ${current} → ${next}. OVR ${career.ovr}.`);
+    }
+
+    mpRenderTraining();
+    await mpAutosaveNow();
+}
+
+async function mpRest() {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const cooldown = mpCooldownText(career.restReadyAt);
+    if (cooldown) {
+        if (typeof showToast === 'function') showToast(`Rest is ready in ${cooldown}.`);
+        return;
+    }
+    if (career.health.stamina >= 100) {
+        if (typeof showToast === 'function') showToast('Stamina is already full.');
+        return;
+    }
+
+    const before = career.health.stamina;
+    career.health.stamina = mpClamp(career.health.stamina + MP_REST_STAMINA, 0, 100);
+    career.restReadyAt = Date.now() + MP_REST_COOLDOWN_MS;
+
+    if (MP.view === 'training') mpRenderTraining();
+    else mpRenderDashboard();
+    if (typeof showToast === 'function') {
+        showToast(`Rested: stamina ${Math.round(before)} → ${Math.round(career.health.stamina)}.`);
+    }
+    await mpAutosaveNow();
+}
+
+// ------------------------------------------------------------
+// Assets
+// ------------------------------------------------------------
+
+function mpOpenAssets() {
+    if (!MP.active) return;
+    MP.view = 'assets';
+    mpRenderAssets();
+    showScreen('screen-myplayer-assets');
+}
+
+function mpRenderAssets() {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const root = document.getElementById('mp-assets-root');
+    if (!root) return;
+
+    root.innerHTML = `
+        <div class="mp-panel">
+            <div class="mp-head">
+                <div>
+                    <div class="eyebrow">Lifestyle</div>
+                    <h2>Assets</h2>
+                    <p>Spend salary on things that keep your mental health safe. Owned assets also soften future mental hits.</p>
+                </div>
+                <div class="mp-club-side" style="text-align:right">
+                    <b>${mpMoney(career.money)}</b>
+                    <span>Available</span>
+                </div>
+            </div>
+
+            <div class="mp-asset-grid">
+                ${MP_ASSETS.map(asset => {
+                    const owned = career.assets.filter(id => id === asset.id).length;
+                    return `
+                        <div class="mp-asset">
+                            <div class="mp-train__top">
+                                <div>
+                                    <h4>${asset.name}</h4>
+                                    <p>${asset.desc}</p>
+                                </div>
+                                ${owned ? `<span class="mp-chip">Owned ×${owned}</span>` : ''}
+                            </div>
+                            <div class="mp-asset__effect">
+                                ${asset.mental ? `<span class="mp-chip mp-chip--mental">+${asset.mental} mental</span>` : ''}
+                                ${asset.stamina ? `<span class="mp-chip mp-chip--stamina">+${asset.stamina} stamina</span>` : ''}
+                                ${asset.shield ? `<span class="mp-chip">−${Math.round(asset.shield * 100)}% mental loss</span>` : ''}
+                                ${asset.perMatch ? `<span class="mp-chip">+${asset.perMatch} mental / match</span>` : ''}
+                            </div>
+                            <div class="mp-asset__price">
+                                <div><span style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;font-weight:900">Price</span><b>${mpMoney(asset.cost)}</b></div>
+                                <button class="btn btn--primary" onclick="mpBuyAsset(${mpJsArg(asset.id)})" ${career.money < asset.cost ? 'disabled' : ''}>Buy</button>
+                            </div>
+                        </div>`;
+                }).join('')}
+            </div>
+
+            <div class="mp-fixture-detail" style="margin-top:16px">
+                <div>
+                    <div class="eyebrow">Mental health</div>
+                    <h4>${Math.round(career.health.mental)}%</h4>
+                    <p>Injuries, cards, skipped matches and spells on the bench all cost mental health. Assets reduce those losses.</p>
+                </div>
+                <div class="mp-fixture-detail__actions">
+                    <button class="btn btn--ghost" onclick="mpBackToCareer()">Back to career</button>
+                </div>
+            </div>
+        </div>`;
+    accountRenderHud();
+}
+
+function mpBuyAsset(id) {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const asset = MP_ASSETS.find(item => item.id === id);
+    if (!asset) return;
+    if (career.money < asset.cost) {
+        if (typeof showToast === 'function') showToast(`You need ${mpMoney(asset.cost - career.money)} more.`);
+        return;
+    }
+
+    career.money -= asset.cost;
+    career.health.mental = mpClamp(career.health.mental + (asset.mental || 0), 0, 100);
+    career.health.stamina = mpClamp(career.health.stamina + (asset.stamina || 0), 0, 100);
+    career.assets.push(asset.id);
+    mpRenderAssets();
+    if (typeof showToast === 'function') showToast(`Bought ${asset.name}.`);
+    mpAutosaveNow();
 }
 
 // ------------------------------------------------------------
@@ -900,10 +1971,49 @@ const MP_STORY = {
             title: 'Graduation Day',
             text: career => [
                 `The month goes by in a blur of exams, goodbyes and one last summer. Then the cap goes up, the photos are taken, and high school is officially over.`,
-                `The little C League club on the leaflet has just been promoted. That is why the trial is now a B League recruitment day — and why the queue outside the training ground is twice as long as you expected.`,
+                `The little C League club on the leaflet has kept its place in the league after a hard season. That is why the trial is now an open recruitment day — and why the queue outside the training ground is twice as long as you expected.`,
                 `You take a breath, hold the leaflet tight, and walk in. This is the first step of the rest of your life.`
+            ]
+        },
+        {
+            act: 'Chapter 3 · The First Season',
+            title: 'The Badge',
+            text: career => [
+                `The trial is a cold dose of reality. Faster players, sharper coaches, a hundred hopefuls for three places. You are not one of the three.`,
+                `But the club that put up the leaflet — ${career.club.name} — remembers your name. They are rebuilding for the C League season, and they offer you a squad place.`,
+                `It is not the dream you drew on your ceiling. It is a start. You take it.`
+            ]
+        },
+        {
+            act: 'Chapter 3 · The First Season',
+            title: "The Manager's Rules",
+            text: career => [
+                `Your first morning at ${career.club.name} smells of deep heat and ambition. The manager gathers the squad and does not raise his voice once.`,
+                `"I do not care what you did before this week," he says. "I pick on form, fitness and attitude. Train hard, rest properly, keep your head straight, and you will play."`,
+                `He looks at you a moment longer than the others. "Show me you belong."`
+            ]
+        },
+        {
+            act: 'Chapter 3 · The First Season',
+            title: 'The Team Sheet',
+            text: career => [
+                `Pre-season is a blur of running, drills and ice baths. You learn the names, the patterns, the way the senior players talk when they think nobody is listening.`,
+                `On Friday, the team sheet goes up. Your name is on it, written in the manager's hard, tilted hand.`,
+                `Your first professional match for ${career.club.name} is on the calendar.`
+            ]
+        },
+        {
+            act: 'Chapter 3 · The First Season',
+            title: 'Matchday',
+            text: () => [
+                `You stand in the tunnel with the noise above you and the badge on your chest. Whatever happens next, it starts here.`,
+                `The calendar is on the wall: sixteen fixtures, key nights circled in red. Stamina, form and your head will decide how far you go.`,
+                `Welcome to the C League.`
             ],
-            end: true
+            end: true,
+            endBadge: 'Your career begins',
+            endText: 'Everything from here is yours to play. The dashboard holds your calendar, training, rest and health.',
+            endCta: 'Go to Dashboard'
         }
     ],
     shoot: [
@@ -985,8 +2095,47 @@ const MP_STORY = {
                 `The loan is not a punishment. It is a second chance, and you know it.`,
                 `At ${career.story.clubs.loan}, the dressing room is smaller, the pitch is heavier, and nobody cares what you did in high school. They only care what you do on Saturday.`,
                 `You lace up your boots, take a deep breath, and get to work. The bigger stage will have to wait.`
+            ]
+        },
+        {
+            act: 'Chapter 3 · The First Season',
+            title: 'The Badge',
+            text: career => [
+                `The loan ends the way loans do: quietly. The parent club does not call. Your agent — a friend of your uncle, really — makes one more call.`,
+                `${career.club.name}, rebuilding for the C League season, need bodies and believe in second chances. They offer you a one-year deal.`,
+                `You sign the same afternoon. It is not the dream you drew on your ceiling. It is a start. You take it.`
+            ]
+        },
+        {
+            act: 'Chapter 3 · The First Season',
+            title: "The Manager's Rules",
+            text: career => [
+                `Your first morning at ${career.club.name} smells of deep heat and ambition. The manager gathers the squad and does not raise his voice once.`,
+                `"I do not care what you did before this week," he says. "I pick on form, fitness and attitude. Train hard, rest properly, keep your head straight, and you will play."`,
+                `He looks at you a moment longer than the others. "Show me you belong."`
+            ]
+        },
+        {
+            act: 'Chapter 3 · The First Season',
+            title: 'The Team Sheet',
+            text: career => [
+                `Pre-season is a blur of running, drills and ice baths. You learn the names, the patterns, the way the senior players talk when they think nobody is listening.`,
+                `On Friday, the team sheet goes up. Your name is on it, written in the manager's hard, tilted hand.`,
+                `Your first professional match for ${career.club.name} is on the calendar.`
+            ]
+        },
+        {
+            act: 'Chapter 3 · The First Season',
+            title: 'Matchday',
+            text: () => [
+                `You stand in the tunnel with the noise above you and the badge on your chest. Whatever happens next, it starts here.`,
+                `The calendar is on the wall: sixteen fixtures, key nights circled in red. Stamina, form and your head will decide how far you go.`,
+                `Welcome to the C League.`
             ],
-            end: true
+            end: true,
+            endBadge: 'Your career begins',
+            endText: 'Everything from here is yours to play. The dashboard holds your calendar, training, rest and health.',
+            endCta: 'Go to Dashboard'
         }
     ]
 };
@@ -1029,17 +2178,20 @@ function mpRenderStory() {
         actions = `
             <div class="mp-choices">
                 ${choices.map(choice => `
-                    <button class="mp-choice" onclick="mpChooseStory('${mpEscAttr(choice.path)}')">
+                    <button class="mp-choice" onclick="mpChooseStory(${mpJsArg(choice.path)})">
                         <span>${mpEsc(choice.label)}</span>
                         <span class="mp-choice__arrow">→</span>
                     </button>`).join('')}
             </div>`;
     } else if (isEnd) {
+        const endBadge = scene.endBadge || 'To be continued';
+        const endText = scene.endText || 'This is the end of the current chapter. Your career is saved — return to it whenever you want.';
+        const endCta = scene.endCta || 'Back to Career';
         actions = `
             <div class="mp-story__end">
-                <div class="mp-story__end-badge">To be continued</div>
-                <p>This is the end of the current build. Your career is saved — come back when the next chapter arrives.</p>
-                <button class="btn btn--primary" onclick="mpBackToList()">Back to My Players</button>
+                <div class="mp-story__end-badge">${mpEsc(endBadge)}</div>
+                <p>${mpEsc(endText)}</p>
+                <button class="btn btn--primary" onclick="mpBackToCareer()">${mpEsc(endCta)}</button>
             </div>`;
     } else {
         actions = `
@@ -1070,18 +2222,17 @@ function mpIdentityMarkup(career) {
                 <div class="mp-idcard__badge">${mpEsc(career.position || '—')}</div>
                 <div class="mp-idcard__names">
                     <div class="mp-idcard__name">${mpEsc(career.name || 'My Player')}</div>
-                    <div class="mp-idcard__meta">${Number(career.age) || 18} · ${mpEsc(career.nationality || '—')} · ${mpEsc(career.hometown || '—')}</div>
+                    <div class="mp-idcard__meta">${career.ovr} OVR · ${Number(career.age) || 18} · ${mpEsc(career.nationality || '—')}</div>
                 </div>
             </div>
             <div class="mp-idcard__rows">
-                <div><span>Height</span><b>${mpEsc(mpHeight(career.heightCm))}</b></div>
-                <div><span>Weight</span><b>${mpEsc((Number(career.weightKg) || 0) + ' kg')}</b></div>
+                <div><span>Club</span><b>${mpEsc(career.club.name)}</b></div>
+                <div><span>League</span><b>${mpEsc(career.club.league)}</b></div>
                 <div><span>Position</span><b>${mpEsc(mpPosLabel(career.position))}</b></div>
                 <div><span>Archetype</span><b>${mpEsc(career.archetype || '—')}</b></div>
                 <div><span>Playstyle</span><b>${mpEsc(career.playstyle || '—')}</b></div>
-                <div><span>Career</span><b>${mpEsc(mpChapterName(career))}</b></div>
             </div>
-            <button class="btn btn--ghost mp-idcard__back" onclick="mpBackToList()">My Players</button>
+            <button class="btn btn--ghost mp-idcard__back" onclick="mpBackToCareer()">Back to Career</button>
         </div>`;
 }
 
@@ -1110,31 +2261,11 @@ async function mpAdvanceStory() {
     MP.storyBusy = false;
 }
 
-function mpSetSaveState(state) {
-    const el = document.getElementById('mp-save-state');
-    if (!el) return;
-    const labels = { saved: 'Saved', saving: 'Saving…', error: 'Save failed' };
-    el.className = `mp-save${state === 'saved' ? ' is-saved' : state === 'saving' ? ' is-saving' : state === 'error' ? ' is-error' : ''}`;
-    el.innerHTML = `<span class="mp-save__dot"></span>${labels[state] || 'Cloud save'}`;
-}
-
 // ------------------------------------------------------------
-// Small boot wiring (script lives at the bottom of index.html)
+// Boot
 // ------------------------------------------------------------
 
 (function mpBoot() {
-    const password = document.getElementById('mp-auth-password');
-    const confirm = document.getElementById('mp-auth-confirm');
-    if (password) {
-        password.addEventListener('keydown', event => {
-            if (event.key === 'Enter') mpSubmitAuth();
-        });
-    }
-    if (confirm) {
-        confirm.addEventListener('keydown', event => {
-            if (event.key === 'Enter') mpSubmitAuth();
-        });
-    }
     const name = document.getElementById('mp-name');
     if (name) {
         name.addEventListener('keydown', event => {

@@ -6,7 +6,7 @@
 // room state is worse than an honest offline error.
 // ============================================================
 
-const CACHE = 'dbf-shell-v47';
+const CACHE = 'dbf-shell-v49';
 const SHELL = [
     './',
     './index.html',
@@ -28,6 +28,7 @@ const SHELL = [
     './transfers.js',
     './investment.js',
     './save.js',
+    './account.js',
     './myplayer.js',
     './vendor/tailwind.js'
 ];
