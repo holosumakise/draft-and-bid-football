@@ -24,9 +24,12 @@ function showScreen(screenId) {
 }
 
 let toastTimer = null;
-function showToast(msg, ms = 3500) {
+// asHtml is only for strings the caller built itself — every dynamic part has
+// to go through escapeHTML() first, because innerHTML is not a text sink.
+function showToast(msg, ms = 3500, asHtml = false) {
     const toast = document.getElementById('toast');
-    document.getElementById('toast-msg').innerText = msg;
+    const target = document.getElementById('toast-msg');
+    if (asHtml) target.innerHTML = msg; else target.innerText = msg;
     toast.classList.remove('opacity-0'); toast.classList.add('opacity-100');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); }, ms);

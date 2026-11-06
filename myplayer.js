@@ -23,7 +23,8 @@ const MP = {
     liveFixtureId: null,
     liveStarts: false,
     livePlayerId: null,
-    liveClubSide: 1
+    liveClubSide: 1,
+    cut: { beats: [], index: 0, phase: 'idle', path: null, timer: null }
 };
 
 // ------------------------------------------------------------
@@ -34,7 +35,6 @@ const MP_START_OVR = 67;
 const MP_MATCHDAY_GAP = 4;
 const MP_FIRST_MATCHDAY = 3;
 const MP_TRAIN_COOLDOWN_MS = 10 * 60 * 1000;
-const MP_TRAIN_BOOST_COOLDOWN_MS = 3 * 60 * 1000;
 const MP_REST_COOLDOWN_MS = 8 * 60 * 1000;
 const MP_REST_STAMINA = 34;
 const MP_ATTR_KEYS = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
@@ -228,6 +228,11 @@ function mpMonthKey(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// Zero-padded keys compare correctly as plain strings.
+function mpCalendarFloorKey(career) {
+    return mpMonthKey(new Date(Number(career.startDate) || Number(career.createdAt) || Date.now()));
+}
+
 // ------------------------------------------------------------
 // Cloud data
 // ------------------------------------------------------------
@@ -392,6 +397,7 @@ function openMyPlayer() {
 }
 
 function mpClose() {
+    mpCutStop();
     MP.open = false;
     MP.view = null;
     MP.active = null;
@@ -406,9 +412,6 @@ async function mpShowList() {
     MP.active = null;
     MP.selectedFixture = null;
     MP.calendarMonth = null;
-
-    const emailEl = document.getElementById('mp-account-email');
-    if (emailEl) emailEl.textContent = Account.user.email || 'Signed in';
 
     mpSetListStatus('Loading your careers…');
     mpRenderList();
@@ -428,6 +431,7 @@ async function mpShowList() {
 
 function mpBackToList() {
     if (!mpRequireAccount()) return;
+    mpCutStop();
     MP.active = null;
     MP.view = 'list';
     MP.selectedFixture = null;
@@ -451,6 +455,7 @@ function mpOpenCareer(id) {
 }
 
 function mpBackToCareer() {
+    mpCutStop();
     if (!MP.active) {
         mpBackToList();
         return;
@@ -472,10 +477,10 @@ function mpSetListStatus(text, isError) {
     el.className = 'mp-status' + (isError ? ' is-error' : '');
 }
 
-function mpSetCreateStatus(text, isError) {
+function mpSetCreateStatus(text, isError, asHtml) {
     const el = document.getElementById('mp-create-status');
     if (!el) return;
-    el.textContent = text || '';
+    if (asHtml) el.innerHTML = text || ''; else el.textContent = text || '';
     el.className = 'mp-status' + (isError ? ' is-error' : '');
 }
 
@@ -657,7 +662,7 @@ function mpShowCreate() {
         roll.disabled = false;
         roll.textContent = 'Roll';
     }
-    mpSetCreateStatus('Your first roll is free. Rerolls cost Tokens.');
+    mpSetCreateStatus(`Your first roll is free. Rerolls cost ${TOKEN_COSTS.MP_REROLL} ${tokenInline(13)}.`, false, true);
     mpRenderReels();
     showScreen('screen-myplayer-create');
     accountRenderHud();
@@ -677,12 +682,12 @@ async function mpRollAction() {
         const paid = await accountSpendTokens(TOKEN_COSTS.MP_REROLL, 'My Player reroll');
         if (!paid) {
             MP.rollBusy = false;
-            if (roll) { roll.disabled = false; roll.textContent = `Reroll · ${TOKEN_COSTS.MP_REROLL} Tokens`; }
+            if (roll) { roll.disabled = false; roll.innerHTML = `Reroll · ${TOKEN_COSTS.MP_REROLL} ${tokenInline(13)}`; }
             if (submit) submit.disabled = !MP.draft;
-            mpSetCreateStatus(`You need ${TOKEN_COSTS.MP_REROLL} Tokens to reroll.`, true);
+            mpSetCreateStatus(`You need ${TOKEN_COSTS.MP_REROLL} ${tokenInline(13)} to reroll.`, true, true);
             return;
         }
-        mpSetCreateStatus(`Rerolled for ${TOKEN_COSTS.MP_REROLL} Tokens.`);
+        mpSetCreateStatus(`Rerolled for ${TOKEN_COSTS.MP_REROLL} ${tokenInline(13)}.`, false, true);
     } else {
         mpSetCreateStatus('Rolling your player…');
     }
@@ -694,7 +699,7 @@ async function mpRollAction() {
 
     setTimeout(() => {
         MP.rollBusy = false;
-        if (roll) { roll.disabled = false; roll.textContent = `Reroll · ${TOKEN_COSTS.MP_REROLL} Tokens`; }
+        if (roll) { roll.disabled = false; roll.innerHTML = `Reroll · ${TOKEN_COSTS.MP_REROLL} ${tokenInline(13)}`; }
         if (submit) submit.disabled = false;
         const hint = document.getElementById('mp-create-status');
         if (hint) {
@@ -1025,8 +1030,9 @@ function mpOpenSchedule() {
 function mpShiftCalendar(delta) {
     if (!MP.active || !MP.calendarMonth) return;
     const [year, month] = MP.calendarMonth.split('-').map(Number);
-    const date = new Date(year, month - 1 + delta, 1);
-    MP.calendarMonth = mpMonthKey(date);
+    const key = mpMonthKey(new Date(year, month - 1 + delta, 1));
+    if (key < mpCalendarFloorKey(MP.active)) return;
+    MP.calendarMonth = key;
     if (delta > 0) mpEnsureSchedule(MP.active);
     mpRenderSchedule();
 }
@@ -1085,7 +1091,11 @@ function mpRenderSchedule() {
     if (subtitle) subtitle.textContent = `${career.club.league} · ${career.club.name}`;
 
     mpEnsureSchedule(career);
-    const [year, month] = (MP.calendarMonth || mpMonthKey(new Date())).split('-').map(Number);
+    const calendarFloor = mpCalendarFloorKey(career);
+    const storedMonth = MP.calendarMonth || mpMonthKey(new Date());
+    const calendarKey = storedMonth < calendarFloor ? calendarFloor : storedMonth;
+    MP.calendarMonth = calendarKey;
+    const [year, month] = calendarKey.split('-').map(Number);
     const first = new Date(year, month - 1, 1);
     const monthLabel = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     const startOffset = (first.getDay() + 6) % 7; // Monday first
@@ -1152,7 +1162,7 @@ function mpRenderSchedule() {
                 <div class="mp-cal__head">
                     <div><h3>${monthLabel}</h3></div>
                     <div class="mp-cal__nav">
-                        <button class="btn btn--ghost" onclick="mpShiftCalendar(-1)" aria-label="Previous month">←</button>
+                        <button class="btn btn--ghost" onclick="mpShiftCalendar(-1)" ${calendarKey > calendarFloor ? '' : 'disabled'} aria-label="Previous month">←</button>
                         <button class="btn btn--ghost" onclick="mpShiftCalendar(1)" aria-label="Next month">→</button>
                     </div>
                 </div>
@@ -1643,7 +1653,7 @@ function mpRenderTraining() {
                 <div>
                     <div class="eyebrow">Player development</div>
                     <h2>Training</h2>
-                    <p>Every drill raises one attribute and can raise your OVR. Boost with Tokens to train harder and cut the cooldown.</p>
+                    <p>Every drill raises one attribute and can raise your OVR. ${tokenInline(13)} pays to cut a drill or rest cooldown.</p>
                 </div>
                 <div class="token-pill"><span class="token-pill__icon" data-token-icon="15"></span><b>${tokenText(Account.tokenBalance)}</b></div>
             </div>
@@ -1663,8 +1673,10 @@ function mpRenderTraining() {
                             </div>
                             <div class="mp-train__bar"><i style="width:${mpClamp(value, 0, 100)}%"></i></div>
                             <div class="mp-train__foot">
-                                <button class="btn btn--primary" onclick="mpDoTraining(${mpJsArg(exercise.id)}, false)" ${cooldown ? 'disabled' : ''}>${cooldown ? `Train in ${cooldown}` : 'Train +1'}</button>
-                                <button class="btn btn--ghost" onclick="mpDoTraining(${mpJsArg(exercise.id)}, true)">Boost +2 · ${TOKEN_COSTS.TRAINING_BOOST} Tokens</button>
+                                ${cooldown ? `
+                                    <button class="btn btn--ghost" onclick="mpCutTrainingCooldown(${mpJsArg(exercise.id)})">Cut wait · ${TOKEN_COSTS.TRAINING_COOLDOWN} ${tokenInline(13)}</button>
+                                    <button class="btn btn--primary" disabled>Train in ${cooldown}</button>`
+                                : `<button class="btn btn--primary" onclick="mpDoTraining(${mpJsArg(exercise.id)})">Train +1</button>`}
                             </div>
                         </div>`;
                 }).join('')}
@@ -1680,6 +1692,7 @@ function mpRenderTraining() {
                     <button class="btn btn--primary" onclick="mpRest()" ${mpCooldownText(career.restReadyAt) || career.health.stamina >= 100 ? 'disabled' : ''}>
                         ${career.health.stamina >= 100 ? 'Stamina full' : mpCooldownText(career.restReadyAt) ? `Ready in ${mpCooldownText(career.restReadyAt)}` : 'Rest now'}
                     </button>
+                    ${mpCooldownText(career.restReadyAt) ? `<button class="btn btn--ghost" onclick="mpCutRestCooldown()">Cut wait · ${TOKEN_COSTS.TRAINING_COOLDOWN} ${tokenInline(13)}</button>` : ''}
                     <button class="btn btn--ghost" onclick="mpBackToCareer()">Back</button>
                 </div>
             </div>
@@ -1687,35 +1700,53 @@ function mpRenderTraining() {
     accountRenderHud();
 }
 
-async function mpDoTraining(exerciseId, boosted) {
+async function mpDoTraining(exerciseId) {
     if (!MP.active) return;
     const career = mpEnsureCareerShape(MP.active);
     const exercise = MP_TRAINING.find(item => item.id === exerciseId);
     if (!exercise) return;
 
-    const cooldown = mpCooldownText(career.trainingCooldowns[exercise.id]);
-    if (!boosted && cooldown) {
-        if (typeof showToast === 'function') showToast(`This drill is on cooldown for ${cooldown}. Use a Token boost to train now.`);
+    if (mpCooldownText(career.trainingCooldowns[exercise.id])) {
+        if (typeof showToast === 'function') showToast(`This drill is on cooldown for ${mpCooldownText(career.trainingCooldowns[exercise.id])}.`);
         return;
     }
 
-    if (boosted) {
-        const paid = await accountSpendTokens(TOKEN_COSTS.TRAINING_BOOST, `${exercise.name} boost`);
-        if (!paid) return;
-    }
-
-    const gain = boosted ? 2 : 1;
     const current = Math.round(career.attrs[exercise.attr]);
-    const next = mpClamp(current + gain, 1, 99);
+    const next = mpClamp(current + 1, 1, 99);
     career.attrs[exercise.attr] = next;
     career.ovr = calculateOVRFromStats(career.attrs, career.position);
-    career.health.stamina = mpClamp(career.health.stamina - (boosted ? 6 : 8), 0, 100);
-    career.trainingCooldowns[exercise.id] = Date.now() + (boosted ? MP_TRAIN_BOOST_COOLDOWN_MS : MP_TRAIN_COOLDOWN_MS);
+    career.health.stamina = mpClamp(career.health.stamina - 8, 0, 100);
+    career.trainingCooldowns[exercise.id] = Date.now() + MP_TRAIN_COOLDOWN_MS;
 
     if (typeof showToast === 'function') {
         showToast(`${exercise.name}: ${exercise.attr} ${current} → ${next}. OVR ${career.ovr}.`);
     }
 
+    mpRenderTraining();
+    await mpAutosaveNow();
+}
+
+// Coins buy time, never a bigger gain: paying clears the wait, it does not
+// make the drill count for more.
+async function mpCutTrainingCooldown(exerciseId) {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    const exercise = MP_TRAINING.find(item => item.id === exerciseId);
+    if (!exercise || !mpCooldownText(career.trainingCooldowns[exercise.id])) return;
+    const paid = await accountSpendTokens(TOKEN_COSTS.TRAINING_COOLDOWN, `${exercise.name} cooldown`);
+    if (!paid) return;
+    career.trainingCooldowns[exercise.id] = 0;
+    mpRenderTraining();
+    await mpAutosaveNow();
+}
+
+async function mpCutRestCooldown() {
+    if (!MP.active) return;
+    const career = mpEnsureCareerShape(MP.active);
+    if (!mpCooldownText(career.restReadyAt)) return;
+    const paid = await accountSpendTokens(TOKEN_COSTS.TRAINING_COOLDOWN, 'Rest cooldown');
+    if (!paid) return;
+    career.restReadyAt = 0;
     mpRenderTraining();
     await mpAutosaveNow();
 }
@@ -1795,7 +1826,7 @@ function mpRenderAssets() {
                                 ${asset.perMatch ? `<span class="mp-chip">+${asset.perMatch} mental / match</span>` : ''}
                             </div>
                             <div class="mp-asset__price">
-                                <div><span style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;font-weight:900">Price</span><b>${mpMoney(asset.cost)}</b></div>
+                                <div class="mp-asset__cost"><span>Price:</span><b>${mpMoney(asset.cost)}</b></div>
                                 <button class="btn btn--primary" onclick="mpBuyAsset(${mpJsArg(asset.id)})" ${career.money < asset.cost ? 'disabled' : ''}>Buy</button>
                             </div>
                         </div>`;
@@ -1839,6 +1870,8 @@ function mpBuyAsset(id) {
 // Story
 // ------------------------------------------------------------
 
+// Each scene feeds the film one beat: act, title and the mood of art it uses.
+// `text` is archive only — the cutscene shows no prose.
 const MP_STORY = {
     intro: [
         {
@@ -2085,6 +2118,128 @@ function mpGetScene(career) {
     return { path, list, step, scene: list[step] };
 }
 
+// ------------------------------------------------------------
+// Origin story cutscene
+//
+// The whole origin plays as one film: every chapter beat runs back to back on a
+// letterboxed stage, each beat a mood of art carrying its title card. There is
+// no prose and no page turning — the film stops once, at the last game, for the
+// Pass or Shoot decision, then finishes on one button into the dashboard.
+// Which beat is on screen is transient; story.decision is the only thing saved
+// while it plays, so a reload resumes the same chapter.
+// ------------------------------------------------------------
+
+const MP_CUT_BEAT_MS = 2600;
+
+const MP_CUT_ART = {
+    'One Chance': 'pitch',
+    'The Square Ball': 'pitch',
+    'The Strike': 'pitch',
+    'Empty Sky': 'sky',
+    'City Champions': 'sky',
+    'The Walk Home': 'street',
+    'The Leaflet': 'street',
+    'Graduation Day': 'street',
+    'The Scout': 'street',
+    'The Handshake': 'street',
+    'The Loan': 'street',
+    'Dinner and the Ceiling': 'room',
+    'The Badge': 'club',
+    "The Manager's Rules": 'club',
+    'The Team Sheet': 'club',
+    'Graduation and the Contract': 'club',
+    'The Call': 'club',
+    'The Debut': 'stadium',
+    'Ten Matches': 'stadium',
+    'Matchday': 'stadium'
+};
+
+function mpCutArt(scene) {
+    return scene.art || MP_CUT_ART[scene.title] || 'street';
+}
+
+function mpCutBeats(list) {
+    return (list || []).map(scene => ({ act: scene.act, title: scene.title, art: mpCutArt(scene) }));
+}
+
+function mpCutStage() {
+    return document.querySelector('#mp-story-panel .mp-cut');
+}
+
+function mpCutStop() {
+    if (MP.cut.timer) clearTimeout(MP.cut.timer);
+    MP.cut.timer = null;
+}
+
+function mpCutArm() {
+    mpCutStop();
+    if (MP.cut.phase !== 'play') return;
+    MP.cut.timer = setTimeout(mpCutTick, MP_CUT_BEAT_MS);
+}
+
+function mpCutTick() {
+    MP.cut.timer = null;
+    if (MP.cut.index + 1 < MP.cut.beats.length) {
+        MP.cut.index++;
+        mpCutShowBeat();
+        mpCutArm();
+        return;
+    }
+    mpCutPhase(MP.cut.path ? 'done' : 'decide');
+}
+
+function mpCutShowBeat() {
+    const stage = mpCutStage();
+    const beat = MP.cut.beats[MP.cut.index];
+    if (!stage || !beat) return;
+    stage.dataset.art = beat.art;
+    const card = stage.querySelector('.mp-cut__card');
+    card.classList.remove('is-in');
+    card.innerHTML = `
+        <div class="mp-cut__act">${mpEsc(beat.act || 'Chapter 1 · The Last Game')}</div>
+        <h2 class="mp-cut__title">${mpEsc(beat.title || 'One Chance')}</h2>`;
+    void card.offsetWidth;
+    card.classList.add('is-in');
+}
+
+function mpCutDecisionMarkup() {
+    const scene = MP_STORY.intro.find(item => (item.choices || []).length);
+    if (!scene) return '';
+    return `
+        <p class="mp-cut__prompt">Make your decision</p>
+        <div class="mp-cut__choices">
+            ${scene.choices.map(choice => `
+                <button class="mp-cut__choice" onclick="mpChooseStory(${mpJsArg(choice.path)})">
+                    <b>${mpEsc(choice.label)}</b>
+                    <span>Choose</span>
+                </button>`).join('')}
+        </div>`;
+}
+
+function mpCutFootMarkup() {
+    if (MP.cut.phase === 'decide') return mpCutDecisionMarkup();
+    if (MP.cut.phase === 'done') return `<button class="btn btn--primary mp-cut__cta" onclick="mpFinishStory()">Go to Dashboard</button>`;
+    return `<button class="mp-cut__leave" onclick="mpFinishStory()">End</button>`;
+}
+
+function mpCutPhase(phase) {
+    MP.cut.phase = phase;
+    mpCutStop();
+    const foot = document.querySelector('#mp-story-panel .mp-cut__foot');
+    if (foot) foot.innerHTML = mpCutFootMarkup();
+}
+
+function mpCutPlay(beats, path) {
+    mpCutStop();
+    MP.cut.beats = beats;
+    MP.cut.path = path;
+    MP.cut.index = 0;
+    MP.cut.phase = 'play';
+    mpCutShowBeat();
+    mpCutPhase('play');
+    mpCutArm();
+}
+
 function mpRenderStory() {
     const career = mpEnsureCareerShape(MP.active);
     if (!career) {
@@ -2095,106 +2250,48 @@ function mpRenderStory() {
     const subtitle = document.getElementById('mp-story-subtitle');
     if (subtitle) subtitle.textContent = career.name || 'Career';
 
-    const identity = document.getElementById('mp-story-player');
-    if (identity) identity.innerHTML = mpIdentityMarkup(career);
-
     const panel = document.getElementById('mp-story-panel');
     if (!panel) return;
 
-    const { list, step, scene } = mpGetScene(career);
-    const paragraphs = typeof scene.text === 'function' ? scene.text(career) : (scene.text || []);
-    const isEnd = !!scene.end || step >= list.length - 1;
-    const choices = scene.choices || [];
-
-    const body = paragraphs.map(paragraph => `<p>${mpEsc(paragraph)}</p>`).join('');
-    const progress = list.map((_, index) => `<span class="mp-progress__dot${index <= step ? ' is-on' : ''}"></span>`).join('');
-
-    let actions = '';
-    if (choices.length) {
-        actions = `
-            <div class="mp-choices">
-                ${choices.map(choice => `
-                    <button class="mp-choice" onclick="mpChooseStory(${mpJsArg(choice.path)})">
-                        <span>${mpEsc(choice.label)}</span>
-                        <span class="mp-choice__arrow">→</span>
-                    </button>`).join('')}
-            </div>`;
-    } else if (isEnd) {
-        const endBadge = scene.endBadge || 'To be continued';
-        const endText = scene.endText || 'This is the end of the current chapter. Your career is saved — return to it whenever you want.';
-        const endCta = scene.endCta || 'Back';
-        actions = `
-            <div class="mp-story__end">
-                <div class="mp-story__end-badge">${mpEsc(endBadge)}</div>
-                <p>${mpEsc(endText)}</p>
-                <button class="btn btn--primary" onclick="mpBackToCareer()">${mpEsc(endCta)}</button>
-            </div>`;
-    } else {
-        actions = `
-            <div class="mp-story__actions">
-                <button class="btn btn--primary" onclick="mpAdvanceStory()">Continue <span>→</span></button>
-            </div>`;
-    }
+    const decided = MP_STORY[career.story.decision] ? career.story.decision : '';
+    const beats = decided ? mpCutBeats(MP_STORY[decided]) : mpCutBeats(MP_STORY.intro);
+    if (!beats.length) return;
 
     panel.innerHTML = `
-        <div class="mp-story__top">
-            <div>
-                <div class="mp-story__chapter">${mpEsc(scene.act || 'Chapter 1 · The Last Game')}</div>
-                <h2 class="mp-story__title">${mpEsc(scene.title || 'One Chance')}</h2>
-            </div>
-            <div class="mp-story__progress" aria-label="Story progress">${progress}</div>
-        </div>
-        <div class="mp-story__text">${body}</div>
-        ${actions}
-        <div class="mp-story__foot">Part ${step + 1} of ${list.length} · Autosaves after every step</div>`;
-
-    mpSetSaveState('saved');
-}
-
-function mpIdentityMarkup(career) {
-    return `
-        <div class="mp-idcard">
-            <div class="mp-idcard__top">
-                <div class="mp-idcard__badge">${mpEsc(career.position || '—')}</div>
-                <div class="mp-idcard__names">
-                    <div class="mp-idcard__name">${mpEsc(career.name || 'My Player')}</div>
-                    <div class="mp-idcard__meta">${career.ovr} OVR · ${Number(career.age) || 18} · ${mpEsc(career.nationality || '—')}</div>
-                </div>
-            </div>
-            <div class="mp-idcard__rows">
-                <div><span>Club</span><b>${mpEsc(career.club.name)}</b></div>
-                <div><span>League</span><b>${mpEsc(career.club.league)}</b></div>
-                <div><span>Position</span><b>${mpEsc(mpPosLabel(career.position))}</b></div>
-                <div><span>Archetype</span><b>${mpEsc(career.archetype || '—')}</b></div>
-                <div><span>Playstyle</span><b>${mpEsc(career.playstyle || '—')}</b></div>
-            </div>
-            <button class="btn btn--ghost mp-idcard__back" onclick="mpBackToCareer()">Back</button>
+        <div class="mp-cut" data-art="${mpEscAttr(beats[0].art)}">
+            <div class="mp-cut__art" aria-hidden="true"></div>
+            <div class="mp-cut__rail mp-cut__rail--top" aria-hidden="true"></div>
+            <div class="mp-cut__rail mp-cut__rail--bottom" aria-hidden="true"></div>
+            <div class="mp-cut__card"></div>
+            <div class="mp-cut__foot"></div>
         </div>`;
+
+    mpCutPlay(beats, decided || null);
+    mpSetSaveState('saved');
 }
 
 async function mpChooseStory(path) {
     if (!MP.active || MP.storyBusy || !MP_STORY[path]) return;
     MP.storyBusy = true;
     MP.active.story = MP.active.story || {};
-    MP.active.story.path = path;
-    MP.active.story.step = 0;
     MP.active.story.decision = path;
-    mpRenderStory();
+    mpCutPlay(mpCutBeats(MP_STORY[path]), path);
     await mpAutosaveNow();
     MP.storyBusy = false;
 }
 
-async function mpAdvanceStory() {
-    if (!MP.active || MP.storyBusy) return;
-    const { list, step } = mpGetScene(MP.active);
-    if (step >= list.length - 1) return;
-    MP.storyBusy = true;
+// One button leaves the film, whenever it is pressed: the chapter reached is
+// what the career card remembers.
+async function mpFinishStory() {
+    if (!MP.active) return;
+    mpCutStop();
+    const path = MP_STORY[MP.cut.path] ? MP.cut.path : 'intro';
     MP.active.story = MP.active.story || {};
-    MP.active.story.path = MP_STORY[MP.active.story.path] ? MP.active.story.path : 'intro';
-    MP.active.story.step = step + 1;
-    mpRenderStory();
+    MP.active.story.path = path;
+    MP.active.story.step = MP_STORY[path].length - 1;
+    if (MP_STORY[MP.cut.path]) MP.active.story.decision = MP.cut.path;
     await mpAutosaveNow();
-    MP.storyBusy = false;
+    mpBackToCareer();
 }
 
 // ------------------------------------------------------------

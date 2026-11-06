@@ -1240,10 +1240,6 @@
         .mp-head h2 { font-family: var(--font-display); font-size: clamp(26px, 4vw, 36px); font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; margin: 2px 0 0; }
         .mp-head p { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
 
-        .mp-account { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, 0.03); flex-wrap: wrap; }
-        .mp-account__who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-        .mp-account__label { font-size: 9px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
-        .mp-account__email { font-size: 13px; font-weight: 800; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
 
         .mp-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
         .mp-career { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)); overflow: hidden; transition: border-color 0.15s ease, transform 0.15s ease; }
@@ -1292,38 +1288,53 @@
         .mp-create-actions .btn--ghost { flex: 0 0 auto; }
         .mp-hint { color: var(--dim); font-size: 10px; line-height: 1.6; margin-top: 10px; }
 
-        .mp-story-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
-        .mp-story-side { position: sticky; top: 78px; }
-        .mp-idcard { background: linear-gradient(165deg, rgba(21, 39, 66, 0.98), rgba(8, 14, 26, 0.98)); border: 1px solid var(--line-strong); border-radius: 20px; padding: 18px; box-shadow: var(--shadow); }
-        .mp-idcard__top { display: flex; align-items: center; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-        .mp-idcard__badge { width: 52px; height: 52px; flex: 0 0 auto; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 18px; font-weight: 900; color: #04120c; background: linear-gradient(135deg, #34d399, #0ea5e9); }
-        .mp-idcard__names { min-width: 0; }
-        .mp-idcard__name { font-size: 17px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .mp-idcard__meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
         .mp-idcard__rows { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
         .mp-idcard__rows > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
         .mp-idcard__rows span { color: var(--dim); font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; font-size: 9px; }
         .mp-idcard__rows b { color: var(--text); font-weight: 800; text-align: right; }
         .mp-idcard__back { width: 100%; margin-top: 16px; }
-        .mp-idcard__back + .mp-idcard__back { margin-top: 8px; }
-        .mp-story-panel { background: linear-gradient(165deg, rgba(16, 29, 51, 0.97), rgba(8, 14, 26, 0.98)); border: 1px solid var(--line); border-radius: 20px; padding: 24px; min-height: 460px; box-shadow: var(--shadow); }
-        .mp-story__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
-        .mp-story__chapter { font-size: 9px; font-weight: 900; letter-spacing: 0.2em; text-transform: uppercase; color: var(--emerald); }
-        .mp-story__title { font-family: var(--font-display); font-size: clamp(26px, 3.6vw, 38px); font-weight: 900; line-height: 1.05; margin: 5px 0 0; }
-        .mp-story__progress { display: flex; gap: 5px; align-items: center; padding-top: 8px; }
-        .mp-progress__dot { width: 6px; height: 6px; border-radius: 999px; background: rgba(148, 163, 184, 0.25); transition: background 0.2s ease, width 0.2s ease; }
-        .mp-progress__dot.is-on { background: var(--emerald); width: 18px; }
-        .mp-story__text { padding: 18px 0 4px; }
-        .mp-story__text p { color: #c9d6e6; font-size: 14px; line-height: 1.85; margin: 0 0 13px; }
-        .mp-choices { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
-        .mp-choice { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 15px 17px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgba(255, 255, 255, 0.035); color: var(--text); font: inherit; font-weight: 800; font-size: 13px; text-align: left; cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease; }
-        .mp-choice:hover { border-color: rgba(52, 211, 153, 0.65); background: rgba(52, 211, 153, 0.08); transform: translateX(2px); }
-        .mp-choice__arrow { color: var(--emerald); font-size: 17px; }
-        .mp-story__actions { margin-top: 20px; }
-        .mp-story__end { margin-top: 22px; padding: 20px; border: 1px dashed rgba(52, 211, 153, 0.35); border-radius: 16px; background: rgba(52, 211, 153, 0.05); text-align: center; }
-        .mp-story__end-badge { display: inline-block; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(52, 211, 153, 0.4); color: var(--emerald); font-size: 9px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 9px; }
-        .mp-story__end p { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 0 auto 14px; max-width: 520px; }
-        .mp-story__foot { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--dim); font-size: 9px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+        .mp-story-panel { min-height: 460px; }
+        .mp-cut { position: relative; display: flex; flex-direction: column; justify-content: flex-end; min-height: min(74vh, 560px); overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: #060b14; box-shadow: var(--shadow); }
+        .mp-cut__art { position: absolute; inset: 0; background: linear-gradient(170deg, var(--cut-a), var(--cut-b) 62%, #03070d); transition: background 1.2s ease; }
+        .mp-cut__art::before { content: ''; position: absolute; inset: -20%; background: radial-gradient(45% 40% at 30% 25%, var(--cut-c), transparent 70%), radial-gradient(38% 34% at 76% 64%, rgba(255, 255, 255, .10), transparent 72%); animation: mpCutDrift 14s ease-in-out infinite alternate; }
+        .mp-cut__art::after { content: ''; position: absolute; inset: 0; background: radial-gradient(120% 100% at 50% 42%, transparent 42%, rgba(3, 7, 13, .88) 100%), linear-gradient(180deg, transparent 45%, rgba(3, 6, 12, .82)); }
+        .mp-cut[data-art="pitch"] { --cut-a: #0d342d; --cut-b: #04120f; --cut-c: rgba(52, 211, 153, .38); }
+        .mp-cut[data-art="pitch"] .mp-cut__art { background-image: repeating-linear-gradient(90deg, rgba(255, 255, 255, .055) 0 6%, transparent 6% 12%), linear-gradient(170deg, var(--cut-a), var(--cut-b) 62%, #03070d); }
+        .mp-cut[data-art="sky"] { --cut-a: #123a5e; --cut-b: #061422; --cut-c: rgba(14, 165, 233, .40); }
+        .mp-cut[data-art="street"] { --cut-a: #2a2338; --cut-b: #0f0b17; --cut-c: rgba(251, 191, 36, .30); }
+        .mp-cut[data-art="room"] { --cut-a: #2c1f1a; --cut-b: #100a08; --cut-c: rgba(249, 115, 22, .28); }
+        .mp-cut[data-art="club"] { --cut-a: #10243f; --cut-b: #060d18; --cut-c: rgba(99, 102, 241, .34); }
+        .mp-cut[data-art="stadium"] { --cut-a: #0e2b46; --cut-b: #050e19; --cut-c: rgba(226, 232, 240, .32); }
+        @keyframes mpCutDrift {
+            from { transform: translate3d(-2%, -1%, 0) scale(1); }
+            to { transform: translate3d(3%, 2%, 0) scale(1.06); }
+        }
+        .mp-cut__rail { position: absolute; left: 0; right: 0; height: 16px; background: #03060c; z-index: 2; }
+        .mp-cut__rail--top { top: 0; }
+        .mp-cut__rail--bottom { bottom: 0; }
+        .mp-cut__card { position: relative; z-index: 3; padding: 0 26px 14px; opacity: 0; }
+        .mp-cut__card.is-in { animation: mpCutCard .8s ease both; }
+        @keyframes mpCutCard {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: none; }
+        }
+        .mp-cut__act { font-size: 9px; font-weight: 900; letter-spacing: 0.2em; text-transform: uppercase; color: var(--emerald); }
+        .mp-cut__title { font-family: var(--font-display); font-size: clamp(28px, 5vw, 46px); font-weight: 900; line-height: 1.05; margin: 6px 0 0; text-shadow: 0 6px 18px rgba(0, 0, 0, .55); }
+        .mp-cut__foot { position: relative; z-index: 3; display: flex; flex-direction: column; gap: 10px; padding: 0 26px 26px; }
+        .mp-cut__prompt { margin: 0; color: var(--gold); font-size: 10px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; }
+        .mp-cut__choices { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+        .mp-cut__choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 15px 16px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgba(6, 11, 20, 0.72); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease; }
+        .mp-cut__choice b { font-size: 13px; font-weight: 900; }
+        .mp-cut__choice span { font-size: 9px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; color: var(--emerald); }
+        .mp-cut__choice:hover { border-color: rgba(52, 211, 153, 0.6); background: rgba(52, 211, 153, 0.12); transform: translateY(-2px); }
+        .mp-cut__leave { align-self: flex-end; padding: 9px 18px; border: 1px solid var(--line-strong); border-radius: 999px; background: rgba(6, 11, 20, 0.6); color: var(--muted); font: inherit; font-size: 10px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
+        .mp-cut__leave:hover { color: var(--text); border-color: rgba(226, 232, 240, 0.4); }
+        .mp-cut__cta { width: 100%; max-width: 340px; }
+        @media (prefers-reduced-motion: reduce) {
+            .mp-cut__art { transition: none; }
+            .mp-cut__art::before, .mp-cut__card.is-in { animation: none; }
+            .mp-cut__card { opacity: 1; }
+        }
         .mp-save { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); color: var(--dim); font-size: 9px; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; }
         .mp-save__dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
         .mp-save.is-saving { color: var(--gold); border-color: rgba(251, 191, 36, 0.35); }
@@ -1331,14 +1342,18 @@
         .mp-save.is-error { color: #fecaca; border-color: rgba(248, 113, 113, 0.45); }
 
         @media (max-width: 900px) {
-            .mp-story-layout { grid-template-columns: 1fr; }
-            .mp-story-side { position: static; }
             .mp-career__side { display: none; }
         }
         @media (max-width: 680px) {
             .mp-reel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .mp-panel { padding: 18px; }
-            .mp-story-panel { padding: 19px; }
+            .mp-story-panel { min-height: 420px; }
+            .mp-cut { min-height: min(70vh, 470px); }
+            .mp-cut__rail { height: 12px; }
+            .mp-cut__card { padding: 0 16px 12px; }
+            .mp-cut__foot { padding: 0 16px 20px; }
+            .mp-cut__choices { grid-template-columns: 1fr; }
+            .mp-cut__cta { max-width: none; }
             .mp-career__open { padding: 12px; gap: 10px; }
             .mp-career__badge { width: 42px; height: 42px; font-size: 15px; }
             .mp-career__del { padding: 0 10px; font-size: 9px; }
@@ -1383,6 +1398,7 @@
         }
         .token-pill--sm { padding: 6px 11px; font-size: 12px; }
         .token-pill__icon, .token-inline { display: inline-flex; align-items: center; justify-content: center; color: var(--gold); }
+        .token-inline { vertical-align: -0.16em; }
         .token-icon { display: block; }
         .mp-cost { color: var(--gold); }
 
@@ -1525,8 +1541,9 @@
         .mp-train__foot .btn { flex: 1; min-width: 96px; padding: 10px 12px; font-size: 11px; }
 
         .mp-asset__price { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
+        .mp-asset__cost { display: flex; align-items: baseline; gap: 5px; }
+        .mp-asset__cost span { font-size: 8px; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; font-weight: 900; }
         .mp-asset__price b { font-size: 16px; font-weight: 900; color: var(--emerald); }
-        .mp-asset__price small { display: block; font-size: 8px; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; font-weight: 900; }
         .mp-asset__effect { display: flex; gap: 6px; flex-wrap: wrap; }
         .mp-chip { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03); font-size: 8px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
         .mp-chip--mental { border-color: rgba(167, 139, 250, .4); color: #d8caff; }
@@ -1638,7 +1655,7 @@
                 <button class="btn btn--ghost main-hud__signout" onclick="accountSignOut()">Sign out</button>
             </div>
             <div class="main-hud__right">
-                <span class="token-pill" title="Tokens earned by winning online matches">
+                <span class="token-pill">
                     <span class="token-pill__icon" data-token-icon="17"></span>
                     <b id="menu-token-count" data-token-count>0</b>
                 </span>
@@ -1714,7 +1731,7 @@
                         <h2 class="mp-auth-title">Sign in</h2>
                     </div>
                 </div>
-                <p class="mp-auth-sub" id="auth-sub">Sign in to play online, save My Player careers and collect Tokens.</p>
+                <p class="mp-auth-sub" id="auth-sub">Sign in to play online, save My Player careers and collect <span class="token-inline" data-token-icon="13"></span>.</p>
 
                 <label class="mp-label" for="auth-email">Email</label>
                 <input class="mp-input" id="auth-email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com">
@@ -1748,7 +1765,7 @@
                 <span class="appbar__title">My Player <small>Online career</small></span>
             </div>
             <div class="appbar__right">
-                <span class="token-pill token-pill--sm" title="Tokens">
+                <span class="token-pill token-pill--sm">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>
@@ -1757,14 +1774,6 @@
         </header>
         <main class="mp-main">
             <div class="mp-shell">
-                <div class="mp-account">
-                    <div class="mp-account__who">
-                        <span class="mp-account__label">Signed in as</span>
-                        <b class="mp-account__email" id="mp-account-email">—</b>
-                    </div>
-                    <button class="btn btn--ghost" onclick="accountSignOut()">Sign out</button>
-                </div>
-
                 <div class="mp-panel">
                     <div class="mp-head">
                         <div>
@@ -1792,7 +1801,7 @@
                 <span class="appbar__title">Create My Player <small>Roll your beginning</small></span>
             </div>
             <div class="appbar__right">
-                <span class="token-pill token-pill--sm" title="Tokens">
+                <span class="token-pill token-pill--sm">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>
@@ -1804,7 +1813,7 @@
                     <div>
                         <div class="eyebrow">New career</div>
                         <h2>Roll your player</h2>
-                        <p>Press Roll to spin the reels. The first roll is free; every reroll costs <b class="mp-cost" id="mp-reroll-cost">25</b> Tokens.</p>
+                        <p>Press Roll to spin the reels. The first roll is free; every reroll costs <b class="mp-cost" id="mp-reroll-cost">25</b> <span class="token-inline" data-token-icon="13"></span>.</p>
                     </div>
                     <button class="btn btn--primary" id="mp-roll-btn" onclick="mpRollAction()">Roll</button>
                 </div>
@@ -1813,7 +1822,7 @@
                 <input class="mp-input" id="mp-name" type="text" maxlength="24" autocomplete="off" placeholder="Type your player's name">
 
                 <div class="mp-reel-grid" id="mp-reel-grid"></div>
-                <p class="mp-hint">Nationality, height, weight, position, archetype and playstyle are rolled from the game's pools. Archetype and playstyle always fit the rolled position. Rerolls spend account Tokens.</p>
+                <p class="mp-hint">Nationality, height, weight, position, archetype and playstyle are rolled from the game's pools. Archetype and playstyle always fit the rolled position. Rerolls spend account <span class="token-inline" data-token-icon="12"></span>.</p>
 
                 <p class="mp-status" id="mp-create-status" aria-live="polite"></p>
                 <div class="mp-create-actions">
@@ -1832,17 +1841,14 @@
                 <span class="appbar__title">My Player <small id="mp-story-subtitle">Career</small></span>
             </div>
             <div class="appbar__right">
-                <span class="token-pill token-pill--sm" title="Tokens">
+                <span class="token-pill token-pill--sm">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>
                 <span class="mp-save" id="mp-save-state"><span class="mp-save__dot"></span>Cloud save</span>            </div>
         </header>
         <main class="mp-main">
-            <div class="mp-story-layout">
-                <aside class="mp-story-side" id="mp-story-player"></aside>
-                <article class="mp-story-panel" id="mp-story-panel"></article>
-            </div>
+            <article class="mp-story-panel" id="mp-story-panel"></article>
         </main>
     </div>
 
@@ -1854,7 +1860,7 @@
                 <span class="appbar__title">My Player <small id="mp-dash-subtitle">Career</small></span>
             </div>
             <div class="appbar__right">
-                <span class="token-pill token-pill--sm" title="Tokens">
+                <span class="token-pill token-pill--sm">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>
@@ -1874,7 +1880,7 @@
                 <span class="appbar__title">Matches <small id="mp-schedule-subtitle">C League</small></span>
             </div>
             <div class="appbar__right">
-                <span class="token-pill token-pill--sm" title="Tokens">
+                <span class="token-pill token-pill--sm">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>            </div>
@@ -1892,7 +1898,7 @@
                 <span class="appbar__title">Training <small>Build your attributes</small></span>
             </div>
             <div class="appbar__right">
-                <span class="token-pill token-pill--sm" title="Tokens">
+                <span class="token-pill token-pill--sm">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>            </div>
@@ -1910,7 +1916,7 @@
                 <span class="appbar__title">Assets <small>Protect your mental health</small></span>
             </div>
             <div class="appbar__right">
-                <span class="token-pill token-pill--sm" title="Tokens">
+                <span class="token-pill token-pill--sm">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>            </div>
@@ -1939,7 +1945,7 @@
             </div>
             <p class="mp-status" id="account-name-status" aria-live="polite"></p>
             <div class="account-card__rows">
-                <div><span>Tokens</span><b><span class="token-inline" data-token-icon="14"></span><span id="account-info-tokens">0</span></b></div>
+                <div><span class="token-inline" data-token-icon="14"></span><b><span id="account-info-tokens">0</span></b></div>
                 <div><span>My Players</span><b id="account-info-players">0</b></div>
                 <div><span>Member since</span><b id="account-info-since">Today</b></div>
                 <div><span>Account ID</span><b class="account-card__uid" id="account-info-uid">—</b></div>
@@ -1949,7 +1955,7 @@
             <div class="account-card__topup hidden" id="account-dev-topup">
                 <span class="token-inline" data-token-icon="14"></span>
                 <input class="mp-input" id="account-dev-amount" type="number" min="1" max="100000" step="1" value="100">
-                <button class="btn btn--gold" onclick="accountDevAddTokens()">Add Tokens</button>
+                <button class="btn btn--gold" onclick="accountDevAddTokens()">Add <span class="token-inline" data-token-icon="13"></span></button>
             </div>
             <div class="account-card__actions">
                 <button class="btn btn--ghost" onclick="accountCloseInfo()">Close</button>

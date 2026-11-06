@@ -16,7 +16,7 @@ const TOKEN_REWARDS = Object.freeze({
 
 const TOKEN_COSTS = Object.freeze({
     MP_REROLL: 25,
-    TRAINING_BOOST: 20
+    TRAINING_COOLDOWN: 20
 });
 
 const Account = {
@@ -49,6 +49,12 @@ function tokenIcon(size = 16) {
 function tokenText(value) {
     const n = Number(value);
     return Number.isFinite(n) ? Math.max(0, Math.floor(n)).toLocaleString() : '0';
+}
+
+// The coin inline inside a sentence or a button label, so the UI never has to
+// spell the currency out.
+function tokenInline(size = 14) {
+    return `<span class="token-inline">${tokenIcon(size)}</span>`;
 }
 
 function accountInitial() {
@@ -265,10 +271,10 @@ async function accountAwardTokens(amount, eventId, reason) {
         });
         Account.tokenBalance = Number(result && result.snapshot && result.snapshot.val()) || 0;
         accountRenderHud();
-        if (typeof showToast === 'function') showToast(`+${tokenText(value)} Tokens · ${reason || 'Reward'}`, 4200);
+        if (typeof showToast === 'function') showToast(`+${tokenText(value)} ${tokenInline(14)} · ${escapeHTML(reason || 'Reward')}`, 4200, true);
         return true;
     } catch (error) {
-        if (typeof showToast === 'function') showToast(`Token reward failed: ${accountFriendlyError(error)}`, 5200);
+        if (typeof showToast === 'function') showToast(`Reward failed: ${escapeHTML(accountFriendlyError(error))}`, 5200, true);
         return false;
     }
 }
@@ -284,14 +290,14 @@ async function accountSpendTokens(amount, reason) {
             return n - value;
         });
         if (!result || !result.committed) {
-            if (typeof showToast === 'function') showToast(`Not enough Tokens. You need ${tokenText(value)}.`);
+            if (typeof showToast === 'function') showToast(`Not enough ${tokenInline(14)}. You need ${tokenText(value)}.`, 3500, true);
             return false;
         }
         Account.tokenBalance = Number(result.snapshot.val()) || 0;
         accountRenderHud();
         return true;
     } catch (error) {
-        if (typeof showToast === 'function') showToast(`Token spend failed: ${accountFriendlyError(error)}`, 5200);
+        if (typeof showToast === 'function') showToast(`Spend failed: ${escapeHTML(accountFriendlyError(error))}`, 5200, true);
         return false;
     }
 }
@@ -348,9 +354,9 @@ function accountSetAuthMode(mode) {
     if (toggle) toggle.textContent = signup ? 'I already have an account' : 'Create an account';
     const sub = document.getElementById('auth-sub');
     if (sub) {
-        sub.textContent = signup
-            ? 'Create a free account to play online, save My Player careers and collect Tokens.'
-            : 'Sign in to play online, save My Player careers and collect Tokens.';
+        sub.innerHTML = signup
+            ? `Create a free account to play online, save My Player careers and collect ${tokenInline(13)}.`
+            : `Sign in to play online, save My Player careers and collect ${tokenInline(13)}.`;
     }
     const wrap = document.getElementById('auth-confirm-wrap');
     if (wrap) wrap.classList.toggle('hidden', !signup);
@@ -484,9 +490,6 @@ function accountRenderHud() {
     document.querySelectorAll('[data-token-count]').forEach(el => { el.textContent = tokenText(Account.tokenBalance); });
     const infoTokens = document.getElementById('account-info-tokens');
     if (infoTokens) infoTokens.textContent = tokenText(Account.tokenBalance);
-
-    const emailEl = document.getElementById('mp-account-email');
-    if (emailEl) emailEl.textContent = Account.user ? (Account.user.email || 'Signed in') : 'Not signed in';
 }
 
 function accountSetNameStatus(text, isError) {
@@ -546,7 +549,7 @@ async function accountDevAddTokens() {
     if (!Account.devUnlocked || !Account.user) return;
     const raw = Math.floor(Number(document.getElementById('account-dev-amount')?.value));
     if (!Number.isFinite(raw) || raw < 1) {
-        if (typeof showToast === 'function') showToast('Enter how many Tokens to add.');
+        if (typeof showToast === 'function') showToast(`Enter how many ${tokenInline(14)} to add.`, 3500, true);
         return;
     }
     await accountAwardTokens(Math.min(raw, TOKEN_TOPUP_MAX), null, 'Manual top-up');
