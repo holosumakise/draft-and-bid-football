@@ -701,8 +701,11 @@ async function mpRollAction() {
         MP.rollBusy = false;
         if (roll) { roll.disabled = false; roll.innerHTML = `Reroll · ${TOKEN_COSTS.MP_REROLL} ${tokenInline(13)}`; }
         if (submit) submit.disabled = false;
-        // Keep the status line for paid-reroll feedback only; clear the free roll.
-        if (!reroll) mpSetCreateStatus('');
+        const hint = document.getElementById('mp-create-status');
+        if (hint) {
+            hint.textContent = 'Happy with the roll? Name your player and create the career.';
+            hint.className = 'mp-status';
+        }
     }, 1000);
 }
 
@@ -934,7 +937,6 @@ function mpRenderDashboard() {
     const player = mpPlayerObject(career);
     const avg = mpOverallRating(career);
     const next = mpNextFixture(career);
-    const decision = mpManagerDecision(career);
 
     root.innerHTML = `
         <div class="mp-dash">
@@ -969,7 +971,6 @@ function mpRenderDashboard() {
                         <div class="mp-stat"><span>Salary</span><b>${mpMoney(career.club.salary)}</b><small>per week</small></div>
                         <div class="mp-stat"><span>Appearances</span><b>${career.careerStats.matches}</b><small>${career.careerStats.goals} goals · ${career.careerStats.assists} assists</small></div>
                         <div class="mp-stat"><span>Avg rating</span><b>${avg ? avg.toFixed(2) : '—'}</b><small>Sofascore style</small></div>
-                        <div class="mp-stat"><span>Manager call</span><b>${decision.starts ? 'Starts' : 'Benched'}</b><small>${mpEsc(decision.reason)}</small></div>
                     </div>
 
                     ${mpHealthMarkup(career)}
@@ -2118,7 +2119,6 @@ function mpGetScene(career) {
 // ------------------------------------------------------------
 // Origin story cutscene
 //
-
 // The whole origin plays as one film: every chapter beat runs back to back on a
 // letterboxed stage, each beat a mood of art carrying its title card. There is
 // no prose and no page turning — the film stops once, at the last game, for the

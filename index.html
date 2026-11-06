@@ -1450,7 +1450,7 @@
         .mp-club-side b { display: block; font-size: 19px; font-weight: 900; color: var(--emerald); }
         .mp-club-side span { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 900; }
 
-        .mp-statgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+        .mp-statgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
         .mp-stat { padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .03); }
         .mp-stat span { display: block; font-size: 8px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
         .mp-stat b { display: block; margin-top: 4px; font-size: 18px; font-weight: 900; line-height: 1; }
@@ -1720,7 +1720,7 @@
 
     <!-- My Player: account gate -->
     <!-- Global account gate: shown before the app, required for online + My Player -->
-    <div id="screen-auth" class="screen mp-auth-screen">
+    <div id="screen-auth" class="screen mp-auth-screen active">
         <div class="mp-auth-orbs" aria-hidden="true"></div>
         <main class="mp-auth">
             <div class="mp-auth-card">
@@ -1822,6 +1822,7 @@
                 <input class="mp-input" id="mp-name" type="text" maxlength="24" autocomplete="off" placeholder="Type your player's name">
 
                 <div class="mp-reel-grid" id="mp-reel-grid"></div>
+                <p class="mp-hint">Nationality, height, weight, position, archetype and playstyle are rolled from the game's pools. Archetype and playstyle always fit the rolled position. Rerolls spend account <span class="token-inline" data-token-icon="12"></span>.</p>
 
                 <p class="mp-status" id="mp-create-status" aria-live="polite"></p>
                 <div class="mp-create-actions">
