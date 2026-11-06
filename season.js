@@ -1311,6 +1311,10 @@ function simulateGroupTie(m) {
     m.s1 = EngineCore.samplePoisson(clamp(expected.lambdaA * nerveA, 0.2, 4.0));
     m.s2 = EngineCore.samplePoisson(clamp(expected.lambdaB * nerveB, 0.2, 4.0));
     m.played = true;
+    // A group tie is a scoreline, but the humans' players still have to be
+    // credited for it or their tournament totals start in the round of 16.
+    recordEuropeanGroupStats(m.t1, 1, m);
+    recordEuropeanGroupStats(m.t2, 2, m);
 }
 
 function runEuroGroupMatchday(mdIndex, onlyComp) {
@@ -1946,6 +1950,63 @@ function recordEuropeanPlayerStats(human, sim) {
     });
 }
 
+// Group ties are simulated as scorelines, so hand the human's XI the same
+// player-level credit as a league match. Every appearance, goal, assist, clean
+// sheet and rating from the six group games lands in the same euroStats bucket
+// the knockout rounds use, which is what the awards read.
+function recordEuropeanGroupStats(node, side, tie) {
+    const human = node && node.humanRef;
+    const teamState = human && human.teamState;
+    if (!human || !teamState || !Array.isArray(teamState.lineup) || !teamState.lineup.length) return;
+
+    const oppNode = side === 1 ? tie.t2 : tie.t1;
+    const oppState = oppNode && oppNode.humanRef ? oppNode.humanRef.teamState : null;
+    const goalsFor = side === 1 ? tie.s1 : tie.s2;
+    const goalsAgainst = side === 1 ? tie.s2 : tie.s1;
+    const result = goalsFor > goalsAgainst ? 'W' : goalsFor === goalsAgainst ? 'D' : 'L';
+    if (!human.euroStats) human.euroStats = {};
+
+    // Name the scorers and assisters from the XI that was actually picked.
+    const matchup = getTacticsMatchupFor(teamState.tactics, oppState ? oppState.tactics : teamState.tactics);
+    const mul = side === 1 ? matchup.a : matchup.b;
+    const goalIds = [], assistIds = [];
+    for (let i = 0; i < goalsFor; i++) {
+        const goal = getGoal(teamState, pickGoalKind(mul, setPieceShareFor(teamState, oppState, mul)));
+        if (goal.scorerId >= 0) goalIds.push(goal.scorerId);
+        if (goal.assisterId != null) assistIds.push(goal.assisterId);
+    }
+
+    // applySideMatchEffects writes into a full stats sheet; seed one for every
+    // squad member the appearance planner could use, then fold it into euroStats.
+    const matchStats = {};
+    const seed = player => {
+        if (!player || player.id == null || matchStats[player.id]) return;
+        matchStats[player.id] = {
+            apps: 0, minutes: 0, goals: 0, assists: 0, cleanSheets: 0,
+            yellows: 0, reds: 0, ratingSum: 0, ratingCount: 0, goalsConcededAsGK: 0
+        };
+    };
+    (teamState.lineup || []).forEach(slot => seed(slot && slot.player));
+    (teamState.bench || []).forEach(seed);
+    (teamState.reserves || []).forEach(seed);
+
+    applySideMatchEffects(teamState, matchStats, goalsAgainst, { goals: goalIds, assists: assistIds, result });
+
+    Object.keys(matchStats).forEach(id => {
+        const s = matchStats[id];
+        if (!s.apps && !s.ratingCount) return;
+        const total = human.euroStats[id] || (human.euroStats[id] = {
+            apps: 0, goals: 0, assists: 0, cleanSheets: 0, ratingSum: 0, ratingCount: 0
+        });
+        total.apps += s.apps;
+        total.goals += s.goals;
+        total.assists += s.assists;
+        total.cleanSheets += s.cleanSheets;
+        total.ratingSum += s.ratingSum;
+        total.ratingCount += s.ratingCount;
+    });
+}
+
 function onEuropeMatchFinished(gf, ga, penalties = null) {
     const euro = gameState.europe;
     const cur = euro?.current;
@@ -2217,7 +2278,10 @@ function buildAwardCandidates() {
         const part = europe && europe.participants ? europe.participants.find(h => h.managerId === m.id) : null;
         const euro = (part && part.euroStats) || {};
         const outcome = euroOutcome(part);
-        const euroTies = part && part.path ? part.path.length : 0;
+        // The European campaign starts with six group games, so participation is
+        // measured against those as well as the knockout ties actually reached.
+        const groupTies = part && part.competition ? EURO_GROUP_MATCHDAYS : 0;
+        const euroTies = groupTies + (part && part.path ? part.path.length : 0);
         (m.squad || []).forEach(p => {
             const L = mergedLeague.get(String(p.id)) || {}, E = euro[p.id] || {};
             const ratingCount = (L.ratingCount || 0) + (E.ratingCount || 0);

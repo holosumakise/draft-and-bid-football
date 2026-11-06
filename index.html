@@ -322,6 +322,10 @@
         }
         .timeline-event.left-side { justify-content: flex-start; }
         .timeline-event.right-side { justify-content: flex-end; }
+        /* Two teams substituting in the same minute share one row and one time bubble. */
+        .timeline-event.split-sides { justify-content: space-between; }
+        .timeline-event.split-sides .timeline-card.left-card::before { right: -5%; }
+        .timeline-event.split-sides .timeline-card.right-card::before { left: -5%; }
         
         .timeline-card {
             width: 45%;
@@ -1218,6 +1222,125 @@
             .card-modal__info h3 { font-size: 26px; }
         }
 
+        /* ============================================================
+           MY PLAYER — account gate, career list, randomizer, story
+           ============================================================ */
+        .mode-card--emerald { --accent: #34d399; }
+
+        .mp-screen { background: transparent; padding: 0; }
+        .mp-main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 26px 20px 70px; }
+        .mp-shell { display: flex; flex-direction: column; gap: 18px; width: 100%; }
+        .mp-panel { background: linear-gradient(160deg, rgba(16, 29, 51, 0.96), rgba(8, 14, 26, 0.97)); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); padding: 22px; }
+        .mp-panel--narrow { max-width: 640px; margin: 0 auto; }
+        .mp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+        .mp-head h2 { font-family: var(--font-display); font-size: clamp(26px, 4vw, 36px); font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; margin: 2px 0 0; }
+        .mp-head p { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+
+        .mp-account { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, 0.03); flex-wrap: wrap; }
+        .mp-account__who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .mp-account__label { font-size: 9px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
+        .mp-account__email { font-size: 13px; font-weight: 800; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+
+        .mp-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+        .mp-career { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)); overflow: hidden; transition: border-color 0.15s ease, transform 0.15s ease; }
+        .mp-career:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+        .mp-career__open { flex: 1; display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: transparent; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+        .mp-career__badge { width: 48px; height: 48px; flex: 0 0 auto; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 17px; font-weight: 900; color: #04120c; background: linear-gradient(135deg, #34d399, #0ea5e9); box-shadow: 0 0 22px rgba(52, 211, 153, 0.22); }
+        .mp-career__body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+        .mp-career__name { font-size: 16px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mp-career__meta { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mp-career__tags { font-size: 10px; color: var(--dim); font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mp-career__side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right; flex: 0 0 auto; max-width: 40%; }
+        .mp-career__chapter { font-size: 10px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; color: var(--emerald); }
+        .mp-career__time { font-size: 9px; color: var(--dim); font-weight: 700; }
+        .mp-career__del { flex: 0 0 auto; padding: 0 14px; border: 0; border-left: 1px solid var(--line); background: rgba(127, 29, 29, 0.18); color: #fecaca; font-size: 10px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; transition: background 0.15s ease; }
+        .mp-career__del:hover { background: rgba(127, 29, 29, 0.4); }
+        .mp-empty { text-align: center; padding: 48px 22px; border: 1px dashed var(--line); border-radius: 16px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+        .mp-empty b { display: block; color: var(--text); font-size: 18px; margin-bottom: 6px; }
+        .mp-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+        .mp-status { min-height: 18px; margin: 10px 0 0; font-size: 11px; font-weight: 700; line-height: 1.5; color: var(--muted); }
+        .mp-status.is-error { color: #fecaca; }
+
+        .mp-auth-screen { min-height: 100vh; align-items: center; justify-content: center; padding: 26px 18px; overflow: hidden; }
+        .mp-auth-orbs { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 20% 0%, rgba(52, 211, 153, 0.16), transparent 45%), radial-gradient(ellipse at 85% 15%, rgba(56, 189, 248, 0.12), transparent 42%); }
+        .mp-auth { position: relative; z-index: 2; width: 100%; max-width: 440px; }
+        .mp-auth-card { background: linear-gradient(160deg, rgba(16, 29, 51, 0.98), rgba(7, 13, 24, 0.99)); border: 1px solid var(--line-strong); border-radius: 22px; box-shadow: var(--shadow); padding: 26px; }
+        .mp-auth-head { display: flex; align-items: center; gap: 13px; margin-bottom: 14px; }
+        .mp-auth-mark { width: 52px; height: 52px; border-radius: 15px; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 20px; font-weight: 900; color: #04120c; background: linear-gradient(135deg, #34d399, #0ea5e9); box-shadow: 0 0 26px rgba(52, 211, 153, 0.3); }
+        .mp-auth-title { font-family: var(--font-display); font-size: 30px; font-weight: 900; line-height: 1; text-transform: uppercase; margin: 4px 0 0; }
+        .mp-auth-sub { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0 0 18px; }
+        .mp-label { display: block; font-size: 10px; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; }
+        .mp-input { width: 100%; background: #070e1a; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; color: var(--text); font: inherit; font-size: 13px; outline: none; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+        .mp-input:focus { border-color: rgba(52, 211, 153, 0.75); box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.12); }
+        .mp-auth-submit { width: 100%; margin-top: 16px; }
+        .mp-auth-toggle { width: 100%; margin-top: 9px; }
+        .mp-auth-back { width: 100%; margin-top: 9px; color: var(--muted); }
+        .mp-auth-note { margin-top: 14px; font-size: 10px; line-height: 1.6; color: var(--dim); text-align: center; }
+
+        .mp-reel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0 8px; }
+        .mp-reel { border: 1px solid var(--line); border-radius: 14px; background: rgba(8, 15, 29, 0.82); overflow: hidden; }
+        .mp-reel__label { padding: 8px 11px; border-bottom: 1px solid var(--line); font-size: 9px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
+        .mp-reel__window { height: 46px; overflow: hidden; position: relative; }
+        .mp-reel__window::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(8, 15, 29, 0.85), transparent 28%, transparent 72%, rgba(8, 15, 29, 0.85)); }
+        .mp-reel__track { transition: transform 0.9s cubic-bezier(0.12, 0.72, 0.16, 1); will-change: transform; }
+        .mp-reel__item { height: 46px; line-height: 46px; padding: 0 12px; font-size: 14px; font-weight: 900; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mp-create-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+        .mp-create-actions .btn--primary { flex: 1; min-width: 180px; }
+        .mp-create-actions .btn--ghost { flex: 0 0 auto; }
+        .mp-hint { color: var(--dim); font-size: 10px; line-height: 1.6; margin-top: 10px; }
+
+        .mp-story-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
+        .mp-story-side { position: sticky; top: 78px; }
+        .mp-idcard { background: linear-gradient(165deg, rgba(21, 39, 66, 0.98), rgba(8, 14, 26, 0.98)); border: 1px solid var(--line-strong); border-radius: 20px; padding: 18px; box-shadow: var(--shadow); }
+        .mp-idcard__top { display: flex; align-items: center; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+        .mp-idcard__badge { width: 52px; height: 52px; flex: 0 0 auto; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 18px; font-weight: 900; color: #04120c; background: linear-gradient(135deg, #34d399, #0ea5e9); }
+        .mp-idcard__names { min-width: 0; }
+        .mp-idcard__name { font-size: 17px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mp-idcard__meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+        .mp-idcard__rows { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+        .mp-idcard__rows > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
+        .mp-idcard__rows span { color: var(--dim); font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; font-size: 9px; }
+        .mp-idcard__rows b { color: var(--text); font-weight: 800; text-align: right; }
+        .mp-idcard__back { width: 100%; margin-top: 16px; }
+        .mp-story-panel { background: linear-gradient(165deg, rgba(16, 29, 51, 0.97), rgba(8, 14, 26, 0.98)); border: 1px solid var(--line); border-radius: 20px; padding: 24px; min-height: 460px; box-shadow: var(--shadow); }
+        .mp-story__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+        .mp-story__chapter { font-size: 9px; font-weight: 900; letter-spacing: 0.2em; text-transform: uppercase; color: var(--emerald); }
+        .mp-story__title { font-family: var(--font-display); font-size: clamp(26px, 3.6vw, 38px); font-weight: 900; line-height: 1.05; margin: 5px 0 0; }
+        .mp-story__progress { display: flex; gap: 5px; align-items: center; padding-top: 8px; }
+        .mp-progress__dot { width: 6px; height: 6px; border-radius: 999px; background: rgba(148, 163, 184, 0.25); transition: background 0.2s ease, width 0.2s ease; }
+        .mp-progress__dot.is-on { background: var(--emerald); width: 18px; }
+        .mp-story__text { padding: 18px 0 4px; }
+        .mp-story__text p { color: #c9d6e6; font-size: 14px; line-height: 1.85; margin: 0 0 13px; }
+        .mp-choices { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+        .mp-choice { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 15px 17px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgba(255, 255, 255, 0.035); color: var(--text); font: inherit; font-weight: 800; font-size: 13px; text-align: left; cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease; }
+        .mp-choice:hover { border-color: rgba(52, 211, 153, 0.65); background: rgba(52, 211, 153, 0.08); transform: translateX(2px); }
+        .mp-choice__arrow { color: var(--emerald); font-size: 17px; }
+        .mp-story__actions { margin-top: 20px; }
+        .mp-story__end { margin-top: 22px; padding: 20px; border: 1px dashed rgba(52, 211, 153, 0.35); border-radius: 16px; background: rgba(52, 211, 153, 0.05); text-align: center; }
+        .mp-story__end-badge { display: inline-block; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(52, 211, 153, 0.4); color: var(--emerald); font-size: 9px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 9px; }
+        .mp-story__end p { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 0 auto 14px; max-width: 520px; }
+        .mp-story__foot { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--dim); font-size: 9px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+        .mp-save { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); color: var(--dim); font-size: 9px; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; }
+        .mp-save__dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+        .mp-save.is-saving { color: var(--gold); border-color: rgba(251, 191, 36, 0.35); }
+        .mp-save.is-saved { color: var(--emerald); border-color: rgba(52, 211, 153, 0.35); }
+        .mp-save.is-error { color: #fecaca; border-color: rgba(248, 113, 113, 0.45); }
+
+        @media (max-width: 900px) {
+            .mp-story-layout { grid-template-columns: 1fr; }
+            .mp-story-side { position: static; }
+            .mp-career__side { display: none; }
+        }
+        @media (max-width: 680px) {
+            .mp-reel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .mp-panel { padding: 18px; }
+            .mp-story-panel { padding: 19px; }
+            .mp-career__open { padding: 12px; gap: 10px; }
+            .mp-career__badge { width: 42px; height: 42px; font-size: 15px; }
+            .mp-career__del { padding: 0 10px; font-size: 9px; }
+            .mp-main { padding: 18px 12px 56px; }
+        }
+
     </style>
 </head>
 <body class="font-sans antialiased text-slate-100">
@@ -1305,6 +1428,17 @@
                         </span>
                         <span class="mode-card__arrow">→</span>
                     </button>
+
+                    <button onclick="openMyPlayer()" class="mode-card mode-card--emerald">
+                        <span class="mode-card__icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/><path d="m17 2 0.8 1.7L19.5 4l-1.7.8L17 6.5l-.8-1.7L14.5 4l1.7-.3L17 2Z"/></svg>
+                        </span>
+                        <span class="mode-card__body">
+                            <b>My Player</b>
+                            <small>Online career · Sign in required · Autosaved</small>
+                        </span>
+                        <span class="mode-card__arrow">→</span>
+                    </button>
                 </div>
 
                 <div class="main-actions">
@@ -1322,6 +1456,138 @@
                 <svg class="hero-ball" aria-hidden="true"><use href="#soccer-ball"/></svg>
             </div>
         </div>
+    </div>
+
+    <!-- My Player: account gate -->
+    <div id="screen-myplayer-auth" class="screen mp-auth-screen">
+        <div class="mp-auth-orbs" aria-hidden="true"></div>
+        <main class="mp-auth">
+            <div class="mp-auth-card">
+                <div class="mp-auth-head">
+                    <div class="mp-auth-mark">MP</div>
+                    <div>
+                        <div class="eyebrow">Online career mode</div>
+                        <h2 class="mp-auth-title">My Player</h2>
+                    </div>
+                </div>
+                <p class="mp-auth-sub" id="mp-auth-sub">Sign in so every career is saved to your account — and only yours.</p>
+
+                <label class="mp-label" for="mp-auth-email">Email</label>
+                <input class="mp-input" id="mp-auth-email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com">
+
+                <label class="mp-label" for="mp-auth-password">Password</label>
+                <input class="mp-input" id="mp-auth-password" type="password" autocomplete="current-password" placeholder="At least 6 characters">
+
+                <div id="mp-auth-confirm-wrap" class="hidden">
+                    <label class="mp-label" for="mp-auth-confirm">Confirm password</label>
+                    <input class="mp-input" id="mp-auth-confirm" type="password" autocomplete="new-password" placeholder="Repeat your password">
+                </div>
+
+                <p class="mp-status" id="mp-auth-status" aria-live="polite"></p>
+
+                <button class="btn btn--primary mp-auth-submit" id="mp-auth-submit" onclick="mpSubmitAuth()">Sign in</button>
+                <button class="btn btn--ghost mp-auth-toggle" id="mp-auth-toggle" onclick="mpToggleAuthMode()">Create an account</button>
+                <button class="btn btn--ghost mp-auth-back" onclick="mpClose()">Back to menu</button>
+                <p class="mp-auth-note">My Player is online-only. Your careers live in your account and autosave after every story step.</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- My Player: career list -->
+    <div id="screen-myplayer-list" class="screen mp-screen">
+        <header class="appbar">
+            <div class="appbar__brand">
+                <span class="appbar__mark">MP</span>
+                <span class="appbar__title">My Player <small>Online career</small></span>
+            </div>
+            <div class="appbar__right">
+                <span class="mp-save"><span class="mp-save__dot"></span>Autosave on</span>
+            </div>
+        </header>
+        <main class="mp-main">
+            <div class="mp-shell">
+                <div class="mp-account">
+                    <div class="mp-account__who">
+                        <span class="mp-account__label">Signed in as</span>
+                        <b class="mp-account__email" id="mp-account-email">—</b>
+                    </div>
+                    <button class="btn btn--ghost" onclick="mpSignOut()">Sign out</button>
+                </div>
+
+                <div class="mp-panel">
+                    <div class="mp-head">
+                        <div>
+                            <div class="eyebrow">Your careers</div>
+                            <h2>My Players</h2>
+                            <p>Every career here is saved to this account. Only you can see it.</p>
+                        </div>
+                    </div>
+                    <div class="mp-list" id="mp-career-list"></div>
+                    <p class="mp-status" id="mp-list-status" aria-live="polite"></p>
+                    <div class="mp-actions">
+                        <button class="btn btn--ghost" onclick="mpClose()">Back</button>
+                        <button class="btn btn--primary" onclick="mpShowCreate()">Create My Player</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- My Player: create/randomizer -->
+    <div id="screen-myplayer-create" class="screen mp-screen">
+        <header class="appbar">
+            <div class="appbar__brand">
+                <span class="appbar__mark">MP</span>
+                <span class="appbar__title">Create My Player <small>Roll your beginning</small></span>
+            </div>
+            <div class="appbar__right">
+                <button class="btn btn--ghost" onclick="mpBackToList()">My Players</button>
+            </div>
+        </header>
+        <main class="mp-main">
+            <div class="mp-panel mp-panel--narrow">
+                <div class="mp-head">
+                    <div>
+                        <div class="eyebrow">New career</div>
+                        <h2>Roll your player</h2>
+                        <p>The reels decide everything except the name. Only the name is yours to type.</p>
+                    </div>
+                    <button class="btn btn--ghost" onclick="mpRollAgain()">Roll again</button>
+                </div>
+
+                <label class="mp-label" for="mp-name">Player name</label>
+                <input class="mp-input" id="mp-name" type="text" maxlength="24" autocomplete="off" placeholder="Type your player's name">
+
+                <div class="mp-reel-grid" id="mp-reel-grid"></div>
+                <p class="mp-hint">Nationality, height, weight, position, archetype and playstyle are rolled from the game's pools. Archetype and playstyle always fit the rolled position.</p>
+
+                <p class="mp-status" id="mp-create-status" aria-live="polite"></p>
+                <div class="mp-create-actions">
+                    <button class="btn btn--ghost" onclick="mpBackToList()">Back</button>
+                    <button class="btn btn--primary" id="mp-create-btn" onclick="mpCreateCareer()">Create My Player</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- My Player: story/career -->
+    <div id="screen-myplayer-story" class="screen mp-screen">
+        <header class="appbar">
+            <div class="appbar__brand">
+                <span class="appbar__mark">MP</span>
+                <span class="appbar__title">My Player <small id="mp-story-subtitle">Career</small></span>
+            </div>
+            <div class="appbar__right">
+                <span class="mp-save" id="mp-save-state"><span class="mp-save__dot"></span>Cloud save</span>
+                <button class="btn btn--ghost" onclick="mpBackToList()">My Players</button>
+            </div>
+        </header>
+        <main class="mp-main">
+            <div class="mp-story-layout">
+                <aside class="mp-story-side" id="mp-story-player"></aside>
+                <article class="mp-story-panel" id="mp-story-panel"></article>
+            </div>
+        </main>
     </div>
 
     <!-- Screen 2: Setup -->
@@ -1866,6 +2132,7 @@
     <script src="transfers.js"></script>
     <script src="investment.js"></script>
     <script src="save.js"></script>
+    <script src="myplayer.js"></script>
     <script>
         // Menu showcase — Cristiano Ronaldo's card, for appreciation.
         (function () {

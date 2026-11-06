@@ -984,6 +984,18 @@ function broadcastMatch(sim) {
     }
 }
 
+// Substitutions that land in the same minute share one card per team.
+function subCardHtml(subs, extraClass = '', maxWidth = '') {
+    const lines = subs.map(e => `
+        <div class="flex items-center gap-1.5">
+            <span class="text-[9px] font-black text-slate-500 shrink-0">SUB</span>
+            <span class="text-[10px] font-bold text-emerald-700 truncate">${escapeHTML(e.inName)}</span>
+            <span class="text-[9px] text-slate-400 shrink-0">⇄</span>
+            <span class="text-[10px] font-bold text-red-600 line-through truncate">${escapeHTML(e.outName)}</span>
+        </div>`).join('');
+    return `<div class="timeline-card py-1 px-3 bg-slate-50 border border-slate-200 flex flex-col gap-0.5 w-auto max-w-[70%] ${extraClass}"${maxWidth ? ` style="max-width:${maxWidth}"` : ''}>${lines}</div>`;
+}
+
 function displayTimelineStep(step, sim) {
     // The host mirrors the match to remote devices: every real event is pushed
     // immediately, quiet minutes only every 10th tick so the clock still moves.
@@ -1001,10 +1013,18 @@ function displayTimelineStep(step, sim) {
 
     if (!step.events || !step.events.length) return;
 
+    step.events.forEach(e => applyViewEvent(sim, e));
+
+    const isAddedTime = step.displayTime.includes('+');
+    const timeLabel = step.displayTime.replace("'", '');
+    const timeBubble = `<div class="timeline-time-bubble ${isAddedTime ? 'time-injury' : ''}">${timeLabel}</div>`;
+
     step.events.forEach(e => {
+        // Subs are grouped below, so every team's changes in this minute land on
+        // the same timeline row instead of repeating the time bubble.
+        if (e.type === 'sub') return;
         const isL = e.t === 1;
         let cHtml = '';
-        applyViewEvent(sim, e);
 
         if (e.type === 'goal') {
             cHtml = `
@@ -1017,28 +1037,41 @@ function displayTimelineStep(step, sim) {
             cHtml = `<div class="timeline-card py-1 px-3 bg-yellow-50 flex items-center gap-2 w-auto max-w-[40%]"><div class="w-2 h-3 bg-yellow-400 rounded-sm"></div><div class="text-xs font-bold text-slate-700 truncate">${escapeHTML(e.name)}</div></div>`;
         } else if (e.type === 'red') {
             cHtml = `<div class="timeline-card py-1 px-3 bg-red-50 flex items-center gap-2 w-auto max-w-[40%]"><div class="w-2 h-3 bg-red-500 rounded-sm"></div><div class="text-xs font-bold text-slate-700 truncate">${escapeHTML(e.name)}</div></div>`;
-        } else if (e.type === 'sub') {
-            cHtml = `<div class="timeline-card py-1 px-3 bg-slate-50 border border-slate-200 flex items-center gap-1.5 w-auto max-w-[70%]">
-                <span class="text-[9px] font-black text-slate-500 shrink-0">SUB</span>
-                <span class="text-[10px] font-bold text-emerald-700 truncate">${escapeHTML(e.inName)}</span>
-                <span class="text-[9px] text-slate-400 shrink-0">⇄</span>
-                <span class="text-[10px] font-bold text-red-600 line-through truncate">${escapeHTML(e.outName)}</span>
-            </div>`;
         }
 
         if (cHtml && tl) {
-            const isAddedTime = step.displayTime.includes('+');
             const row = document.createElement('div');
             row.className = `timeline-event ${isL ? 'left-side' : 'right-side'}`;
             row.innerHTML = `
                 ${isL ? cHtml : '<div class="w-1/2"></div>'}
-                <div class="timeline-time-bubble ${isAddedTime ? 'time-injury' : ''}">${step.displayTime.replace("'", "")}</div>
+                ${timeBubble}
                 ${!isL ? cHtml : '<div class="w-1/2"></div>'}
             `;
             tl.appendChild(row);
             if (tl.parentElement) tl.parentElement.scrollTop = tl.parentElement.scrollHeight;
         }
     });
+
+    // Every substitution in this minute is compacted onto one row: one time
+    // bubble, with team 1 on the left and team 2 on the right when both change.
+    const subs = step.events.filter(e => e.type === 'sub');
+    if (!subs.length || !tl) return;
+    const subs1 = subs.filter(e => e.t === 1);
+    const subs2 = subs.filter(e => e.t === 2);
+    let rowHtml;
+    if (subs1.length && subs2.length) {
+        rowHtml = `<div class="timeline-event split-sides">
+            <div class="w-1/2 flex justify-start">${subCardHtml(subs1, 'left-card', '92%')}</div>
+            <div class="w-1/2 flex justify-end">${subCardHtml(subs2, 'right-card', '92%')}</div>
+            ${timeBubble}
+        </div>`;
+    } else if (subs1.length) {
+        rowHtml = `<div class="timeline-event left-side">${subCardHtml(subs1)}${timeBubble}<div class="w-1/2"></div></div>`;
+    } else {
+        rowHtml = `<div class="timeline-event right-side"><div class="w-1/2"></div>${timeBubble}${subCardHtml(subs2)}</div>`;
+    }
+    tl.insertAdjacentHTML('beforeend', rowHtml);
+    if (tl.parentElement) tl.parentElement.scrollTop = tl.parentElement.scrollHeight;
 }
 
 // ============================================================

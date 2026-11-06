@@ -12,6 +12,10 @@
 // device in anonymously so the security rules can pin host writes and each
 // manager's own club to a real uid.
 //
+// My Player also needs Email/Password enabled
+// (Authentication → Sign-in method → Email/Password). Each career is stored
+// under users/{uid}/myPlayers, so database.rules.json must be deployed too.
+//
 // Leaving this empty is safe: local play never touches the network, and the
 // Online screen shows a "No Firebase project configured" message instead.
 // A config saved in localStorage under 'dbf.firebase' (DevTools console)
