@@ -33,7 +33,9 @@ const Account = {
     entering: false,
     loadedCareers: 0,
     tokenRef: null,
-    tokenHandler: null
+    tokenHandler: null,
+    pendingUsername: null,
+    devUnlocked: false
 };
 
 // ------------------------------------------------------------
@@ -49,9 +51,23 @@ function tokenText(value) {
     return Number.isFinite(n) ? Math.max(0, Math.floor(n)).toLocaleString() : '0';
 }
 
-function accountInitial(email) {
-    const text = String(email || '').trim();
+function accountInitial() {
+    const text = accountDisplayName();
     return text ? text.charAt(0).toUpperCase() : '?';
+}
+
+// The username is the name everyone else sees. Accounts created before it
+// existed fall back to the local part of the email until the owner picks one.
+function accountDisplayName() {
+    const named = String((Account.profile && Account.profile.username) || '').trim();
+    if (named) return named;
+    const email = String((Account.user && Account.user.email) || '').trim();
+    return email ? email.split('@')[0] : '';
+}
+
+function accountCleanUsername(value) {
+    const name = String(value || '').trim().replace(/\s+/g, ' ');
+    return /^[A-Za-z0-9._ -]{2,15}$/.test(name) ? name : null;
 }
 
 function accountFriendlyAuthError(error) {
@@ -177,10 +193,12 @@ async function accountLoadProfile() {
         const now = Date.now();
         const patch = {
             email: Account.user.email || '',
+            username: accountCleanUsername(Account.pendingUsername) || '',
             createdAt: now,
             lastSeenAt: now,
             tokens: Account.tokenBalance
         };
+        Account.pendingUsername = null;
         Account.profile = { ...profile, ...patch };
         Account.db.ref(`users/${uid}/profile`).update(patch).catch(() => {});
     } else {
@@ -336,14 +354,18 @@ function accountSetAuthMode(mode) {
     }
     const wrap = document.getElementById('auth-confirm-wrap');
     if (wrap) wrap.classList.toggle('hidden', !signup);
+    const signupFields = document.getElementById('auth-signup-fields');
+    if (signupFields) signupFields.classList.toggle('hidden', !signup);
     const password = document.getElementById('auth-password');
     if (password) password.setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
     accountSetAuthStatus('');
 }
 
 function accountToggleAuthMode() {
+    const username = document.getElementById('auth-username');
     const password = document.getElementById('auth-password');
     const confirm = document.getElementById('auth-confirm');
+    if (username) username.value = '';
     if (password) password.value = '';
     if (confirm) confirm.value = '';
     accountSetAuthMode(Account.authMode === 'signup' ? 'login' : 'signup');
@@ -356,9 +378,14 @@ async function accountSubmitAuth() {
     const email = (document.getElementById('auth-email')?.value || '').trim();
     const password = document.getElementById('auth-password')?.value || '';
     const confirm = document.getElementById('auth-confirm')?.value || '';
+    const username = accountCleanUsername(document.getElementById('auth-username')?.value);
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         accountSetAuthStatus('Enter a valid email address.', true);
+        return;
+    }
+    if (Account.authMode === 'signup' && !username) {
+        accountSetAuthStatus('Pick a username: 2-15 letters, numbers, spaces, dot, underscore or dash.', true);
         return;
     }
     if (password.length < 6) {
@@ -380,12 +407,14 @@ async function accountSubmitAuth() {
     try {
         await accountBindAuth();
         if (mode === 'signup') {
+            Account.pendingUsername = username || '';
             await Account.auth.createUserWithEmailAndPassword(email, password);
         } else {
             await Account.auth.signInWithEmailAndPassword(email, password);
         }
         // onAuthStateChanged loads the profile and opens the menu.
     } catch (error) {
+        Account.pendingUsername = null;
         accountSetAuthStatus(accountFriendlyAuthError(error), true);
         if (submit) {
             submit.disabled = false;
@@ -402,7 +431,7 @@ function accountSetAuthStatus(text, isError) {
 }
 
 function accountHookFormKeys() {
-    ['auth-email', 'auth-password', 'auth-confirm'].forEach(id => {
+    ['auth-email', 'auth-username', 'auth-password', 'auth-confirm'].forEach(id => {
         const el = document.getElementById(id);
         if (!el || el.dataset.authHooked) return;
         el.dataset.authHooked = '1';
@@ -424,6 +453,8 @@ async function accountSignOut() {
         Account.profile = {};
         Account.tokenBalance = 0;
         Account.authMode = 'login';
+        Account.pendingUsername = null;
+        Account.devUnlocked = false;
         accountUnwatchTokens();
         accountRenderHud();
         accountCloseInfo();
@@ -439,8 +470,8 @@ async function accountSignOut() {
 // ------------------------------------------------------------
 
 function accountRenderHud() {
-    const email = Account.user ? (Account.user.email || 'Signed in') : 'Not signed in';
-    const initial = accountInitial(email);
+    const name = accountDisplayName() || (Account.user ? 'Player' : '—');
+    const initial = accountInitial();
 
     // Screens build their own token pills long after boot, so hydrate any icon
     // that was injected by a renderer and is still empty.
@@ -448,12 +479,77 @@ function accountRenderHud() {
         if (!el.innerHTML.trim()) el.innerHTML = tokenIcon(Number(el.dataset.tokenIcon) || 16);
     });
 
-    document.querySelectorAll('[data-account-email]').forEach(el => { el.textContent = email; });
+    document.querySelectorAll('[data-account-name]').forEach(el => { el.textContent = name; });
     document.querySelectorAll('[data-account-avatar]').forEach(el => { el.textContent = initial; });
     document.querySelectorAll('[data-token-count]').forEach(el => { el.textContent = tokenText(Account.tokenBalance); });
+    const infoTokens = document.getElementById('account-info-tokens');
+    if (infoTokens) infoTokens.textContent = tokenText(Account.tokenBalance);
 
     const emailEl = document.getElementById('mp-account-email');
-    if (emailEl) emailEl.textContent = email;
+    if (emailEl) emailEl.textContent = Account.user ? (Account.user.email || 'Signed in') : 'Not signed in';
+}
+
+function accountSetNameStatus(text, isError) {
+    const el = document.getElementById('account-name-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'mp-status' + (isError ? ' is-error' : '');
+}
+
+// The owner can rename themselves at any time; the name only ever comes from
+// this profile, so rooms and the HUD pick it up on the next render.
+async function accountSaveUsername() {
+    if (!Account.user || !Account.db) return;
+    const input = document.getElementById('account-username-input');
+    const name = accountCleanUsername(input && input.value);
+    if (!name) {
+        accountSetNameStatus('Use 2-15 letters, numbers, spaces, dot, underscore or dash.', true);
+        return;
+    }
+    if (name === accountDisplayName()) {
+        accountSetNameStatus('');
+        return;
+    }
+    if (input) input.value = name;
+    try {
+        await Account.db.ref(`users/${Account.user.uid}/profile/username`).set(name);
+        Account.profile = { ...Account.profile, username: name };
+        accountRenderHud();
+        const title = document.getElementById('account-info-title');
+        if (title) title.textContent = name;
+        accountSetNameStatus('');
+        if (typeof showToast === 'function') showToast(`You are now ${name}.`);
+    } catch (error) {
+        accountSetNameStatus(accountFriendlyError(error), true);
+    }
+}
+
+// ------------------------------------------------------------
+// Hidden Token top-up (revealed by TOKEN_DEV_CODE)
+// ------------------------------------------------------------
+
+const TOKEN_TOPUP_MAX = 100000;
+
+function accountDevCodeCheck(value) {
+    const code = String(value || '').trim();
+    const unlocked = typeof TOKEN_DEV_CODE !== 'undefined' && !!code && code === TOKEN_DEV_CODE;
+    Account.devUnlocked = unlocked;
+    const topup = document.getElementById('account-dev-topup');
+    if (topup) topup.classList.toggle('hidden', !unlocked);
+    if (unlocked) {
+        const input = document.getElementById('account-dev-code');
+        if (input) input.value = '';
+    }
+}
+
+async function accountDevAddTokens() {
+    if (!Account.devUnlocked || !Account.user) return;
+    const raw = Math.floor(Number(document.getElementById('account-dev-amount')?.value));
+    if (!Number.isFinite(raw) || raw < 1) {
+        if (typeof showToast === 'function') showToast('Enter how many Tokens to add.');
+        return;
+    }
+    await accountAwardTokens(Math.min(raw, TOKEN_TOPUP_MAX), null, 'Manual top-up');
 }
 
 function accountShowInfo() {
@@ -468,11 +564,23 @@ function accountShowInfo() {
         const el = document.getElementById(id);
         if (el) el.textContent = text;
     };
+    const name = accountDisplayName() || 'Player';
+    setText('account-info-title', name);
     setText('account-info-email', Account.user.email || 'Signed in');
     setText('account-info-uid', Account.user.uid || '—');
     setText('account-info-tokens', tokenText(Account.tokenBalance));
     setText('account-info-players', String(Account.loadedCareers || 0));
-    setText('account-info-avatar', accountInitial(Account.user.email));
+    setText('account-info-avatar', accountInitial());
+
+    const nameInput = document.getElementById('account-username-input');
+    if (nameInput) nameInput.value = name === 'Player' ? '' : name;
+    accountSetNameStatus('');
+
+    Account.devUnlocked = false;
+    const devCode = document.getElementById('account-dev-code');
+    if (devCode) devCode.value = '';
+    const devTopup = document.getElementById('account-dev-topup');
+    if (devTopup) devTopup.classList.add('hidden');
 
     const created = Number(Account.profile && Account.profile.createdAt);
     setText('account-info-since', Number.isFinite(created) && created > 0
@@ -499,11 +607,6 @@ function accountCloseInfo() {
     if (!modal) return;
     modal.classList.remove('is-open');
     modal.setAttribute('aria-hidden', 'true');
-}
-
-function accountOpenMyPlayer() {
-    accountCloseInfo();
-    if (typeof openMyPlayer === 'function') openMyPlayer();
 }
 
 function accountBoot() {

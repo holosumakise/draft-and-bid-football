@@ -69,9 +69,6 @@ function chooseLocal() {
 }
 
 function chooseOnline() {
-    const stored = localStorage.getItem('dbf.managerName') || '';
-    const nameInput = document.getElementById('online-manager-name');
-    if (nameInput && stored) nameInput.value = stored;
     const note = document.getElementById('online-hub-mode');
     if (note) note.innerText = pendingMode;
     setHubStatus(Net.config() ? '' : 'No Firebase project found — put your web config in firebase-config.js.');
@@ -90,16 +87,13 @@ function setHubStatus(msg) {
     if (el) el.innerText = msg || '';
 }
 
-// A name is required before a room can be created or joined.
+// A room seat is named after the signed-in account, so there is nothing to set here.
 function readManagerName() {
-    const input = document.getElementById('online-manager-name');
-    const name = (input ? input.value : '').trim().slice(0, 15);
+    const name = (typeof accountDisplayName === 'function' ? accountDisplayName() : '').slice(0, 15);
     if (!name) {
-        setHubStatus('Set your manager name first.');
-        if (input) input.focus();
+        setHubStatus('Sign in with an account that has a username first.');
         return null;
     }
-    localStorage.setItem('dbf.managerName', name);
     return name;
 }
 

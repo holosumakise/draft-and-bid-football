@@ -20,7 +20,6 @@ const MP = {
     reelTimers: [],
     selectedFixture: null,
     calendarMonth: null,
-    lastResult: null,
     liveFixtureId: null,
     liveStarts: false,
     livePlayerId: null,
@@ -45,24 +44,6 @@ const MP_ATTR_KEYS = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'];
 // ------------------------------------------------------------
 
 const MP_POSITIONS = ['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB', 'CDM', 'CM', 'CAM', 'LM', 'RM', 'LW', 'RW', 'CF', 'ST'];
-
-const MP_POSITION_LABELS = {
-    GK: 'Goalkeeper',
-    CB: 'Centre-back',
-    LB: 'Left-back',
-    RB: 'Right-back',
-    LWB: 'Left wing-back',
-    RWB: 'Right wing-back',
-    CDM: 'Defensive mid',
-    CM: 'Central mid',
-    CAM: 'Attacking mid',
-    LM: 'Left mid',
-    RM: 'Right mid',
-    LW: 'Left wing',
-    RW: 'Right wing',
-    CF: 'Centre-forward',
-    ST: 'Striker'
-};
 
 const MP_CITIES = [
     'Riverside', 'Northgate', 'Harbour City', 'Eastbrook', 'Stonebridge',
@@ -190,7 +171,7 @@ function mpHeight(cm) {
 }
 
 function mpPosLabel(pos) {
-    return MP_POSITION_LABELS[pos] || pos || '—';
+    return String(pos || '—').toUpperCase();
 }
 
 function mpMoney(value) {
@@ -477,14 +458,6 @@ function mpBackToCareer() {
     MP.view = 'dashboard';
     mpRenderDashboard();
     showScreen('screen-myplayer-dashboard');
-}
-
-function mpOpenStory() {
-    if (!MP.active) return;
-    MP.view = 'story';
-    MP.storyBusy = false;
-    mpRenderStory();
-    showScreen('screen-myplayer-story');
 }
 
 function mpChapterName(career) {
@@ -897,7 +870,7 @@ function mpManagerDecision(career) {
     if (formAvg != null && formAvg < 6.3 && career.health.stamina < 55) {
         return { starts: false, reason: 'Rotated — the manager wants fresher legs' };
     }
-    return { starts: true, reason: 'Starting XI' };
+    return { starts: true, reason: 'Picked for the starting XI' };
 }
 
 function mpPlayerObject(career, scale = 1) {
@@ -931,17 +904,6 @@ function mpConditionScale(career) {
     return mpClamp(scale, 0.78, 1);
 }
 
-function mpFormMarkup(career) {
-    if (!career.form.length) {
-        return '<div class="mp-form"><span class="mp-chip">Form</span><span class="mp-chip">No rated matches yet</span></div>';
-    }
-    return `<div class="mp-form"><span class="mp-chip">Form</span>${career.form.slice(-8).map(rating => {
-        const value = Number(rating);
-        const cls = value >= 7 ? ' is-good' : value < 6 ? ' is-bad' : '';
-        return `<span class="mp-form__chip${cls}">${value.toFixed(1)}</span>`;
-    }).join('')}</div>`;
-}
-
 function mpHealthMarkup(career) {
     const stamina = Math.round(career.health.stamina);
     const mental = Math.round(career.health.mental);
@@ -952,7 +914,7 @@ function mpHealthMarkup(career) {
                 <div class="mp-bar"><div class="mp-bar__fill ${stamina < 35 ? 'mp-bar__fill--low' : 'mp-bar__fill--stamina'}" style="--v:${stamina}"></div></div>
             </div>
             <div class="mp-health__row">
-                <div class="mp-health__top"><span>Mental health</span><b>${mental}%</b></div>
+                <div class="mp-health__top"><span>Mental health</span></div>
                 <div class="mp-bar"><div class="mp-bar__fill ${mental < 35 ? 'mp-bar__fill--low' : 'mp-bar__fill--mental'}" style="--v:${mental}"></div></div>
             </div>
         </div>`;
@@ -971,8 +933,6 @@ function mpRenderDashboard() {
     const avg = mpOverallRating(career);
     const next = mpNextFixture(career);
     const decision = mpManagerDecision(career);
-    const trainingReady = MP_TRAINING.some(exercise => !mpCooldownText(career.trainingCooldowns[exercise.id]));
-    const restReady = !mpCooldownText(career.restReadyAt);
 
     root.innerHTML = `
         <div class="mp-dash">
@@ -980,16 +940,13 @@ function mpRenderDashboard() {
                 <div class="mp-dash__cardwrap">${renderPlayerCard(player, { size: 'xl' })}</div>
                 <div class="mp-panel">
                     <div class="mp-idcard__rows">
-                        <div><span>Overall</span><b>${career.ovr}</b></div>
-                        <div><span>Position</span><b>${mpEsc(mpPosLabel(career.position))}</b></div>
+                        <div><span>Age</span><b>${Number(career.age) || 18}</b></div>
+                        <div><span>Nationality</span><b>${mpEsc(career.nationality)}</b></div>
                         <div><span>Archetype</span><b>${mpEsc(career.archetype)}</b></div>
                         <div><span>Playstyle</span><b>${mpEsc(career.playstyle)}</b></div>
                         <div><span>Height / Weight</span><b>${mpEsc(mpHeight(career.heightCm))} · ${career.weightKg} kg</b></div>
                     </div>
-                    <div class="mp-form" style="margin-top:14px">
-                        ${MP_ATTR_KEYS.map(key => `<span class="mp-chip">${key} ${Math.round(career.attrs[key])}</span>`).join('')}
-                    </div>
-                    <button class="btn btn--ghost mp-idcard__back" onclick="mpOpenStory()">Origin story · ${mpEsc(mpChapterName(career))}</button>
+                    <button class="btn btn--ghost mp-idcard__back" onclick="mpBackToList()">Back</button>
                 </div>
             </aside>
 
@@ -999,7 +956,6 @@ function mpRenderDashboard() {
                         <div>
                             <div class="eyebrow">${mpEsc(career.club.league)}</div>
                             <h3>${mpEsc(career.club.name)}</h3>
-                            <p>${mpEsc(mpPosLabel(career.position))} · ${career.age} years old · ${mpEsc(career.nationality)}</p>
                         </div>
                         <div class="mp-club-side">
                             <b>${mpMoney(career.money)}</b>
@@ -1011,12 +967,10 @@ function mpRenderDashboard() {
                         <div class="mp-stat"><span>Salary</span><b>${mpMoney(career.club.salary)}</b><small>per week</small></div>
                         <div class="mp-stat"><span>Appearances</span><b>${career.careerStats.matches}</b><small>${career.careerStats.goals} goals · ${career.careerStats.assists} assists</small></div>
                         <div class="mp-stat"><span>Avg rating</span><b>${avg ? avg.toFixed(2) : '—'}</b><small>Sofascore style</small></div>
-                        <div class="mp-stat"><span>Manager</span><b>${decision.starts ? 'Starts' : 'Benched'}</b><small>${mpEsc(decision.reason)}</small></div>
+                        <div class="mp-stat"><span>Manager call</span><b>${decision.starts ? 'Starts' : 'Benched'}</b><small>${mpEsc(decision.reason)}</small></div>
                     </div>
 
                     ${mpHealthMarkup(career)}
-
-                    ${mpFormMarkup(career)}
                 </div>
 
                 <div class="mp-panel">
@@ -1038,11 +992,7 @@ function mpRenderDashboard() {
                     </button>
                     <button class="mp-actionbtn" onclick="mpOpenTraining()">
                         <b>Training</b>
-                        <small>${trainingReady ? 'A session is ready.' : 'All drills are on cooldown.'} Spend Tokens to boost.</small>
-                    </button>
-                    <button class="mp-actionbtn" onclick="mpRest()">
-                        <b>Rest</b>
-                        <small>${restReady ? `Recover up to ${MP_REST_STAMINA} stamina.` : `Ready in ${mpCooldownText(career.restReadyAt)}.`}</small>
+                        <small>${MP_TRAINING.some(exercise => !mpCooldownText(career.trainingCooldowns[exercise.id])) ? 'A session is ready.' : 'All drills are on cooldown.'} Drills, boosts and rest.</small>
                     </button>
                     <button class="mp-actionbtn" onclick="mpOpenAssets()">
                         <b>Assets</b>
@@ -1090,14 +1040,20 @@ function mpFixturesForDate(career, date) {
     });
 }
 
+function mpFixtureAvailability(career, fixture) {
+    const unavailable = career.injury > 0 || career.suspension > 0;
+    return {
+        decision: mpManagerDecision(career),
+        canPlay: !unavailable,
+        canSim: !fixture.key && !unavailable,
+        canSkip: !fixture.key || unavailable
+    };
+}
+
 function mpFixtureActionButtons(career, fixture) {
     if (fixture.played) return '<span class="mp-chip">Result recorded</span>';
 
-    const unavailable = career.injury > 0 || career.suspension > 0;
-    const decision = mpManagerDecision(career);
-    const canPlay = !unavailable;
-    const canSim = !fixture.key && canPlay;
-    const canSkip = !fixture.key || unavailable;
+    const { decision, canPlay, canSim, canSkip } = mpFixtureAvailability(career, fixture);
     const buttons = [];
 
     buttons.push(`<button class="btn btn--primary" onclick="mpPlayFixture(${mpJsArg(fixture.id)})" ${canPlay ? '' : 'disabled'}>Play live</button>`);
@@ -1109,8 +1065,15 @@ function mpFixtureActionButtons(career, fixture) {
     }
     buttons.push(`<button class="btn btn--ghost" onclick="mpSkipFixture(${mpJsArg(fixture.id)})" ${canSkip ? '' : 'disabled'}>Skip</button>`);
 
-    return `<div class="mp-fixture-detail__actions">${buttons.join('')}</div>
-        <p class="mp-status" style="width:100%;margin:4px 0 0">${canPlay ? mpEsc(decision.reason) : mpEsc(decision.reason) + '. Recovery or skipping is the only option.'}</p>`;
+    return buttons.join('');
+}
+
+function mpFixtureNote(career, fixture) {
+    if (fixture.played) return '';
+    const { decision, canPlay } = mpFixtureAvailability(career, fixture);
+    if (decision.starts && canPlay) return '';
+    const reason = mpEsc(decision.reason);
+    return `<p class="mp-status" style="width:100%;margin:4px 0 0">${canPlay ? reason : `${reason}. Recovery or skipping is the only option.`}</p>`;
 }
 
 function mpRenderSchedule() {
@@ -1149,16 +1112,12 @@ function mpRenderSchedule() {
     }
     while (cells.length % 7) cells.push('<div class="mp-cal__day is-out"></div>');
 
-    const result = MP.lastResult ? mpResultMarkup(MP.lastResult) : '';
-    const nextCard = next ? `
-        <div class="mp-fixture-detail">
-            <div>
-                <div class="eyebrow">${next.key ? 'Key match' : 'Next match'}</div>
-                <h4>${next.home ? 'vs' : 'at'} ${mpEsc(next.opponent)}</h4>
-                <p>Matchday ${next.round} · ${mpDateLabel(mpFixtureDate(career, next))} · ${next.home ? 'Home' : 'Away'} · ${mpEsc(career.club.name)}</p>
-            </div>
-            ${mpFixtureActionButtons(career, next)}
-        </div>` : '<div class="mp-empty-note">No fixtures are scheduled. Open the calendar again to extend the season.</div>';
+    const nextHead = next ? `
+        <div class="mp-sched__next">
+            <span>${next.key ? 'Key match' : 'Next match'}</span>
+            <b>${next.home ? 'vs' : 'at'} ${mpEsc(next.opponent)}</b>
+            <small>Matchday ${next.round} · ${mpDateLabel(mpFixtureDate(career, next))} · ${next.home ? 'Home' : 'Away'}</small>
+        </div>` : '<div class="mp-sched__next"><span>Next match</span><b>Season complete</b><small>The calendar extends when the season rolls over.</small></div>';
 
     const selectedCard = selected && (!next || selected.id !== next.id) ? `
         <div class="mp-fixture-panel">
@@ -1168,30 +1127,30 @@ function mpRenderSchedule() {
                     <h4>${selected.home ? 'vs' : 'at'} ${mpEsc(selected.opponent)}</h4>
                     <p>Matchday ${selected.round} · ${mpDateLabel(mpFixtureDate(career, selected))} · ${selected.home ? 'Home' : 'Away'}</p>
                 </div>
-                ${mpFixtureActionButtons(career, selected)}
+                <div class="mp-fixture-detail__actions">${mpFixtureActionButtons(career, selected)}</div>
+                ${mpFixtureNote(career, selected)}
             </div>
         </div>` : '';
 
     root.innerHTML = `
-        ${result}
         <div class="mp-panel">
-            <div class="mp-head">
+            <div class="mp-head mp-head--sched">
                 <div>
                     <div class="eyebrow">Season schedule</div>
                     <h2>Matches</h2>
-                    <p>Every fifth match is a key match. Key matches must be played live; they cannot be simulated or skipped.</p>
                 </div>
-                <div class="mp-actions" style="margin:0">
-                    <button class="btn btn--ghost" onclick="mpSimulateToKey()">Simulate to next key match</button>
-                </div>
+                ${nextHead}
             </div>
+
+            <div class="mp-sched__actions">
+                ${next ? mpFixtureActionButtons(career, next) : ''}
+                <button class="btn btn--ghost" onclick="mpSimulateToKey()">Simulate to next key match</button>
+            </div>
+            ${next ? mpFixtureNote(career, next) : ''}
 
             <div class="mp-cal">
                 <div class="mp-cal__head">
-                    <div>
-                        <h3>${monthLabel}</h3>
-                        <small>${next ? `Next: ${next.home ? 'vs' : 'at'} ${mpEsc(next.opponent)} · ${mpDateLabel(mpFixtureDate(career, next))}` : 'No unplayed fixtures'}</small>
-                    </div>
+                    <div><h3>${monthLabel}</h3></div>
                     <div class="mp-cal__nav">
                         <button class="btn btn--ghost" onclick="mpShiftCalendar(-1)" aria-label="Previous month">←</button>
                         <button class="btn btn--ghost" onclick="mpShiftCalendar(1)" aria-label="Next month">→</button>
@@ -1203,29 +1162,13 @@ function mpRenderSchedule() {
                 </div>
             </div>
 
-            <div class="mp-fixture-panel">${nextCard}</div>
             ${selectedCard}
+
+            <button class="btn btn--ghost mp-panel__back" onclick="mpBackToCareer()">Back</button>
         </div>`;
 
     mpSetSaveState('saved');
     accountRenderHud();
-}
-
-function mpResultMarkup(result) {
-    return `
-        <div class="mp-result-card">
-            <div class="eyebrow">Last match</div>
-            <h3>${mpEsc(result.title)}</h3>
-            <div class="mp-result-grid">
-                <div><span>Rating</span><b>${result.rating == null ? '—' : Number(result.rating).toFixed(1)}</b></div>
-                <div><span>Goals</span><b>${result.goals || 0}</b></div>
-                <div><span>Assists</span><b>${result.assists || 0}</b></div>
-                <div><span>Stamina</span><b>${result.stamina >= 0 ? '+' : ''}${result.stamina}</b></div>
-                <div><span>Mental</span><b>${result.mental >= 0 ? '+' : ''}${result.mental}</b></div>
-                <div><span>Salary</span><b>+${mpMoney(result.salary)}</b></div>
-            </div>
-            ${result.note ? `<p class="mp-hint" style="margin-top:10px">${mpEsc(result.note)}</p>` : ''}
-        </div>`;
 }
 
 function mpSelectFixture(id) {
@@ -1361,7 +1304,7 @@ function mpOnLiveMatchFinished() {
     const gf = clubSide === 1 ? sim.s1 : sim.s2;
     const ga = clubSide === 1 ? sim.s2 : sim.s1;
 
-    const outcome = mpApplyMatchOutcome(MP.active, fixture, {
+    mpApplyMatchOutcome(MP.active, fixture, {
         starts: MP.liveStarts && !!entry,
         goals,
         assists,
@@ -1380,7 +1323,6 @@ function mpOnLiveMatchFinished() {
     gameState.matchSim = null;
     forceCloseMatchRatings();
 
-    MP.lastResult = outcome;
     MP.view = 'schedule';
     MP.selectedFixture = null;
     mpRenderSchedule();
@@ -1552,7 +1494,7 @@ function mpResolveFixture(fixture, mode) {
             return;
         }
         const result = mpQuickMatch(career, fixture, decision.starts);
-        const outcome = mpApplyMatchOutcome(career, fixture, {
+        mpApplyMatchOutcome(career, fixture, {
             starts: decision.starts,
             goals: result.goals,
             assists: result.assists,
@@ -1561,9 +1503,8 @@ function mpResolveFixture(fixture, mode) {
             ga: result.ga,
             live: false
         });
-        MP.lastResult = outcome;
     } else if (mode === 'skip') {
-        const outcome = mpApplyMatchOutcome(career, fixture, {
+        mpApplyMatchOutcome(career, fixture, {
             starts: false,
             mode: 'skip',
             goals: 0,
@@ -1574,10 +1515,9 @@ function mpResolveFixture(fixture, mode) {
             live: false,
             benched: false
         });
-        MP.lastResult = outcome;
         if (typeof showToast === 'function') showToast('Match skipped. You stayed fresh but the manager noticed.');
     } else {
-        const outcome = mpApplyMatchOutcome(career, fixture, {
+        mpApplyMatchOutcome(career, fixture, {
             starts: false,
             mode: 'bench',
             goals: 0,
@@ -1588,7 +1528,6 @@ function mpResolveFixture(fixture, mode) {
             live: false,
             benched: true
         });
-        MP.lastResult = outcome;
         if (typeof showToast === 'function') showToast('You started on the bench.');
     }
 
@@ -1706,7 +1645,7 @@ function mpRenderTraining() {
                     <h2>Training</h2>
                     <p>Every drill raises one attribute and can raise your OVR. Boost with Tokens to train harder and cut the cooldown.</p>
                 </div>
-                <div class="token-pill"><span class="token-pill__icon" data-token-icon="15"></span><b>${tokenText(Account.tokenBalance)}</b><span class="token-pill__label">Tokens</span></div>
+                <div class="token-pill"><span class="token-pill__icon" data-token-icon="15"></span><b>${tokenText(Account.tokenBalance)}</b></div>
             </div>
 
             <div class="mp-training-grid">
@@ -1724,10 +1663,7 @@ function mpRenderTraining() {
                             </div>
                             <div class="mp-train__bar"><i style="width:${mpClamp(value, 0, 100)}%"></i></div>
                             <div class="mp-train__foot">
-                                ${cooldown
-                                    ? `<span class="mp-cooldown">Cooldown ${cooldown}</span>`
-                                    : `<span class="mp-ready">Ready</span>`}
-                                <button class="btn btn--primary" onclick="mpDoTraining(${mpJsArg(exercise.id)}, false)" ${cooldown ? 'disabled' : ''}>Train +1</button>
+                                <button class="btn btn--primary" onclick="mpDoTraining(${mpJsArg(exercise.id)}, false)" ${cooldown ? 'disabled' : ''}>${cooldown ? `Train in ${cooldown}` : 'Train +1'}</button>
                                 <button class="btn btn--ghost" onclick="mpDoTraining(${mpJsArg(exercise.id)}, true)">Boost +2 · ${TOKEN_COSTS.TRAINING_BOOST} Tokens</button>
                             </div>
                         </div>`;
@@ -1744,7 +1680,7 @@ function mpRenderTraining() {
                     <button class="btn btn--primary" onclick="mpRest()" ${mpCooldownText(career.restReadyAt) || career.health.stamina >= 100 ? 'disabled' : ''}>
                         ${career.health.stamina >= 100 ? 'Stamina full' : mpCooldownText(career.restReadyAt) ? `Ready in ${mpCooldownText(career.restReadyAt)}` : 'Rest now'}
                     </button>
-                    <button class="btn btn--ghost" onclick="mpBackToCareer()">Back to career</button>
+                    <button class="btn btn--ghost" onclick="mpBackToCareer()">Back</button>
                 </div>
             </div>
         </div>`;
@@ -1873,7 +1809,7 @@ function mpRenderAssets() {
                     <p>Injuries, cards, skipped matches and spells on the bench all cost mental health. Assets reduce those losses.</p>
                 </div>
                 <div class="mp-fixture-detail__actions">
-                    <button class="btn btn--ghost" onclick="mpBackToCareer()">Back to career</button>
+                    <button class="btn btn--ghost" onclick="mpBackToCareer()">Back</button>
                 </div>
             </div>
         </div>`;
@@ -2186,7 +2122,7 @@ function mpRenderStory() {
     } else if (isEnd) {
         const endBadge = scene.endBadge || 'To be continued';
         const endText = scene.endText || 'This is the end of the current chapter. Your career is saved — return to it whenever you want.';
-        const endCta = scene.endCta || 'Back to Career';
+        const endCta = scene.endCta || 'Back';
         actions = `
             <div class="mp-story__end">
                 <div class="mp-story__end-badge">${mpEsc(endBadge)}</div>
@@ -2232,7 +2168,7 @@ function mpIdentityMarkup(career) {
                 <div><span>Archetype</span><b>${mpEsc(career.archetype || '—')}</b></div>
                 <div><span>Playstyle</span><b>${mpEsc(career.playstyle || '—')}</b></div>
             </div>
-            <button class="btn btn--ghost mp-idcard__back" onclick="mpBackToCareer()">Back to Career</button>
+            <button class="btn btn--ghost mp-idcard__back" onclick="mpBackToCareer()">Back</button>
         </div>`;
 }
 

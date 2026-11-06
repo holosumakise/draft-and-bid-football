@@ -1027,6 +1027,9 @@
         /* ---------- Modals: picker + card detail ---------- */
         .modal-shell { position: fixed; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center; padding: 16px; }
         .modal-shell.is-open { display: flex; }
+        /* The account card grows with its fields, so let it scroll instead of clipping. */
+        #account-modal.is-open { overflow-y: auto; }
+        #account-modal .account-card { margin: auto; }
         .modal-backdrop { position: absolute; inset: 0; background: rgba(3, 7, 18, 0.78); backdrop-filter: blur(8px); }
         .picker-panel, .card-modal__panel {
             position: relative; z-index: 2; width: 100%; max-height: 92vh;
@@ -1232,6 +1235,7 @@
         .mp-shell { display: flex; flex-direction: column; gap: 18px; width: 100%; }
         .mp-panel { background: linear-gradient(160deg, rgba(16, 29, 51, 0.96), rgba(8, 14, 26, 0.97)); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); padding: 22px; }
         .mp-panel--narrow { max-width: 640px; margin: 0 auto; }
+        .mp-panel__back { margin-top: 16px; }
         .mp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
         .mp-head h2 { font-family: var(--font-display); font-size: clamp(26px, 4vw, 36px); font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; margin: 2px 0 0; }
         .mp-head p { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
@@ -1275,7 +1279,6 @@
         .mp-auth-submit { width: 100%; margin-top: 16px; }
         .mp-auth-toggle { width: 100%; margin-top: 9px; }
         .mp-auth-back { width: 100%; margin-top: 9px; color: var(--muted); }
-        .mp-auth-note { margin-top: 14px; font-size: 10px; line-height: 1.6; color: var(--dim); text-align: center; }
 
         .mp-reel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0 8px; }
         .mp-reel { border: 1px solid var(--line); border-radius: 14px; background: rgba(8, 15, 29, 0.82); overflow: hidden; }
@@ -1302,6 +1305,7 @@
         .mp-idcard__rows span { color: var(--dim); font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; font-size: 9px; }
         .mp-idcard__rows b { color: var(--text); font-weight: 800; text-align: right; }
         .mp-idcard__back { width: 100%; margin-top: 16px; }
+        .mp-idcard__back + .mp-idcard__back { margin-top: 8px; }
         .mp-story-panel { background: linear-gradient(165deg, rgba(16, 29, 51, 0.97), rgba(8, 14, 26, 0.98)); border: 1px solid var(--line); border-radius: 20px; padding: 24px; min-height: 460px; box-shadow: var(--shadow); }
         .mp-story__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
         .mp-story__chapter { font-size: 9px; font-weight: 900; letter-spacing: 0.2em; text-transform: uppercase; color: var(--emerald); }
@@ -1379,7 +1383,6 @@
         }
         .token-pill--sm { padding: 6px 11px; font-size: 12px; }
         .token-pill__icon, .token-inline { display: inline-flex; align-items: center; justify-content: center; color: var(--gold); }
-        .token-pill__label { font-size: 8px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; color: rgba(251, 191, 36, .72); text-shadow: none; }
         .token-icon { display: block; }
         .mp-cost { color: var(--gold); }
 
@@ -1398,12 +1401,20 @@
         .account-card__rows span { color: var(--dim); font-weight: 800; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
         .account-card__rows b { font-weight: 800; display: inline-flex; align-items: center; gap: 5px; text-align: right; }
         .account-card__uid { font-size: 10px; color: var(--muted); max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .account-card__earn {
-            display: flex; align-items: flex-start; gap: 8px; margin-top: 16px; padding: 11px 13px;
-            border: 1px dashed rgba(251, 191, 36, .3); border-radius: 12px;
-            background: rgba(251, 191, 36, .05); color: #fde68a; font-size: 11px; line-height: 1.6;
-        }
         .account-card__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+        .account-card__rename { display: flex; gap: 8px; align-items: stretch; margin-top: 16px; }
+        .account-card__rename .mp-input { flex: 1; min-width: 0; }
+        .account-card__rename .btn { padding: 0 16px; font-size: 11px; }
+        .account-card__topup { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+        .account-card__topup .mp-input { width: 110px; flex: 0 0 auto; }
+        .account-card__topup .btn { padding: 9px 14px; font-size: 11px; }
+        .account-card__key {
+            width: 100%; margin-top: 12px; padding: 6px 10px;
+            background: transparent; border: 1px solid transparent; border-radius: 8px;
+            color: var(--dim); font: inherit; font-size: 10px; letter-spacing: .1em; outline: none;
+        }
+        .account-card__key:hover { border-color: var(--line); }
+        .account-card__key:focus { border-color: var(--line-strong); background: #070e1a; color: var(--text); }
         .account-card__actions .btn { flex: 1; min-width: 100px; }
         .btn--danger { background: rgba(127, 29, 29, .3); border-color: rgba(248, 113, 113, .4); color: #fecaca; }
         .btn--danger:hover { background: rgba(127, 29, 29, .5); }
@@ -1440,7 +1451,7 @@
         .mp-bar__fill--mental { background: linear-gradient(90deg, #a78bfa, #8b5cf6); }
         .mp-bar__fill--low { background: linear-gradient(90deg, #fb7185, #ef4444); }
 
-        .mp-actions-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .mp-actions-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
         .mp-actionbtn {
             display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left;
             padding: 15px 16px; border: 1px solid var(--line); border-radius: 14px;
@@ -1460,18 +1471,19 @@
         .mp-next__who small { display: block; margin-top: 2px; font-size: 10px; color: var(--muted); }
         .mp-next__tag { padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(251, 191, 36, .45); background: rgba(251, 191, 36, .1); color: var(--gold); font-size: 8px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
 
-        .mp-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
-        .mp-form__chip { min-width: 38px; text-align: center; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03); font-size: 11px; font-weight: 900; }
-        .mp-form__chip.is-good { border-color: rgba(52, 211, 153, .45); color: var(--emerald); }
-        .mp-form__chip.is-bad { border-color: rgba(251, 113, 133, .45); color: var(--red); }
-
         /* ============================================================
            MY PLAYER — calendar, training, assets
            ============================================================ */
         .mp-cal { border: 1px solid var(--line); border-radius: 18px; background: rgba(8, 15, 29, .6); padding: 16px; }
+        .mp-head--sched { align-items: center; }
+        .mp-sched__next { display: flex; flex-direction: column; gap: 3px; text-align: right; padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .03); }
+        .mp-sched__next span { font-size: 9px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+        .mp-sched__next b { font-family: var(--font-display); font-size: 17px; font-weight: 900; }
+        .mp-sched__next small { font-size: 10px; color: var(--muted); }
+        .mp-sched__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+        .mp-sched__actions .btn { font-size: 11px; }
         .mp-cal__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
         .mp-cal__head h3 { font-family: var(--font-display); font-size: 22px; font-weight: 900; margin: 0; }
-        .mp-cal__head small { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
         .mp-cal__nav { display: flex; gap: 6px; }
         .mp-cal__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
         .mp-cal__dow { text-align: center; font-size: 8px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); padding: 4px 0; }
@@ -1498,12 +1510,6 @@
         .mp-fixture-detail p { font-size: 10px; color: var(--muted); margin: 4px 0 0; }
         .mp-fixture-detail__actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .mp-lock { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
-        .mp-result-card { margin-bottom: 16px; border: 1px solid rgba(52, 211, 153, .35); border-radius: 16px; background: rgba(52, 211, 153, .06); padding: 16px; }
-        .mp-result-card h3 { font-family: var(--font-display); font-size: 22px; font-weight: 900; margin: 2px 0 0; }
-        .mp-result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; margin-top: 12px; }
-        .mp-result-grid > div { padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(0, 0, 0, .18); }
-        .mp-result-grid span { display: block; font-size: 8px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
-        .mp-result-grid b { display: block; margin-top: 3px; font-size: 14px; font-weight: 900; }
 
         .mp-training-grid, .mp-asset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .mp-train, .mp-asset { border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(150deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, .015)); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -1517,8 +1523,6 @@
         .mp-train__bar i { display: block; height: 100%; background: linear-gradient(90deg, #34d399, #0ea5e9); }
         .mp-train__foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .mp-train__foot .btn { flex: 1; min-width: 96px; padding: 10px 12px; font-size: 11px; }
-        .mp-cooldown { font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); }
-        .mp-ready { font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; color: var(--emerald); }
 
         .mp-asset__price { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
         .mp-asset__price b { font-size: 16px; font-weight: 900; color: var(--emerald); }
@@ -1538,7 +1542,6 @@
             .main-hud { padding: 0 0 10px; }
             .account-chip__body { max-width: 34vw; }
             .main-hud__signout { padding: 8px 10px; }
-            .token-pill__label { display: none; }
             .mp-statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .mp-training-grid, .mp-asset-grid { grid-template-columns: 1fr; }
             .mp-actions-grid { grid-template-columns: 1fr; }
@@ -1556,6 +1559,8 @@
             .mp-fix { font-size: 7px; padding: 3px; }
             .mp-fixture-detail__actions { width: 100%; }
             .mp-fixture-detail__actions .btn { flex: 1; }
+            .mp-sched__next { width: 100%; text-align: left; }
+            .mp-sched__actions .btn { flex: 1; }
             .account-card { padding: 18px; }
         }
 
@@ -1627,7 +1632,7 @@
                     <span class="account-chip__avatar" data-account-avatar>?</span>
                     <span class="account-chip__body">
                         <span class="account-chip__label">Account</span>
-                        <b class="account-chip__email" data-account-email>—</b>
+                        <b class="account-chip__email" data-account-name>—</b>
                     </span>
                 </button>
                 <button class="btn btn--ghost main-hud__signout" onclick="accountSignOut()">Sign out</button>
@@ -1636,7 +1641,6 @@
                 <span class="token-pill" title="Tokens earned by winning online matches">
                     <span class="token-pill__icon" data-token-icon="17"></span>
                     <b id="menu-token-count" data-token-count>0</b>
-                    <span class="token-pill__label">Tokens</span>
                 </span>
             </div>
         </div>
@@ -1715,6 +1719,11 @@
                 <label class="mp-label" for="auth-email">Email</label>
                 <input class="mp-input" id="auth-email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com">
 
+                <div id="auth-signup-fields" class="hidden">
+                    <label class="mp-label" for="auth-username">Username</label>
+                    <input class="mp-input" id="auth-username" type="text" maxlength="15" autocomplete="username" placeholder="Shown to other managers">
+                </div>
+
                 <label class="mp-label" for="auth-password">Password</label>
                 <input class="mp-input" id="auth-password" type="password" autocomplete="current-password" placeholder="At least 6 characters">
 
@@ -1727,7 +1736,6 @@
 
                 <button class="btn btn--primary mp-auth-submit" id="auth-submit" onclick="accountSubmitAuth()">Sign in</button>
                 <button class="btn btn--ghost mp-auth-toggle" id="auth-toggle" onclick="accountToggleAuthMode()">Create an account</button>
-                <p class="mp-auth-note">One account plays online, keeps your Token wallet and stores every My Player career. Your careers are visible only to you.</p>
             </div>
         </main>
     </div>
@@ -1788,7 +1796,6 @@
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>
-                <button class="btn btn--ghost" onclick="mpBackToList()">My Players</button>
             </div>
         </header>
         <main class="mp-main">
@@ -1829,9 +1836,7 @@
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
                 </span>
-                <span class="mp-save" id="mp-save-state"><span class="mp-save__dot"></span>Cloud save</span>
-                <button class="btn btn--ghost" onclick="mpBackToCareer()">Career</button>
-            </div>
+                <span class="mp-save" id="mp-save-state"><span class="mp-save__dot"></span>Cloud save</span>            </div>
         </header>
         <main class="mp-main">
             <div class="mp-story-layout">
@@ -1854,7 +1859,6 @@
                     <b data-token-count>0</b>
                 </span>
                 <span class="mp-save" id="mp-dash-save"><span class="mp-save__dot"></span>Saved</span>
-                <button class="btn btn--ghost" onclick="mpBackToList()">My Players</button>
             </div>
         </header>
         <main class="mp-main">
@@ -1873,9 +1877,7 @@
                 <span class="token-pill token-pill--sm" title="Tokens">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
-                </span>
-                <button class="btn btn--ghost" onclick="mpBackToCareer()">Career</button>
-            </div>
+                </span>            </div>
         </header>
         <main class="mp-main">
             <div id="mp-schedule-root"></div>
@@ -1893,9 +1895,7 @@
                 <span class="token-pill token-pill--sm" title="Tokens">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
-                </span>
-                <button class="btn btn--ghost" onclick="mpBackToCareer()">Career</button>
-            </div>
+                </span>            </div>
         </header>
         <main class="mp-main">
             <div id="mp-training-root"></div>
@@ -1913,9 +1913,7 @@
                 <span class="token-pill token-pill--sm" title="Tokens">
                     <span class="token-pill__icon" data-token-icon="14"></span>
                     <b data-token-count>0</b>
-                </span>
-                <button class="btn btn--ghost" onclick="mpBackToCareer()">Career</button>
-            </div>
+                </span>            </div>
         </header>
         <main class="mp-main">
             <div id="mp-assets-root"></div>
@@ -1935,18 +1933,25 @@
                     <p id="account-info-email">—</p>
                 </div>
             </div>
+            <div class="account-card__rename">
+                <input class="mp-input" id="account-username-input" type="text" maxlength="15" autocomplete="username" spellcheck="false" onkeydown="if (event.key === 'Enter') accountSaveUsername()">
+                <button class="btn btn--ghost" onclick="accountSaveUsername()">Save</button>
+            </div>
+            <p class="mp-status" id="account-name-status" aria-live="polite"></p>
             <div class="account-card__rows">
                 <div><span>Tokens</span><b><span class="token-inline" data-token-icon="14"></span><span id="account-info-tokens">0</span></b></div>
                 <div><span>My Players</span><b id="account-info-players">0</b></div>
                 <div><span>Member since</span><b id="account-info-since">Today</b></div>
                 <div><span>Account ID</span><b class="account-card__uid" id="account-info-uid">—</b></div>
             </div>
-            <div class="account-card__earn">
-                <span class="token-inline" data-token-icon="15"></span>
-                Earn Tokens by winning online Head to Head matches and online tournament titles.
+            <input class="account-card__key" id="account-dev-code" type="password" autocomplete="off" spellcheck="false"
+                   aria-label="Access key" oninput="accountDevCodeCheck(this.value)">
+            <div class="account-card__topup hidden" id="account-dev-topup">
+                <span class="token-inline" data-token-icon="14"></span>
+                <input class="mp-input" id="account-dev-amount" type="number" min="1" max="100000" step="1" value="100">
+                <button class="btn btn--gold" onclick="accountDevAddTokens()">Add Tokens</button>
             </div>
             <div class="account-card__actions">
-                <button class="btn btn--primary" onclick="accountOpenMyPlayer()">My Player</button>
                 <button class="btn btn--ghost" onclick="accountCloseInfo()">Close</button>
                 <button class="btn btn--danger" onclick="accountSignOut()">Sign out</button>
             </div>
@@ -2011,9 +2016,6 @@
         <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700">
             <h2 class="text-2xl md:text-3xl font-bold mb-1 text-center text-purple-400">Online Play</h2>
             <p class="text-center text-xs text-slate-400 mb-6" id="online-hub-mode">H2H · 2 managers</p>
-
-            <label class="block text-sm font-medium text-slate-300 mb-1">Your manager name <span class="text-red-400">*</span></label>
-            <input type="text" id="online-manager-name" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white outline-none focus:border-purple-400 mb-5" maxlength="15" placeholder="e.g. Keanu">
 
             <button onclick="createRoom()" id="btn-create-room" class="w-full py-3 px-4 bg-green-500 hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-bold text-slate-900 transition-colors shadow-lg mb-3">
                 Create Room
