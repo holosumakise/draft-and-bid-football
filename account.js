@@ -326,8 +326,9 @@ async function accountStart() {
     if (Account.started) return;
     Account.started = true;
     Account.authMode = 'login';
-    showScreen('screen-auth');
-    accountSetAuthStatus('Connecting to your account…');
+    // Do not paint the sign-in gate until Firebase has restored the session.
+    // A returning player with a live auth cookie should land on the menu with
+    // no flash of the login form.
     accountHookFormKeys();
 
     try {
@@ -336,7 +337,10 @@ async function accountStart() {
             accountShowGate();
             accountSetAuthStatus('');
         }
+        // When a session is restored, onAuthStateChanged already called
+        // accountEnterApp() — no extra screen swap here.
     } catch (error) {
+        accountShowGate();
         accountSetAuthStatus(accountFriendlyError(error), true);
     }
 }

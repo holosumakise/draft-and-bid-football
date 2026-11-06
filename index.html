@@ -1312,6 +1312,15 @@
         .mp-cut__rail { position: absolute; left: 0; right: 0; height: 16px; background: #03060c; z-index: 2; }
         .mp-cut__rail--top { top: 0; }
         .mp-cut__rail--bottom { bottom: 0; }
+        .mp-cut__stage { position: absolute; inset: 16px 0 72px; z-index: 2; display: flex; align-items: flex-end; justify-content: center; pointer-events: none; }
+        .mp-cut__actor { position: relative; width: 160px; height: 220px; transform-origin: 50% 100%; }
+        .mp-cut__body { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 12px 18px rgba(0,0,0,.45)); }
+        .mp-cut__figure { fill: none; stroke: #e2e8f0; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+        .mp-cut__head { fill: #f8fafc; stroke: none; }
+        .mp-cut__torso { fill: #34d399; stroke: #0f766e; stroke-width: 2; }
+        .mp-cut__boot { fill: #0f172a; stroke: none; }
+        .mp-cut__ball { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #cbd5e1 40%, #64748b); box-shadow: 0 2px 6px rgba(0,0,0,.4); opacity: 0; left: 50%; bottom: 18px; }
+        .mp-cut__prop { position: absolute; left: 58%; bottom: 36%; width: 28px; height: 36px; border-radius: 3px; background: linear-gradient(160deg, #fbbf24, #b45309); box-shadow: 0 4px 10px rgba(0,0,0,.35); opacity: 0; transform: rotate(-8deg); }
         .mp-cut__card { position: relative; z-index: 3; padding: 0 26px 14px; opacity: 0; }
         .mp-cut__card.is-in { animation: mpCutCard .8s ease both; }
         @keyframes mpCutCard {
@@ -1320,6 +1329,7 @@
         }
         .mp-cut__act { font-size: 9px; font-weight: 900; letter-spacing: 0.2em; text-transform: uppercase; color: var(--emerald); }
         .mp-cut__title { font-family: var(--font-display); font-size: clamp(28px, 5vw, 46px); font-weight: 900; line-height: 1.05; margin: 6px 0 0; text-shadow: 0 6px 18px rgba(0, 0, 0, .55); }
+        .mp-cut__caption { margin: 10px 0 0; max-width: 36ch; color: rgba(226, 232, 240, .88); font-size: 13px; line-height: 1.45; text-shadow: 0 2px 10px rgba(0,0,0,.65); }
         .mp-cut__foot { position: relative; z-index: 3; display: flex; flex-direction: column; gap: 10px; padding: 0 26px 26px; }
         .mp-cut__prompt { margin: 0; color: var(--gold); font-size: 10px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; }
         .mp-cut__choices { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
@@ -1330,10 +1340,95 @@
         .mp-cut__leave { align-self: flex-end; padding: 9px 18px; border: 1px solid var(--line-strong); border-radius: 999px; background: rgba(6, 11, 20, 0.6); color: var(--muted); font: inherit; font-size: 10px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
         .mp-cut__leave:hover { color: var(--text); border-color: rgba(226, 232, 240, 0.4); }
         .mp-cut__cta { width: 100%; max-width: 340px; }
+
+        /* Action poses — the silhouette performs the beat */
+        .mp-cut[data-action="idle"] .mp-cut__actor { animation: mpCutBreathe 2.4s ease-in-out infinite; }
+        .mp-cut[data-action="ready"] .mp-cut__actor { animation: mpCutReady 1.6s ease-in-out infinite; }
+        .mp-cut[data-action="ready"] .mp-cut__arm--r { transform-origin: 78px 52px; animation: mpCutArmReady 1.6s ease-in-out infinite; }
+        .mp-cut[data-action="ready"] .mp-cut__ball { opacity: 1; left: 62%; bottom: 22px; }
+        .mp-cut[data-action="shoot"] .mp-cut__actor { animation: mpCutShoot 1.1s ease-out both; }
+        .mp-cut[data-action="shoot"] .mp-cut__arm--r { transform-origin: 78px 52px; animation: mpCutShootArm 1.1s ease-out both; }
+        .mp-cut[data-action="shoot"] .mp-cut__leg--r { transform-origin: 72px 100px; animation: mpCutShootLeg 1.1s ease-out both; }
+        .mp-cut[data-action="shoot"] .mp-cut__ball { opacity: 1; animation: mpCutBallShoot 1.1s ease-out both; }
+        .mp-cut[data-action="pass"] .mp-cut__actor { animation: mpCutPass 1.2s ease-out both; }
+        .mp-cut[data-action="pass"] .mp-cut__arm--l { transform-origin: 42px 52px; animation: mpCutPassArm 1.2s ease-out both; }
+        .mp-cut[data-action="pass"] .mp-cut__ball { opacity: 1; animation: mpCutBallPass 1.2s ease-out both; }
+        .mp-cut[data-action="celebrate"] .mp-cut__actor { animation: mpCutCelebrate 1.4s ease-in-out infinite; }
+        .mp-cut[data-action="celebrate"] .mp-cut__arm--l,
+        .mp-cut[data-action="celebrate"] .mp-cut__arm--r { transform-origin: 60px 52px; animation: mpCutArmsUp 1.4s ease-in-out infinite; }
+        .mp-cut[data-action="celebrate"] .mp-cut__prop { opacity: 1; background: linear-gradient(160deg, #fbbf24, #f59e0b); width: 36px; height: 22px; border-radius: 4px; left: 50%; bottom: 72%; animation: mpCutTrophy 1.4s ease-in-out infinite; }
+        .mp-cut[data-action="walk"] .mp-cut__actor { animation: mpCutWalk 1.1s linear infinite; }
+        .mp-cut[data-action="walk"] .mp-cut__leg--l { transform-origin: 48px 100px; animation: mpCutStrideL 1.1s linear infinite; }
+        .mp-cut[data-action="walk"] .mp-cut__leg--r { transform-origin: 72px 100px; animation: mpCutStrideR 1.1s linear infinite; }
+        .mp-cut[data-action="run"] .mp-cut__actor { animation: mpCutRun 0.7s linear infinite; }
+        .mp-cut[data-action="run"] .mp-cut__leg--l { transform-origin: 48px 100px; animation: mpCutStrideL 0.55s linear infinite; }
+        .mp-cut[data-action="run"] .mp-cut__leg--r { transform-origin: 72px 100px; animation: mpCutStrideR 0.55s linear infinite; }
+        .mp-cut[data-action="down"] .mp-cut__actor { animation: mpCutDown 1.2s ease both; }
+        .mp-cut[data-action="sit"] .mp-cut__actor { animation: mpCutSit 1s ease both; }
+        .mp-cut[data-action="pick"] .mp-cut__actor { animation: mpCutPick 1.4s ease-in-out both; }
+        .mp-cut[data-action="pick"] .mp-cut__prop { opacity: 1; animation: mpCutLeaflet 1.4s ease-in-out both; }
+        .mp-cut[data-action="talk"] .mp-cut__actor { animation: mpCutTalk 2s ease-in-out infinite; }
+        .mp-cut[data-action="shake"] .mp-cut__arm--r { transform-origin: 78px 52px; animation: mpCutShake 1s ease-in-out infinite; }
+        .mp-cut[data-action="badge"] .mp-cut__actor { animation: mpCutBadge 1.6s ease-in-out infinite; }
+        .mp-cut[data-action="listen"] .mp-cut__actor { animation: mpCutListen 2.2s ease-in-out infinite; }
+        .mp-cut[data-action="point"] .mp-cut__arm--r { transform-origin: 78px 52px; animation: mpCutPoint 1.5s ease-in-out infinite; }
+        .mp-cut[data-action="sign"] .mp-cut__arm--r { transform-origin: 78px 52px; animation: mpCutSign 1.2s ease-in-out infinite; }
+        .mp-cut[data-action="sign"] .mp-cut__prop { opacity: 1; left: 42%; bottom: 28%; width: 44px; height: 28px; background: #f8fafc; }
+        .mp-cut[data-action="tunnel"] .mp-cut__actor { animation: mpCutTunnel 2s ease-in-out infinite; }
+
+        @keyframes mpCutBreathe { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+        @keyframes mpCutReady { 0%,100% { transform: translate(0,0) rotate(0); } 50% { transform: translate(2px,-3px) rotate(-2deg); } }
+        @keyframes mpCutArmReady { 0%,100% { transform: rotate(8deg); } 50% { transform: rotate(-6deg); } }
+        @keyframes mpCutShoot {
+            0% { transform: translateX(-18px) rotate(4deg); }
+            35% { transform: translateX(-6px) rotate(-8deg); }
+            55% { transform: translateX(8px) rotate(6deg); }
+            100% { transform: translateX(4px) rotate(0); }
+        }
+        @keyframes mpCutShootArm { 0% { transform: rotate(20deg); } 40% { transform: rotate(-30deg); } 100% { transform: rotate(-10deg); } }
+        @keyframes mpCutShootLeg { 0% { transform: rotate(10deg); } 40% { transform: rotate(-35deg); } 100% { transform: rotate(-8deg); } }
+        @keyframes mpCutBallShoot {
+            0% { opacity: 1; transform: translate(0,0) scale(1); }
+            35% { opacity: 1; transform: translate(8px, 4px) scale(1); }
+            100% { opacity: 0; transform: translate(110px, -140px) scale(.7); }
+        }
+        @keyframes mpCutPass {
+            0% { transform: translateX(10px); }
+            40% { transform: translateX(-6px) rotate(-4deg); }
+            100% { transform: translateX(0); }
+        }
+        @keyframes mpCutPassArm { 0% { transform: rotate(-10deg); } 40% { transform: rotate(40deg); } 100% { transform: rotate(12deg); } }
+        @keyframes mpCutBallPass {
+            0% { opacity: 1; left: 40%; bottom: 24px; transform: translate(0,0); }
+            100% { opacity: 0; left: 40%; bottom: 24px; transform: translate(-120px, -20px); }
+        }
+        @keyframes mpCutCelebrate { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+        @keyframes mpCutArmsUp { 0%,100% { transform: rotate(-70deg); } 50% { transform: rotate(-95deg); } }
+        @keyframes mpCutTrophy { 0%,100% { transform: translate(-50%,0) rotate(-6deg); } 50% { transform: translate(-50%,-6px) rotate(6deg); } }
+        @keyframes mpCutWalk { 0%,100% { transform: translateX(-12px); } 50% { transform: translateX(12px); } }
+        @keyframes mpCutRun { 0%,100% { transform: translateX(-20px); } 50% { transform: translateX(20px); } }
+        @keyframes mpCutStrideL { 0%,100% { transform: rotate(18deg); } 50% { transform: rotate(-18deg); } }
+        @keyframes mpCutStrideR { 0%,100% { transform: rotate(-18deg); } 50% { transform: rotate(18deg); } }
+        @keyframes mpCutDown { from { transform: translateY(0); } to { transform: translateY(18px) scale(.96); filter: brightness(.85); } }
+        @keyframes mpCutSit { from { transform: translateY(0); } to { transform: translateY(28px) scale(.92); } }
+        @keyframes mpCutPick { 0% { transform: translateY(0); } 40% { transform: translateY(22px); } 100% { transform: translateY(0); } }
+        @keyframes mpCutLeaflet { 0% { opacity: 0; transform: translateY(20px) rotate(-20deg); } 45% { opacity: 1; transform: translateY(0) rotate(-8deg); } 100% { opacity: 1; transform: translateY(-40px) rotate(4deg); } }
+        @keyframes mpCutTalk { 0%,100% { transform: translateX(0); } 50% { transform: translateX(6px); } }
+        @keyframes mpCutShake { 0%,100% { transform: rotate(10deg); } 50% { transform: rotate(28deg); } }
+        @keyframes mpCutBadge { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+        @keyframes mpCutListen { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-3deg); } }
+        @keyframes mpCutPoint { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-55deg); } }
+        @keyframes mpCutSign { 0%,100% { transform: rotate(20deg) translate(0,0); } 50% { transform: rotate(35deg) translate(4px,6px); } }
+        @keyframes mpCutTunnel {
+            0%,100% { transform: translateY(8px) scale(.94); filter: brightness(.7); }
+            50% { transform: translateY(0) scale(1); filter: brightness(1); }
+        }
+
         @media (prefers-reduced-motion: reduce) {
             .mp-cut__art { transition: none; }
             .mp-cut__art::before, .mp-cut__card.is-in { animation: none; }
             .mp-cut__card { opacity: 1; }
+            .mp-cut__actor, .mp-cut__arm--l, .mp-cut__arm--r, .mp-cut__leg--l, .mp-cut__leg--r, .mp-cut__ball, .mp-cut__prop { animation: none !important; }
         }
         .mp-save { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); color: var(--dim); font-size: 9px; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; }
         .mp-save__dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
@@ -1720,7 +1815,7 @@
 
     <!-- My Player: account gate -->
     <!-- Global account gate: shown before the app, required for online + My Player -->
-    <div id="screen-auth" class="screen mp-auth-screen active">
+    <div id="screen-auth" class="screen mp-auth-screen">
         <div class="mp-auth-orbs" aria-hidden="true"></div>
         <main class="mp-auth">
             <div class="mp-auth-card">
@@ -1822,7 +1917,6 @@
                 <input class="mp-input" id="mp-name" type="text" maxlength="24" autocomplete="off" placeholder="Type your player's name">
 
                 <div class="mp-reel-grid" id="mp-reel-grid"></div>
-                <p class="mp-hint">Nationality, height, weight, position, archetype and playstyle are rolled from the game's pools. Archetype and playstyle always fit the rolled position. Rerolls spend account <span class="token-inline" data-token-icon="12"></span>.</p>
 
                 <p class="mp-status" id="mp-create-status" aria-live="polite"></p>
                 <div class="mp-create-actions">

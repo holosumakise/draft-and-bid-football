@@ -701,11 +701,8 @@ async function mpRollAction() {
         MP.rollBusy = false;
         if (roll) { roll.disabled = false; roll.innerHTML = `Reroll · ${TOKEN_COSTS.MP_REROLL} ${tokenInline(13)}`; }
         if (submit) submit.disabled = false;
-        const hint = document.getElementById('mp-create-status');
-        if (hint) {
-            hint.textContent = 'Happy with the roll? Name your player and create the career.';
-            hint.className = 'mp-status';
-        }
+        // Keep the status line for paid-reroll feedback only; clear the free roll.
+        if (!reroll) mpSetCreateStatus('');
     }, 1000);
 }
 
@@ -2121,15 +2118,14 @@ function mpGetScene(career) {
 // ------------------------------------------------------------
 // Origin story cutscene
 //
-// The whole origin plays as one film: every chapter beat runs back to back on a
-// letterboxed stage, each beat a mood of art carrying its title card. There is
-// no prose and no page turning — the film stops once, at the last game, for the
-// Pass or Shoot decision, then finishes on one button into the dashboard.
-// Which beat is on screen is transient; story.decision is the only thing saved
-// while it plays, so a reload resumes the same chapter.
+// One continuous film on a letterboxed stage. Each beat carries mood art, a
+// moving silhouette that performs the scene action, prop FX (ball, confetti,
+// paper) and a short film caption drawn from the authored prose. The film
+// pauses once for Pass / Shoot, then ends on a single dashboard CTA.
+// story.decision is the only thing saved while it plays.
 // ------------------------------------------------------------
 
-const MP_CUT_BEAT_MS = 2600;
+const MP_CUT_BEAT_MS = 3400;
 
 const MP_CUT_ART = {
     'One Chance': 'pitch',
@@ -2154,12 +2150,58 @@ const MP_CUT_ART = {
     'Matchday': 'stadium'
 };
 
+// Pose the on-stage athlete performs for each title.
+const MP_CUT_ACTION = {
+    'One Chance': 'ready',
+    'The Square Ball': 'pass',
+    'The Strike': 'shoot',
+    'Empty Sky': 'down',
+    'City Champions': 'celebrate',
+    'The Walk Home': 'walk',
+    'The Leaflet': 'pick',
+    'Graduation Day': 'walk',
+    'The Scout': 'talk',
+    'The Handshake': 'shake',
+    'The Loan': 'walk',
+    'Dinner and the Ceiling': 'sit',
+    'The Badge': 'badge',
+    "The Manager's Rules": 'listen',
+    'The Team Sheet': 'point',
+    'Graduation and the Contract': 'sign',
+    'The Call': 'listen',
+    'The Debut': 'run',
+    'Ten Matches': 'down',
+    'Matchday': 'tunnel'
+};
+
 function mpCutArt(scene) {
     return scene.art || MP_CUT_ART[scene.title] || 'street';
 }
 
-function mpCutBeats(list) {
-    return (list || []).map(scene => ({ act: scene.act, title: scene.title, art: mpCutArt(scene) }));
+function mpCutAction(scene) {
+    return scene.action || MP_CUT_ACTION[scene.title] || 'idle';
+}
+
+function mpCutCaption(scene, career) {
+    if (!scene) return '';
+    if (typeof scene.caption === 'string') return scene.caption;
+    if (typeof scene.text === 'function') {
+        try {
+            const lines = scene.text(career || MP.active || {});
+            if (Array.isArray(lines) && lines[0]) return String(lines[0]);
+        } catch (e) { /* ignore */ }
+    }
+    return '';
+}
+
+function mpCutBeats(list, career) {
+    return (list || []).map(scene => ({
+        act: scene.act,
+        title: scene.title,
+        art: mpCutArt(scene),
+        action: mpCutAction(scene),
+        caption: mpCutCaption(scene, career)
+    }));
 }
 
 function mpCutStage() {
@@ -2174,7 +2216,9 @@ function mpCutStop() {
 function mpCutArm() {
     mpCutStop();
     if (MP.cut.phase !== 'play') return;
-    MP.cut.timer = setTimeout(mpCutTick, MP_CUT_BEAT_MS);
+    const beat = MP.cut.beats[MP.cut.index];
+    const hold = beat && beat.caption ? MP_CUT_BEAT_MS + 900 : MP_CUT_BEAT_MS;
+    MP.cut.timer = setTimeout(mpCutTick, hold);
 }
 
 function mpCutTick() {
@@ -2188,18 +2232,48 @@ function mpCutTick() {
     mpCutPhase(MP.cut.path ? 'done' : 'decide');
 }
 
+function mpCutActorMarkup() {
+    // Simple athletic silhouette — body groups are targeted by CSS per action.
+    return `
+        <div class="mp-cut__actor" aria-hidden="true">
+            <svg class="mp-cut__body" viewBox="0 0 120 180" width="120" height="180">
+                <g class="mp-cut__figure">
+                    <circle class="mp-cut__head" cx="60" cy="28" r="16"/>
+                    <path class="mp-cut__torso" d="M42 48h36l8 52H34z"/>
+                    <path class="mp-cut__arm mp-cut__arm--l" d="M42 52c-14 8-22 26-18 40"/>
+                    <path class="mp-cut__arm mp-cut__arm--r" d="M78 52c14 8 22 26 18 40"/>
+                    <path class="mp-cut__leg mp-cut__leg--l" d="M48 100l-6 56"/>
+                    <path class="mp-cut__leg mp-cut__leg--r" d="M72 100l6 56"/>
+                    <circle class="mp-cut__boot mp-cut__boot--l" cx="40" cy="158" r="6"/>
+                    <circle class="mp-cut__boot mp-cut__boot--r" cx="80" cy="158" r="6"/>
+                </g>
+            </svg>
+            <span class="mp-cut__ball"></span>
+            <span class="mp-cut__prop"></span>
+        </div>`;
+}
+
 function mpCutShowBeat() {
     const stage = mpCutStage();
     const beat = MP.cut.beats[MP.cut.index];
     if (!stage || !beat) return;
     stage.dataset.art = beat.art;
+    stage.dataset.action = beat.action || 'idle';
+    // Retrigger CSS animations by swapping the action class on the stage.
+    stage.classList.remove('is-beat');
+    void stage.offsetWidth;
+    stage.classList.add('is-beat');
+
     const card = stage.querySelector('.mp-cut__card');
-    card.classList.remove('is-in');
-    card.innerHTML = `
-        <div class="mp-cut__act">${mpEsc(beat.act || 'Chapter 1 · The Last Game')}</div>
-        <h2 class="mp-cut__title">${mpEsc(beat.title || 'One Chance')}</h2>`;
-    void card.offsetWidth;
-    card.classList.add('is-in');
+    if (card) {
+        card.classList.remove('is-in');
+        card.innerHTML = `
+            <div class="mp-cut__act">${mpEsc(beat.act || 'Chapter 1 · The Last Game')}</div>
+            <h2 class="mp-cut__title">${mpEsc(beat.title || 'One Chance')}</h2>
+            ${beat.caption ? `<p class="mp-cut__caption">${mpEsc(beat.caption)}</p>` : ''}`;
+        void card.offsetWidth;
+        card.classList.add('is-in');
+    }
 }
 
 function mpCutDecisionMarkup() {
@@ -2225,6 +2299,8 @@ function mpCutFootMarkup() {
 function mpCutPhase(phase) {
     MP.cut.phase = phase;
     mpCutStop();
+    const stage = mpCutStage();
+    if (stage && phase !== 'play') stage.dataset.action = phase === 'decide' ? 'ready' : 'badge';
     const foot = document.querySelector('#mp-story-panel .mp-cut__foot');
     if (foot) foot.innerHTML = mpCutFootMarkup();
 }
@@ -2254,12 +2330,13 @@ function mpRenderStory() {
     if (!panel) return;
 
     const decided = MP_STORY[career.story.decision] ? career.story.decision : '';
-    const beats = decided ? mpCutBeats(MP_STORY[decided]) : mpCutBeats(MP_STORY.intro);
+    const beats = decided ? mpCutBeats(MP_STORY[decided], career) : mpCutBeats(MP_STORY.intro, career);
     if (!beats.length) return;
 
     panel.innerHTML = `
-        <div class="mp-cut" data-art="${mpEscAttr(beats[0].art)}">
+        <div class="mp-cut is-beat" data-art="${mpEscAttr(beats[0].art)}" data-action="${mpEscAttr(beats[0].action || 'idle')}">
             <div class="mp-cut__art" aria-hidden="true"></div>
+            <div class="mp-cut__stage" aria-hidden="true">${mpCutActorMarkup()}</div>
             <div class="mp-cut__rail mp-cut__rail--top" aria-hidden="true"></div>
             <div class="mp-cut__rail mp-cut__rail--bottom" aria-hidden="true"></div>
             <div class="mp-cut__card"></div>
@@ -2275,7 +2352,7 @@ async function mpChooseStory(path) {
     MP.storyBusy = true;
     MP.active.story = MP.active.story || {};
     MP.active.story.decision = path;
-    mpCutPlay(mpCutBeats(MP_STORY[path]), path);
+    mpCutPlay(mpCutBeats(MP_STORY[path], MP.active), path);
     await mpAutosaveNow();
     MP.storyBusy = false;
 }
