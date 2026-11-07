@@ -2284,9 +2284,8 @@ function mpCutCrowd(y, rows, seed) {
     return `<g>${dots}</g>`;
 }
 
-function mpCutGoal(x, groundY) {
-    const top = groundY - 15;
-    const w = 17;
+function mpCutGoal(x, groundY, w = 26, h = 20) {
+    const top = groundY - h;
     const bx1 = x + 1.7, bx2 = x + w - 1.7;   // back posts, pulled in for perspective
     const btop = top + 2.8;                   // back bar sits lower = depth
     let net = '';
@@ -2627,6 +2626,10 @@ function mpCutRig(mod, o) {
                 <circle cx="0" cy="0.1" r="1.25" fill="${o.coat ? sleeve : skinFill}"/>
                 <path d="M-1.2,0 C-1.5,2.8 -1.3,5 -0.7,6.6 L1.4,6.4 C1.2,4.6 1.2,2.2 1.2,0 Z" fill="${o.coat ? sleeve : skinFill}"/>
                 <circle class="mp-a-hand" cx="0.2" cy="7.7" r="1.4" fill="${skinFill}"/>
+                ${near && o.hold === 'scroll' ? `<g transform="translate(0.2,7.7) rotate(-24)">
+                    <rect x="-2.8" y="-0.8" width="5.6" height="1.6" rx="0.8" fill="#f8fafc"/>
+                    <rect x="1.1" y="-1.0" width="1.7" height="2" rx="0.35" fill="#b45309"/>
+                </g>` : ''}
             </g></g>`;
     };
 
@@ -2689,6 +2692,17 @@ function mpCutFlashes() {
         <circle class="mp-flashdot" cx="52" cy="22" r="0.8" fill="#f8fafc" style="animation-delay:-2.2s"/>
         <circle class="mp-flashdot" cx="94" cy="27" r="1" fill="#f8fafc" style="animation-delay:-2.6s"/>
     </g>`;
+}
+
+// Keeper: a smaller, mirrored rig in keeper colours standing on the given
+// ground line. `commit` sends him off his line at the ball (the 2v1 scenes);
+// without it he holds his ready set in the goalmouth (the Strike).
+function mpCutKeeper(x, groundY, commit) {
+    const s = 0.8;
+    const y = groundY - 21.2 * s;
+    const KEEPER = { kit: '#eab308', kit2: '#713f12', sleeve: '#eab308', legs: '#111827', mood: 'tense' };
+    return `<g transform="translate(${x},${y.toFixed(2)}) scale(${-s},${s})">`
+        + mpCutRig('mp-actor--keeper' + (commit ? ' mp-actor--commit' : ''), KEEPER) + `</g>`;
 }
 
 // Leaflet: a club stand with flyers to take one from.
@@ -2833,18 +2847,6 @@ function mpCutSeatedSad() {
         </g>`;
 }
 
-// Handshake: the two front arms are posed so the hands meet at (81,51). This
-// clasp is drawn over the join and pumps with the forearms, so the grip stays
-// closed instead of two hands sweeping through each other.
-function mpCutHandshakeClasp() {
-    return `<g class="mp-shake"><g transform="translate(81,51)">
-        <path d="M-3.4,-1.5 Q0,-2.6 3.4,-1.5 Q3.9,0 3.4,1.5 Q0,2.6 -3.4,1.5 Q-3.9,0 -3.4,-1.5 Z" fill="#b57f56"/>
-        <path d="M-3.4,-1.5 Q0,-2.6 3.4,-1.5 Q3.6,-0.6 3.5,0.2 Q0,-0.9 -3.5,0.2 Q-3.6,-0.6 -3.4,-1.5 Z" fill="#c98e63"/>
-        <path d="M-1.1,-1.9 Q0.5,-2.9 1.9,-1.7 Q0.6,-1.2 -0.9,-1.1 Z" fill="#c98e63"/>
-        <path d="M-2.4,1.4 Q0,2.2 2.4,1.4" fill="none" stroke="rgba(0,0,0,0.22)" stroke-width="0.4"/>
-    </g></g>`;
-}
-
 function mpCutActors(beat) {
     const action = beat.action;
     const title = beat.title || '';
@@ -2856,6 +2858,12 @@ function mpCutActors(beat) {
     const at = (x, rig, flip) => `<g transform="translate(${x},58)${flip ? ' scale(-1,1)' : ''}">${rig}</g>`;
     switch (action) {
         case 'dribble':
+            if (title === 'One Chance') {
+                // the 2v1 before the choice: keeper committed, teammate open behind him
+                return at(68, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(79, 78.6)
+                    + mpCutKeeper(96, 74, true)
+                    + at(112, mpCutRig('mp-actor--mate mp-actor--appeal', Object.assign({}, HERO, { mood: 'surprise' })));
+            }
             return at(68, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(79, 78.6);
         case 'run':
             if (title === 'The Loan') return at(64, mpCutRig('mp-actor--hero', LOAN)) + mpCutKitBag() + mpCutStreaks();
@@ -2863,13 +2871,17 @@ function mpCutActors(beat) {
             return at(64, mpCutRig('mp-actor--hero', HERO)) + mpCutStreaks();
         case 'kickpass':
             if (title === 'The Square Ball') {
-                // the open teammate screams for it under the bar while the ball sails over
+                // keeper beaten off his line; the mate traps the square ball then
+                // swings it over the bar into the trees
                 return at(70, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(77, 76.5)
-                    + at(117, mpCutRig('mp-actor--mate mp-actor--appeal', Object.assign({}, HERO, { mood: 'surprise' })));
+                    + mpCutKeeper(96, 74, true)
+                    + at(114, mpCutRig('mp-actor--mate', Object.assign({}, HERO, { mood: 'surprise' })));
             }
             return at(70, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(77, 76.5);
         case 'strike':
-            return at(70, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(77, 76.5) + `<rect class="mp-flash" x="0" y="0" width="160" height="90" fill="#f8fafc"/>`;
+            return at(70, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(77, 76.5)
+                + mpCutKeeper(137, 68, false)
+                + `<rect class="mp-flash" x="0" y="0" width="160" height="90" fill="#f8fafc"/>`;
         case 'skygaze':
             return at(80, mpCutRig('mp-actor--hero', HERO));
         case 'celebrate':
@@ -2877,13 +2889,8 @@ function mpCutActors(beat) {
         case 'walk':
         case 'walksad':
             if (title === 'Graduation Day') {
-                // diploma scroll held in the front hand
-                return `<g transform="translate(76,58)">${mpCutRig('mp-actor--hero', HERO)}
-                    <g transform="rotate(-24 7.4 0.9)">
-                        <rect x="4.6" y="0.1" width="5.6" height="1.6" rx="0.8" fill="#f8fafc"/>
-                        <rect x="8.7" y="-0.1" width="1.7" height="2" rx="0.35" fill="#b45309"/>
-                    </g>
-                </g>`;
+                // diploma scroll gripped in the front hand, swings with it
+                return at(76, mpCutRig('mp-actor--hero', Object.assign({}, HERO, { hold: 'scroll' })));
             }
             return at(76, mpCutRig('mp-actor--hero', HERO));
         case 'leaflet':
@@ -2895,11 +2902,10 @@ function mpCutActors(beat) {
         case 'talk':
             return at(64, mpCutRig('mp-actor--hero', HERO)) + at(100, mpCutRig('mp-actor--other', COAT), true);
         case 'handshake':
-            // 66 and 96 place the two front shoulders 21.2 apart, which is the
-            // span the posed arms close exactly at the clasp point (81,51).
+            // 66 and 96 place the two front shoulders 21.2 apart; the posed arms
+            // reach in so the characters' own round hands meet and touch.
             return at(66, mpCutRig('mp-actor--hero', HERO))
-                + at(96, mpCutRig('mp-actor--other', COAT), true)
-                + mpCutHandshakeClasp();
+                + at(96, mpCutRig('mp-actor--other', COAT), true);
         case 'sign':
             // club official waits across the desk while the contract is signed
             return at(128, mpCutRig('mp-actor--other', COAT), true) + mpCutSeatedWriter();
