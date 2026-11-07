@@ -326,17 +326,31 @@ async function accountStart() {
     if (Account.started) return;
     Account.started = true;
     Account.authMode = 'login';
-    showScreen('screen-auth');
-    accountSetAuthStatus('Connecting to your account…');
     accountHookFormKeys();
+
+    // The sign-in panel is not shown up front. A returning player's saved
+    // session restores silently and lands straight on the menu; the gate only
+    // appears once the restore has finished without an account — or after a
+    // short wait, so a slow connection still shows something.
+    let revealed = false;
+    const revealGate = () => {
+        if (revealed || Account.user) return;
+        revealed = true;
+        accountShowGate();
+        accountSetAuthStatus('Connecting to your account…');
+    };
+    const gateTimer = setTimeout(revealGate, 1500);
 
     try {
         await accountBindAuth();
+        clearTimeout(gateTimer);
         if (!Account.user) {
             accountShowGate();
             accountSetAuthStatus('');
         }
     } catch (error) {
+        clearTimeout(gateTimer);
+        accountShowGate();
         accountSetAuthStatus(accountFriendlyError(error), true);
     }
 }
