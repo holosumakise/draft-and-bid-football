@@ -2119,28 +2119,29 @@ function mpGetScene(career) {
 // ------------------------------------------------------------
 // Origin story cutscene
 //
-// The whole origin plays as one film: every chapter beat runs back to back on a
-// letterboxed stage, each beat a mood of art carrying its title card. There is
-// no prose and no page turning — the film stops once, at the last game, for the
-// Pass or Shoot decision, then finishes on one button into the dashboard.
-// Which beat is on screen is transient; story.decision is the only thing saved
-// while it plays, so a reload resumes the same chapter.
+// The whole origin plays as one film: every chapter beat is a real animated
+// scene — a articulated player model performing the beat's action (dribbling,
+// striking, walking home, signing…) on a painted backdrop, with a slow camera
+// move per shot. The film stops once, at the last game, for the Pass or Shoot
+// decision, then finishes on one button into the dashboard. Which beat is on
+// screen is transient; story.decision is the only thing saved while it plays,
+// so a reload resumes the same chapter.
 // ------------------------------------------------------------
 
-const MP_CUT_BEAT_MS = 2600;
+const MP_CUT_BEAT_MS = 3400;
 
 const MP_CUT_ART = {
     'One Chance': 'pitch',
     'The Square Ball': 'pitch',
     'The Strike': 'pitch',
     'Empty Sky': 'sky',
-    'City Champions': 'sky',
+    'City Champions': 'pitch',
     'The Walk Home': 'street',
     'The Leaflet': 'street',
     'Graduation Day': 'street',
     'The Scout': 'street',
     'The Handshake': 'street',
-    'The Loan': 'street',
+    'The Loan': 'pitch',
     'Dinner and the Ceiling': 'room',
     'The Badge': 'club',
     "The Manager's Rules": 'club',
@@ -2148,16 +2149,423 @@ const MP_CUT_ART = {
     'Graduation and the Contract': 'club',
     'The Call': 'club',
     'The Debut': 'stadium',
-    'Ten Matches': 'stadium',
+    'Ten Matches': 'club',
     'Matchday': 'stadium'
+};
+
+// What the model does on screen for each beat. Keys off the scene title so the
+// archive MP_STORY data stays untouched.
+const MP_CUT_ACTION = {
+    'One Chance': 'dribble',
+    'The Square Ball': 'kickpass',
+    'The Strike': 'strike',
+    'Empty Sky': 'skygaze',
+    'City Champions': 'celebrate',
+    'The Walk Home': 'walksad',
+    'The Leaflet': 'leaflet',
+    'Graduation Day': 'walk',
+    'The Scout': 'talk',
+    'The Handshake': 'handshake',
+    'Graduation and the Contract': 'sign',
+    'The Debut': 'run',
+    'Ten Matches': 'sit',
+    'The Call': 'talk',
+    'The Loan': 'run',
+    'Dinner and the Ceiling': 'bed',
+    'The Badge': 'handshake',
+    "The Manager's Rules": 'talk',
+    'The Team Sheet': 'talk',
+    'Matchday': 'tunnel'
 };
 
 function mpCutArt(scene) {
     return scene.art || MP_CUT_ART[scene.title] || 'street';
 }
 
+function mpCutAction(scene) {
+    return scene.action || MP_CUT_ACTION[scene.title] || 'idle';
+}
+
+// --- film scene construction -----------------------------------------------
+// Every beat renders one 16:9 SVG "shot": a painted backdrop for its mood plus
+// the actor rig (and props/effects) performing the beat's action. All motion
+// is CSS-driven; the rig's joints are groups with fill-box transform origins.
+
+function mpCutRng(seed) {
+    let n = seed * 7 + 3;
+    return () => {
+        n = (n * 73 + 41) % 977;
+        return n / 977;
+    };
+}
+
+function mpCutCrowd(y, rows, seed) {
+    const rnd = mpCutRng(seed);
+    let dots = '';
+    for (let i = 0; i < rows * 14; i++) {
+        const cx = (i * 13 + Math.floor(rnd() * 8)) % 160;
+        const cy = y + Math.floor(i / 14) * 4 + rnd() * 2;
+        dots += `<circle cx="${cx}" cy="${cy.toFixed(1)}" r="0.7" fill="rgba(226,232,240,${(0.14 + rnd() * 0.2).toFixed(2)})"/>`;
+    }
+    return `<g>${dots}</g>`;
+}
+
+function mpCutGoal(x, groundY) {
+    const top = groundY - 15;
+    const w = 17;
+    let net = '';
+    for (let i = 1; i < 6; i++) {
+        const nx = x + (w / 6) * i;
+        net += `<line x1="${nx.toFixed(1)}" y1="${top}" x2="${(x + (w / 6) * i * 0.82).toFixed(1)}" y2="${groundY}" stroke="rgba(226,232,240,0.16)" stroke-width="0.3"/>`;
+    }
+    for (let j = 1; j < 4; j++) {
+        const ny = top + ((groundY - top) / 4) * j;
+        net += `<line x1="${x}" y1="${ny.toFixed(1)}" x2="${x + w}" y2="${ny.toFixed(1)}" stroke="rgba(226,232,240,0.13)" stroke-width="0.3"/>`;
+    }
+    return `<g class="mp-goal">
+        <g class="mp-goal-net">${net}</g>
+        <line x1="${x}" y1="${top}" x2="${x}" y2="${groundY}" stroke="#e2e8f0" stroke-width="1"/>
+        <line x1="${x + w}" y1="${top}" x2="${x + w}" y2="${groundY}" stroke="#e2e8f0" stroke-width="1"/>
+        <line x1="${x - 0.5}" y1="${top}" x2="${x + w + 0.5}" y2="${top}" stroke="#e2e8f0" stroke-width="1"/>
+    </g>`;
+}
+
+function mpCutPitch() {
+    let stripes = '';
+    for (let i = 0; i < 10; i += 2) {
+        const t1 = i * 16, t2 = (i + 1) * 16;
+        const b1 = 80 + (t1 - 80) * 2.4, b2 = 80 + (t2 - 80) * 2.4;
+        stripes += `<polygon points="${t1},36 ${t2},36 ${b2.toFixed(1)},90 ${b1.toFixed(1)},90" fill="rgba(255,255,255,0.045)"/>`;
+    }
+    return `
+        <rect x="0" y="0" width="160" height="36" fill="#0a1c2e"/>
+        <ellipse cx="34" cy="10" rx="30" ry="12" fill="rgba(226,232,240,0.10)"/>
+        <ellipse cx="128" cy="14" rx="26" ry="10" fill="rgba(226,232,240,0.07)"/>
+        <rect x="0" y="24" width="160" height="12" fill="#071522"/>
+        ${mpCutCrowd(24, 3, 5)}
+        <rect x="0" y="36" width="160" height="54" fill="#0d3a2d"/>
+        ${stripes}
+        <polygon points="79.4,36 80.6,36 80.6,90 79.4,90" fill="rgba(255,255,255,0.10)"/>
+        <ellipse cx="80" cy="62" rx="17" ry="5.5" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="0.5"/>
+        ${mpCutGoal(124, 68)}
+        <rect x="0" y="88" width="160" height="2" fill="#062b21"/>`;
+}
+
+function mpCutSky() {
+    return `
+        <rect x="0" y="0" width="160" height="74" fill="#12253c"/>
+        <g class="mp-cloud" style="animation-duration:34s">
+            <ellipse cx="36" cy="20" rx="16" ry="4.5" fill="rgba(203,213,225,0.16)"/>
+            <ellipse cx="48" cy="23" rx="10" ry="3.2" fill="rgba(203,213,225,0.12)"/>
+        </g>
+        <g class="mp-cloud" style="animation-duration:46s;animation-delay:-18s">
+            <ellipse cx="112" cy="30" rx="20" ry="5" fill="rgba(203,213,225,0.12)"/>
+            <ellipse cx="96" cy="33" rx="11" ry="3.4" fill="rgba(203,213,225,0.09)"/>
+        </g>
+        <g class="mp-cloud" style="animation-duration:58s;animation-delay:-30s">
+            <ellipse cx="70" cy="12" rx="13" ry="3.6" fill="rgba(203,213,225,0.10)"/>
+        </g>
+        <rect x="0" y="74" width="160" height="16" fill="#0d3a2d"/>
+        <ellipse cx="80" cy="80" rx="26" ry="4.5" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="0.5"/>`;
+}
+
+function mpCutLamp(x) {
+    return `<g>
+        <rect x="${x - 0.7}" y="26" width="1.4" height="48" fill="#0b0812"/>
+        <rect x="${x - 3}" y="24" width="6" height="2.4" rx="1" fill="#0b0812"/>
+        <circle cx="${x}" cy="27.6" r="2.1" fill="rgba(251,191,36,0.85)"/>
+        <circle class="mp-glowsoft" cx="${x}" cy="27.6" r="5" fill="rgba(251,191,36,0.18)"/>
+    </g>`;
+}
+
+function mpCutRain() {
+    const rnd = mpCutRng(17);
+    let drops = '';
+    for (let i = 0; i < 22; i++) {
+        const x = (rnd() * 164 - 2).toFixed(1);
+        drops += `<line class="mp-rain" x1="${x}" y1="-8" x2="${x}" y2="-2" style="animation-delay:-${(rnd() * 0.9).toFixed(2)}s"/>`;
+    }
+    return `<g>${drops}</g>`;
+}
+
+function mpCutStreet(action) {
+    const scroll = action === 'walk' || action === 'walksad';
+    const props = offset => `
+        <g transform="translate(${offset},0)">
+            <rect x="6" y="18" width="30" height="58" fill="#161022"/>
+            <rect x="42" y="30" width="22" height="46" fill="#1b142b"/>
+            <rect x="100" y="12" width="34" height="64" fill="#140f20"/>
+            <rect x="140" y="34" width="26" height="42" fill="#191226"/>
+            <rect x="12" y="26" width="3" height="4" fill="rgba(251,191,36,0.55)"/>
+            <rect x="24" y="40" width="3" height="4" fill="rgba(251,191,36,0.35)"/>
+            <rect x="108" y="24" width="3" height="4" fill="rgba(251,191,36,0.5)"/>
+            <rect x="122" y="44" width="3" height="4" fill="rgba(251,191,36,0.3)"/>
+            <rect x="148" y="52" width="3" height="4" fill="rgba(251,191,36,0.4)"/>
+            ${mpCutLamp(72)}
+            ${mpCutLamp(128)}
+        </g>`;
+    return `
+        <rect x="0" y="0" width="160" height="76" fill="#191326"/>
+        ${scroll ? `<g class="mp-scroll">${props(0)}${props(160)}</g>` : props(0)}
+        <rect x="0" y="74" width="160" height="16" fill="#221b30"/>
+        <rect x="0" y="74" width="160" height="1.2" fill="rgba(251,191,36,0.18)"/>
+        ${action === 'walksad' ? mpCutRain() : ''}`;
+}
+
+function mpCutRoom() {
+    return `
+        <rect x="0" y="0" width="160" height="90" fill="#221913"/>
+        <rect x="0" y="0" width="160" height="90" fill="rgba(0,0,0,0.25)"/>
+        <rect x="20" y="16" width="26" height="24" fill="#0e1626"/>
+        <rect x="19" y="15" width="28" height="26" fill="none" stroke="#3d2c1e" stroke-width="1.6"/>
+        <line x1="33" y1="15" x2="33" y2="41" stroke="#3d2c1e" stroke-width="1.2"/>
+        <circle cx="27" cy="24" r="3.4" fill="rgba(226,232,240,0.5)"/>
+        <polygon points="20,41 46,41 58,90 8,90" fill="rgba(226,232,240,0.05)"/>
+        <rect x="96" y="30" width="14" height="10" fill="#2c1f16" stroke="#4a3524" stroke-width="0.8"/>
+        <rect x="99" y="33" width="8" height="4" fill="rgba(251,191,36,0.25)"/>
+        <rect x="60" y="66" width="86" height="5" fill="#3a2417"/>
+        <rect x="64" y="71" width="4" height="12" fill="#2c1b10"/>
+        <rect x="138" y="71" width="4" height="12" fill="#2c1b10"/>
+        <rect x="60" y="62" width="86" height="6" rx="2" fill="#4a2f1c"/>`;
+}
+
+function mpCutClub() {
+    let lockers = '';
+    for (let i = 0; i < 6; i++) {
+        const x = 8 + i * 11;
+        lockers += `<rect x="${x}" y="26" width="9.4" height="40" rx="0.8" fill="${i % 2 ? '#132036' : '#16253e'}" stroke="#0b1424" stroke-width="0.5"/>
+        <line x1="${x + 2}" y1="30" x2="${x + 7.4}" y2="30" stroke="#0b1424" stroke-width="0.7"/>
+        <line x1="${x + 2}" y1="32.4" x2="${x + 7.4}" y2="32.4" stroke="#0b1424" stroke-width="0.7"/>`;
+    }
+    return `
+        <rect x="0" y="0" width="160" height="90" fill="#0e1830"/>
+        ${lockers}
+        <circle class="mp-glowsoft" cx="80" cy="10" r="9" fill="rgba(226,232,240,0.10)"/>
+        <rect x="72" y="4" width="16" height="2.4" rx="1" fill="#0a1220"/>
+        <path d="M30,30 l4,-2 4,2 0,9 -3,0 0,6 -2,0 0,-6 -3,0 Z" fill="rgba(52,211,153,0.5)"/>
+        <rect x="0" y="74" width="160" height="16" fill="#131f38"/>
+        <rect x="8" y="68" width="52" height="3" rx="1.2" fill="#2e4470"/>
+        <rect x="10" y="71" width="3" height="5" fill="#1a2740"/>
+        <rect x="55" y="71" width="3" height="5" fill="#1a2740"/>`;
+}
+
+function mpCutStadium(action) {
+    const rows = [[16, 10], [22, 12], [28, 14]];
+    let tiers = '';
+    rows.forEach(([y, count], r) => {
+        for (let i = 0; i < count; i++) {
+            tiers += `<circle class="mp-crowddot" cx="${(i * 12 + (r % 2) * 6) % 162}" cy="${y + (i % 3)}" r="0.8" fill="rgba(226,232,240,${0.12 + (i % 4) * 0.05})" style="animation-delay:-${((i * 0.37 + r) % 3).toFixed(2)}s"/>`;
+        }
+    });
+    return `
+        <rect x="0" y="0" width="160" height="44" fill="#0a1526"/>
+        <polygon points="0,44 160,44 160,20 0,26" fill="#0d1c33"/>
+        ${tiers}
+        <g class="mp-flood">
+            <rect x="18" y="2" width="1.4" height="18" fill="#060d1a"/>
+            <rect x="13" y="0" width="11" height="3.4" rx="1" fill="#12233c"/>
+            <circle cx="18.5" cy="5" r="7" fill="rgba(226,232,240,0.14)"/>
+            <rect x="140" y="2" width="1.4" height="18" fill="#060d1a"/>
+            <rect x="135" y="0" width="11" height="3.4" rx="1" fill="#12233c"/>
+            <circle cx="140.5" cy="5" r="7" fill="rgba(226,232,240,0.14)"/>
+        </g>
+        <rect x="0" y="44" width="160" height="46" fill="#0d3a2d"/>
+        <polygon points="0,44 160,44 160,50 0,48" fill="#123f31"/>
+        ${action === 'tunnel' ? `<ellipse class="mp-tunglow" cx="118" cy="46" rx="26" ry="12" fill="rgba(226,232,240,0.22)"/><rect x="108" y="30" width="20" height="18" fill="#f1f5f9" opacity="0.9"/><rect x="104" y="26" width="28" height="22" fill="none" stroke="#1b2a44" stroke-width="2"/>` : ''}
+        <rect x="0" y="88" width="160" height="2" fill="#062b21"/>`;
+}
+
+function mpCutBackdrop(art, action) {
+    if (art === 'pitch') return mpCutPitch();
+    if (art === 'sky') return mpCutSky();
+    if (art === 'street') return mpCutStreet(action);
+    if (art === 'room') return mpCutRoom();
+    if (art === 'club') return mpCutClub();
+    return mpCutStadium(action);
+}
+
+// The articulated player model: pelvis origin, jointed limbs as groups so CSS
+// can swing each one around its joint (fill-box origins set in the stylesheet).
+function mpCutRig(mod, o) {
+    const kit = o.kit || '#10b981';
+    const kit2 = o.kit2 || '#0b3b2e';
+    const skin = o.skin || '#c98e63';
+    const skinD = o.skinD || '#a06f4b';
+    const coat = o.coat || kit;
+    const sleeve = o.coat ? coat : kit;
+    return `
+    <g class="mp-actor ${mod}${o.dark ? ' mp-actor--dark' : ''}">
+        <ellipse class="mp-a-shadow" cx="0" cy="21" rx="8.5" ry="1.8" fill="rgba(0,0,0,0.4)"/>
+        <g transform="translate(-2.2,1)"><g class="mp-a-leg mp-a-leg--b">
+            <path d="M-1.4,0 C-1.9,6 -1.5,12 -1.1,17.2 L1.3,17.2 C1.6,12 1.7,6 1.4,0 Z" fill="${skinD}"/>
+            <path d="M-1.5,16.6 L1.5,16.6 L2.7,20.2 L-2.6,20.2 Z" fill="#0f1115"/>
+        </g></g>
+        <g transform="translate(2.2,1)"><g class="mp-a-leg mp-a-leg--f">
+            <path d="M-1.4,0 C-1.9,6 -1.5,12 -1.1,17.2 L1.3,17.2 C1.6,12 1.7,6 1.4,0 Z" fill="${skin}"/>
+            <path d="M-1.5,16.6 L1.5,16.6 L2.7,20.2 L-2.6,20.2 Z" fill="#171a21"/>
+        </g></g>
+        <g><g class="mp-a-torso">
+            <path d="M-4.6,2 C-5.4,-6 -5.2,-13 -4,-16.6 C-1.8,-17.8 1.8,-17.8 4,-16.6 C5.2,-13 5.4,-6 4.6,2 Z" fill="${coat}"/>
+            <path d="M-4.9,0.4 L4.9,0.4 L4.6,4.6 L-4.6,4.6 Z" fill="${kit2}"/>
+            <g transform="translate(-4.2,-15)"><g class="mp-a-arm mp-a-arm--b">
+                <path d="M-1.2,0 C-1.7,4.4 -1.4,8.6 -1,11.8 L1.1,11.8 C1.3,8 1.3,4 1.2,0 Z" fill="${sleeve}"/>
+                <circle cx="0.2" cy="13" r="1.4" fill="${skinD}"/>
+            </g></g>
+            <g transform="translate(0,-16.8)"><g class="mp-a-head">
+                <rect x="-1.2" y="-2.6" width="2.4" height="2.8" fill="${skinD}"/>
+                <circle cx="0.3" cy="-5.6" r="4.1" fill="${skin}"/>
+                <path d="M-3.7,-6.6 Q0.3,-11 4.3,-6.8 Q3.6,-9.4 0.3,-9.9 Q-2.9,-9.4 -3.7,-6.6 Z" fill="#241b12"/>
+            </g></g>
+            <g transform="translate(4.2,-15)"><g class="mp-a-arm mp-a-arm--f">
+                <path d="M-1.2,0 C-1.7,4.4 -1.4,8.6 -1,11.8 L1.1,11.8 C1.3,8 1.3,4 1.2,0 Z" fill="${sleeve}"/>
+                <circle cx="0.2" cy="13" r="1.4" fill="${skin}"/>
+            </g></g>
+        </g></g>
+    </g>`;
+}
+
+function mpCutBall(x, y) {
+    return `<g transform="translate(${x},${y})"><g class="mp-ball"><g class="mp-ball-spin">
+        <circle r="2" fill="#f1f5f9"/>
+        <path d="M-0.8,-0.6 L0.8,-0.6 L0.3,0.9 L-0.3,0.9 Z" fill="#94a3b8" transform="scale(0.62)"/>
+    </g></g></g>`;
+}
+
+function mpCutConfetti() {
+    const colors = ['#f59e0b', '#34d399', '#60a5fa', '#f472b6', '#e2e8f0'];
+    const rnd = mpCutRng(29);
+    let out = '';
+    for (let i = 0; i < 16; i++) {
+        const x = (rnd() * 156 + 2).toFixed(1);
+        out += `<rect class="mp-cfp" x="${x}" y="-4" width="1.6" height="2.6" fill="${colors[i % colors.length]}" style="animation-delay:-${(rnd() * 1.7).toFixed(2)}s;animation-duration:${(1.4 + rnd() * 0.9).toFixed(2)}s"/>`;
+    }
+    return `<g>${out}</g>`;
+}
+
+function mpCutStreaks() {
+    return `<g class="mp-streak">
+        <line x1="44" y1="48" x2="52" y2="48" style="animation-delay:-.2s"/>
+        <line x1="40" y1="56" x2="50" y2="56" style="animation-delay:-.55s"/>
+        <line x1="46" y1="64" x2="54" y2="64" style="animation-delay:-.75s"/>
+    </g>`;
+}
+
+function mpCutLyingFigure() {
+    return `
+        <g>
+            <ellipse cx="70" cy="61.5" rx="5" ry="2.4" fill="#d7cfc0"/>
+            <g class="mp-breathe">
+                <circle cx="70" cy="59.4" r="3" fill="#c98e63"/>
+                <path d="M73,58 Q84,55.5 96,57.5 L128,60 Q136,60.6 142,62.4 L142,65.4 L74,65.4 Q72.5,61 73,58 Z" fill="#5b3a26"/>
+                <path d="M120,58.6 q6,-2.4 10,0 q-4,3 -10,0 Z" fill="#c98e63"/>
+            </g>
+            <rect class="mp-leaflet-glow" x="86" y="58.6" width="7" height="4.6" rx="0.6" fill="#f1f5f9" transform="rotate(8 89 61)"/>
+        </g>`;
+}
+
+function mpCutDesk() {
+    return `
+        <rect x="74" y="54.2" width="15" height="4" rx="0.5" fill="#e8e2d4" transform="rotate(-3 81 56)"/>
+        <rect x="58" y="58" width="54" height="3.2" rx="1" fill="#3a2a1a"/>
+        <rect x="61" y="61.2" width="3.6" height="17" fill="#2b1f13"/>
+        <rect x="105" y="61.2" width="3.6" height="17" fill="#2b1f13"/>`;
+}
+
+function mpCutSeatedWriter() {
+    return `
+        ${mpCutDesk()}
+        <g transform="translate(84,58)">
+            <g class="mp-breathe">
+                <path d="M-5,0 C-5.8,-7 -5.4,-12 -4,-15.4 C-1.6,-16.6 1.6,-16.6 4,-15.4 C5.4,-12 5.8,-7 5,0 Z" fill="#2e3d55"/>
+                <g transform="translate(0,-15.4)"><g class="mp-sithead">
+                    <rect x="-1.2" y="-2.6" width="2.4" height="2.8" fill="#a06f4b"/>
+                    <circle cx="0.6" cy="-5.4" r="3.9" fill="#c98e63"/>
+                    <path d="M-3.2,-6.4 Q0.6,-10.4 4.4,-6.6 Q1,-8.6 -3.2,-6.4 Z" fill="#241b12"/>
+                </g></g>
+            </g>
+            <g transform="translate(-3,-13)"><g class="mp-write-arm">
+                <path d="M0,0 C1.5,3.5 2.5,7 2.8,9.6 L0.2,10 C-0.2,7 -0.8,3.5 -1.6,0.4 Z" fill="#2e3d55"/>
+                <circle cx="2.6" cy="10.4" r="1.2" fill="#c98e63"/>
+                <line x1="2.6" y1="10.8" x2="1.6" y2="12.6" stroke="#e8e2d4" stroke-width="0.8"/>
+            </g></g>
+        </g>`;
+}
+
+function mpCutSeatedSad() {
+    return `
+        <g transform="translate(44,68)">
+            <rect x="-4.6" y="-3" width="9.2" height="3.4" rx="1.2" fill="#2b3648"/>
+            <rect x="0" y="-2.6" width="10" height="3" rx="1.2" fill="#2b3648"/>
+            <rect x="8.6" y="-0.4" width="3" height="5.6" fill="#2b3648"/>
+            <path d="M8.2,5.2 L12.4,5.2 L13.4,7 L7.4,7 Z" fill="#0f1115"/>
+            <g transform="translate(0,-2.6) rotate(14)">
+                <path d="M-4.6,2 C-5.4,-6 -5.2,-12 -4,-15.4 C-1.8,-16.6 1.8,-16.6 4,-15.4 C5.2,-12 5.4,-6 4.6,2 Z" fill="#10b981"/>
+                <g transform="translate(0,-15.2)"><g class="mp-sithead">
+                    <rect x="-1.2" y="-2.6" width="2.4" height="2.8" fill="#a06f4b"/>
+                    <circle cx="0.6" cy="-5.4" r="4" fill="#c98e63"/>
+                    <path d="M-3.4,-6.4 Q0.6,-10.6 4.5,-6.6 Q1,-8.7 -3.4,-6.4 Z" fill="#241b12"/>
+                </g></g>
+                <g transform="translate(-4.2,-14)"><g class="mp-a-arm">
+                    <path d="M-1.2,0 C-1.7,4.4 -1.4,8.6 -1,11.8 L1.1,11.8 C1.3,8 1.3,4 1.2,0 Z" fill="#0d9668"/>
+                    <circle cx="0.2" cy="13" r="1.4" fill="#a06f4b"/>
+                </g></g>
+                <g transform="translate(4.2,-14)"><g class="mp-a-arm">
+                    <path d="M-1.2,0 C-1.7,4.4 -1.4,8.6 -1,11.8 L1.1,11.8 C1.3,8 1.3,4 1.2,0 Z" fill="#10b981"/>
+                    <circle cx="0.2" cy="13" r="1.4" fill="#c98e63"/>
+                </g></g>
+            </g>
+        </g>`;
+}
+
+function mpCutActors(action) {
+    const HERO = { kit: '#10b981', kit2: '#0b3b2e' };
+    const COAT = { coat: '#26334a', kit: '#26334a', kit2: '#1a2434', skin: '#b57f56', skinD: '#8f6242' };
+    const at = (x, rig, flip) => `<g transform="translate(${x},58)${flip ? ' scale(-1,1)' : ''}">${rig}</g>`;
+    switch (action) {
+        case 'dribble':
+            return at(68, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(85, 71);
+        case 'run':
+            return at(64, mpCutRig('mp-actor--hero', HERO)) + mpCutStreaks();
+        case 'kickpass':
+            return at(70, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(77, 71);
+        case 'strike':
+            return at(70, mpCutRig('mp-actor--hero', HERO)) + mpCutBall(77, 71) + `<rect class="mp-flash" x="0" y="0" width="160" height="90" fill="#f8fafc"/>`;
+        case 'skygaze':
+            return at(80, mpCutRig('mp-actor--hero', HERO));
+        case 'celebrate':
+            return at(80, mpCutRig('mp-actor--hero', HERO)) + mpCutConfetti();
+        case 'walk':
+        case 'walksad':
+            return at(76, mpCutRig('mp-actor--hero', HERO));
+        case 'leaflet':
+            return at(86, mpCutRig('mp-actor--hero', HERO)) + `<g transform="translate(40,34)"><g class="mp-leaflet">
+                <rect x="-3" y="-2" width="6" height="4" rx="0.4" fill="#e8e2d4"/>
+                <rect x="-2.2" y="-1" width="4.4" height="0.7" fill="#b45309"/>
+                <rect x="-2.2" y="0.4" width="3.2" height="0.5" fill="#b45309"/>
+            </g></g>`;
+        case 'talk':
+            return at(64, mpCutRig('mp-actor--hero', HERO)) + at(100, mpCutRig('mp-actor--other', COAT), true);
+        case 'handshake':
+            return at(64, mpCutRig('mp-actor--hero', HERO)) + at(98, mpCutRig('mp-actor--other', COAT), true);
+        case 'sign':
+            return mpCutSeatedWriter();
+        case 'sit':
+            return mpCutSeatedSad();
+        case 'bed':
+            return mpCutLyingFigure();
+        case 'tunnel':
+            return at(58, mpCutRig('mp-actor--hero', Object.assign({ dark: true }, HERO)));
+        default:
+            return at(80, mpCutRig('mp-actor--hero', HERO));
+    }
+}
+
+function mpCutSceneSvg(beat) {
+    return `<svg class="mp-cut__svg" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${mpCutBackdrop(beat.art, beat.action)}${mpCutActors(beat.action)}</svg>`;
+}
+
 function mpCutBeats(list) {
-    return (list || []).map(scene => ({ act: scene.act, title: scene.title, art: mpCutArt(scene) }));
+    return (list || []).map(scene => ({ act: scene.act, title: scene.title, art: mpCutArt(scene), action: mpCutAction(scene) }));
 }
 
 function mpCutStage() {
@@ -2191,13 +2599,24 @@ function mpCutShowBeat() {
     const beat = MP.cut.beats[MP.cut.index];
     if (!stage || !beat) return;
     stage.dataset.art = beat.art;
+    stage.dataset.act = beat.action;
+    stage.dataset.cam = MP.cut.index % 2 ? 'panr' : 'panl';
+    const film = stage.querySelector('.mp-cut__film');
+    if (film) {
+        film.classList.remove('is-in');
+        film.innerHTML = mpCutSceneSvg(beat);
+        void film.offsetWidth;
+        film.classList.add('is-in');
+    }
     const card = stage.querySelector('.mp-cut__card');
-    card.classList.remove('is-in');
-    card.innerHTML = `
-        <div class="mp-cut__act">${mpEsc(beat.act || 'Chapter 1 · The Last Game')}</div>
-        <h2 class="mp-cut__title">${mpEsc(beat.title || 'One Chance')}</h2>`;
-    void card.offsetWidth;
-    card.classList.add('is-in');
+    if (card) {
+        card.classList.remove('is-in');
+        card.innerHTML = `
+            <div class="mp-cut__act">${mpEsc(beat.act || 'Chapter 1 · The Last Game')}</div>
+            <h2 class="mp-cut__title">${mpEsc(beat.title || 'One Chance')}</h2>`;
+        void card.offsetWidth;
+        card.classList.add('is-in');
+    }
 }
 
 function mpCutDecisionMarkup() {
@@ -2256,8 +2675,10 @@ function mpRenderStory() {
     if (!beats.length) return;
 
     panel.innerHTML = `
-        <div class="mp-cut" data-art="${mpEscAttr(beats[0].art)}">
+        <div class="mp-cut" data-art="${mpEscAttr(beats[0].art)}" data-act="${mpEscAttr(beats[0].action)}" data-cam="panl">
             <div class="mp-cut__art" aria-hidden="true"></div>
+            <div class="mp-cut__film" aria-hidden="true"></div>
+            <div class="mp-cut__veil" aria-hidden="true"></div>
             <div class="mp-cut__rail mp-cut__rail--top" aria-hidden="true"></div>
             <div class="mp-cut__rail mp-cut__rail--bottom" aria-hidden="true"></div>
             <div class="mp-cut__card"></div>
